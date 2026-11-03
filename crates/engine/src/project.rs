@@ -28,6 +28,63 @@ pub struct ProjectConfig {
     /// Number of player inventory slots.
     #[serde(default = "default_inventory_size")]
     pub inventory_size: u32,
+    /// Character creator shown when a new game starts.
+    #[serde(default)]
+    pub creation: CharacterCreation,
+}
+
+/// The character creator: the player chooses a name, sex and look before a new game.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CharacterCreation {
+    pub enabled: bool,
+    /// The player character's sex: chosen by the player, or fixed by the game.
+    #[serde(default)]
+    pub sex: SexChoice,
+    /// Name suggested in the creator (and used when it is skipped); "" = the player
+    /// character definition's name.
+    #[serde(default)]
+    pub default_name: String,
+    /// Selectable looks (sprite sheets in the player character's layout).
+    #[serde(default)]
+    pub looks: Vec<PlayerLook>,
+}
+
+/// Whether the player may choose the player character's sex.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SexChoice {
+    /// The player chooses in the character creator (male if the creator is off).
+    #[default]
+    Both,
+    Male,
+    Female,
+}
+
+impl SexChoice {
+    pub const ALL: [SexChoice; 3] = [SexChoice::Both, SexChoice::Male, SexChoice::Female];
+    pub fn label(self) -> &'static str {
+        match self {
+            SexChoice::Both => "Player chooses",
+            SexChoice::Male => "Always male",
+            SexChoice::Female => "Always female",
+        }
+    }
+    /// The sex every player character has, if it is fixed.
+    pub fn fixed(self) -> Option<crate::state::Sex> {
+        match self {
+            SexChoice::Both => None,
+            SexChoice::Male => Some(crate::state::Sex::Male),
+            SexChoice::Female => Some(crate::state::Sex::Female),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlayerLook {
+    pub sheet: String,
+    pub sex: crate::state::Sex,
+    /// Shown under the preview ("" = the sheet id).
+    #[serde(default)]
+    pub label: String,
 }
 
 /// Edge length of every tile in pixels. Sprites, hitboxes and speeds are designed for it.
@@ -49,6 +106,7 @@ impl ProjectConfig {
             player: String::new(),
             sfx: GameSfx::default(),
             inventory_size: default_inventory_size(),
+            creation: CharacterCreation::default(),
         }
     }
 }

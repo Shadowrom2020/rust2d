@@ -13,6 +13,8 @@
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
 //               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
 //               quest_done(id)
+// Player:       player_name() player_sex() ("male"/"female") is_female() is_male()
+//               text("...") fills in placeholders: {player} {sir|madam} {variable}
 // Other:        player_hp() random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
@@ -20,9 +22,14 @@ fn mira_talk() {
     add_var("mira_talks", 1);
     let n = get_var("mira_talks");
     if n == 1 {
-        say("Mira", "Hi! I'm Mira. Have you met Elder Rowan by the well?");
+        say("Mira", "Hi! I'm Mira. " + player_name() + ", right? Have you met Elder Rowan by the well?");
     } else if flag("shrine_lit") {
-        say("Mira", "You lit the shrine? Amazing!");
+        // Scripts can check the player's sex too (or use "{hero|heroine}" in the text).
+        if is_female() {
+            say("Mira", "You lit the shrine? When I grow up I want to be a heroine like you!");
+        } else {
+            say("Mira", "You lit the shrine? When I grow up I want to be a hero like you!");
+        }
     } else if n < 4 {
         say("Mira", "Talked to me " + n + " times now. You must be bored!");
     } else {

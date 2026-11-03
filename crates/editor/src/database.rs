@@ -1221,6 +1221,10 @@ fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {
 }
 
 fn project_ui(ed: &mut Editor, ui: &mut egui::Ui) {
+    egui::ScrollArea::vertical().id_salt("project_scroll").show(ui, |ui| project_form(ed, ui));
+}
+
+fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     let c = &mut ed.project.config;
     ui.heading("Project");
     egui::Grid::new("proj").num_columns(2).show(ui, |ui| {
@@ -1259,6 +1263,81 @@ fn project_ui(ed: &mut Editor, ui: &mut egui::Ui) {
             ui.end_row();
         }
     });
+    ui.separator();
+    ui.heading("Character creator");
+    let cc = &mut c.creation;
+    ui.checkbox(&mut cc.enabled, "Show the character creator when a new game starts")
+        .on_hover_text("The player types a name, chooses male / female and one of the looks below. Play-tests from the editor skip it and use the default name.");
+    ui.horizontal(|ui| {
+        ui.label("Player character's sex");
+        egui::ComboBox::from_id_salt("creation_sex").selected_text(cc.sex.label()).show_ui(ui, |ui| {
+            for v in rust2d_engine::project::SexChoice::ALL {
+                ui.selectable_value(&mut cc.sex, v, v.label());
+            }
+        });
+        ui.weak(match cc.sex {
+            rust2d_engine::project::SexChoice::Both => "chosen in the character creator (male when it is off)",
+            _ => "fixed by the game; the creator only offers looks of this sex",
+        });
+    });
+    ui.horizontal(|ui| {
+        ui.label("Default name");
+        ui.add(egui::TextEdit::singleline(&mut cc.default_name).hint_text("(player character's name)").desired_width(160.0));
+    });
+    ui.label("Looks (sprite sheets in the player character's layout; the player picks among those of the chosen sex):");
+    let mut remove = None;
+    let mut swap = None;
+    let n = cc.looks.len();
+    for (k, l) in cc.looks.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            if widgets::frame_thumb(ui, &ed.tex, &ed.assets, &l.sheet, 0, 44.0, false).on_hover_text("Choose another look").clicked() {
+                crate::models::request_model(crate::models::ModelTarget::Look(k));
+            }
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt(format!("look_sex{k}")).width(80.0).selected_text(l.sex.label()).show_ui(ui, |ui| {
+                        for s in rust2d_engine::state::Sex::ALL {
+                            ui.selectable_value(&mut l.sex, s, s.label());
+                        }
+                    });
+                    ui.add(egui::TextEdit::singleline(&mut l.label).hint_text(l.sheet.as_str()).desired_width(160.0));
+                    if ui.add_enabled(k > 0, egui::Button::new("^").small()).clicked() {
+                        swap = Some(k - 1);
+                    }
+                    if ui.add_enabled(k + 1 < n, egui::Button::new("v").small()).clicked() {
+                        swap = Some(k);
+                    }
+                    if ui.small_button("✖").clicked() {
+                        remove = Some(k);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.weak(format!("sheet: {}", l.sheet));
+                    if !ed.assets.sheets.contains_key(&l.sheet) {
+                        ui.colored_label(Color32::LIGHT_RED, "missing sheet");
+                    }
+                });
+            });
+        });
+    }
+    if let Some(k) = swap {
+        cc.looks.swap(k, k + 1);
+    }
+    if let Some(k) = remove {
+        cc.looks.remove(k);
+    }
+    if ui.button("👤 + Add a look…").on_hover_text("From this project or the asset library").clicked() {
+        crate::models::request_model(crate::models::ModelTarget::Look(n));
+    }
+    let needed: Vec<rust2d_engine::state::Sex> = match cc.sex.fixed() {
+        Some(x) => vec![x],
+        None => rust2d_engine::state::Sex::ALL.to_vec(),
+    };
+    let missing: Vec<&str> = needed.iter().filter(|x| !cc.looks.iter().any(|l| l.sex == **x)).map(|x| x.label()).collect();
+    if cc.enabled && !missing.is_empty() {
+        ui.colored_label(Color32::YELLOW, format!("No {} look yet: the player character's own look is used.", missing.join(" / ").to_lowercase()));
+    }
+    ui.weak("Dialogs address the player with {player} (name) and {sir|madam} (male|female); conditions have 'Player sex'; scripts have player_name(), player_sex(), is_female(), is_male(), text(\"...\").");
     ui.separator();
     ui.label(format!("Project folder: {}", ed.project.root.display()));
 }

@@ -22,6 +22,8 @@ pub enum ModelTarget {
     Def(String),
     /// One placed character on the open map (entity uid).
     Instance(u32),
+    /// A look of the character creator (index; past the end = add a new one).
+    Look(usize),
 }
 
 /// A model to use.
@@ -57,9 +59,12 @@ pub fn request_model(target: ModelTarget) {
     REQUEST.with(|r| *r.borrow_mut() = Some(target));
 }
 
-/// Library characters count as female when their id ends in `_f` or the name says so.
+/// Library characters count as female when their id ends in `_f` or the name says so
+/// ("(female)", "Lady", "Heroine", ...).
 fn is_female(id: &str, name: &str) -> bool {
-    id.ends_with("_f") || name.to_lowercase().contains("female")
+    let n = name.to_lowercase();
+    let words = ["female", "lady", "woman", "girl", "queen", "princess", "heroine", "sorceress", "witch", "priestess"];
+    id.ends_with("_f") || id.contains("_f_") || words.iter().any(|w| n.split(|c: char| !c.is_alphanumeric()).any(|x| x == *w))
 }
 
 const THUMB: f32 = 64.0;
@@ -77,6 +82,7 @@ impl Editor {
                     Some(e.sheet.clone())
                 }
             }
+            ModelTarget::Look(i) => self.project.config.creation.looks.get(*i).map(|l| l.sheet.clone()),
         }
     }
 
@@ -94,10 +100,10 @@ impl Editor {
 
     /// Gives `target` the model `pick`; library models are copied into the project first.
     pub fn apply_model(&mut self, target: &ModelTarget, pick: &ModelPick) -> Result<String> {
-        let (sheet, frames, label) = match pick {
+        let (sheet, frames, label, female) = match pick {
             ModelPick::Project(s) => {
                 self.project.db.sheet(s).with_context(|| format!("no sprite sheet '{s}' in the project"))?;
-                (s.clone(), None, s.clone())
+                (s.clone(), None, s.clone(), is_female(s, s))
             }
             ModelPick::Library(cid) => {
                 self.lib.ensure_loaded();
@@ -112,7 +118,7 @@ impl Editor {
                 if !report.added.is_empty() {
                     self.defs_dirty = true;
                 }
-                (id, Some(c.walk_frames), c.name.clone())
+                (id, Some(c.walk_frames), c.name.clone(), is_female(&c.id, &c.name))
             }
         };
         let msg = match target {
@@ -124,6 +130,16 @@ impl Editor {
                 }
                 self.defs_dirty = true;
                 format!("{id} now looks like {label}. Save the definitions to keep it.")
+            }
+            ModelTarget::Look(i) => {
+                use rust2d_engine::{project::PlayerLook, state::Sex};
+                let looks = &mut self.project.config.creation.looks;
+                match looks.get_mut(*i) {
+                    Some(l) => l.sheet = sheet,
+                    None => looks.push(PlayerLook { sheet, sex: if female { Sex::Female } else { Sex::Male }, label: label.clone() }),
+                }
+                self.defs_dirty = true;
+                format!("Character creator look: {label}. Save the definitions to keep it.")
             }
             ModelTarget::Instance(uid) => {
                 let doc = self.doc.as_mut().context("no map open")?;
@@ -152,6 +168,7 @@ impl Editor {
         let title = match &st.target {
             ModelTarget::Def(id) => format!("Model of '{id}'"),
             ModelTarget::Instance(uid) => format!("Model of #{uid} (only this one)"),
+            ModelTarget::Look(_) => "Look for the character creator".to_string(),
         };
         let current = self.model_of(&st.target).unwrap_or_default();
         let mut open = true;

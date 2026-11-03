@@ -4,6 +4,7 @@ mod combat;
 mod equipment;
 mod inventory_ui;
 mod journal;
+mod creator;
 mod shop_ui;
 mod locks;
 mod menu;
@@ -163,6 +164,7 @@ pub struct Game {
     inv: inventory_ui::InvUi,
     shop: shop_ui::ShopUi,
     journal: journal::Journal,
+    creator: Option<creator::Creator>,
     menu: menu::Menu,
     pub world: WorldState,
     scripts: ScriptHost,
@@ -228,6 +230,7 @@ impl Game {
             inv: Default::default(),
             shop: Default::default(),
             journal: Default::default(),
+            creator: None,
             menu: Default::default(),
             world: WorldState::default(),
             scripts,
@@ -660,6 +663,9 @@ impl Game {
                 }
             }
         }
+        if self.update_creator(dt) {
+            return;
+        }
         if self.update_menu(can_open) {
             return;
         }
@@ -953,6 +959,14 @@ impl Game {
     /// Applies project rules (inventory size, stack limits) to the world state, e.g. after loading.
     fn prepare_world(&mut self) {
         self.migrate_equipment();
+        // Games started without the creator (or saved before it existed) get the default name.
+        if self.world.player_name.trim().is_empty() {
+            self.world.player_name = self.default_player_name();
+        }
+        // A game that fixes the player's sex always has it (new games, play-tests, saves).
+        if let Some(sex) = self.project.config.creation.sex.fixed() {
+            self.world.player_sex = sex;
+        }
         let limits = self.project.db.stack_limits();
         self.world.inventory.resize(self.project.config.inventory_size.max(1) as usize);
         self.world.inventory.set_limits(limits.clone());
@@ -1070,7 +1084,9 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_sheet_id().unwrap_or("-")),
+            self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
             self.shop_status(),
             self.loaded.map.name,
@@ -1201,10 +1217,7 @@ impl Game {
                     }
                     let col = if self.player.moving { (self.player.anim * 8.0) as u32 % self.player_frames } else { 0 };
                     let frame = self.player.facing as u32 * self.player_frames + col;
-                    let drawn = self
-                        .player_sheet
-                        .as_ref()
-                        .is_some_and(|s| self.assets.draw_frame(s, frame, self.player.pos, WHITE));
+                    let drawn = self.player_sheet_id().is_some_and(|s| self.assets.draw_frame(s, frame, self.player.pos, WHITE));
                     self.draw_armor_overlays(frame, self.player.pos, WHITE);
                     if !drawn {
                         let r = self.player.rect();
@@ -1251,7 +1264,11 @@ impl Game {
         self.ui.draw_toasts();
         self.ui.draw_dialog();
         self.draw_game_over();
-        self.draw_menu();
+        if self.creator.is_some() {
+            self.draw_creator();
+        } else {
+            self.draw_menu();
+        }
         if self.debug {
             let p = self.player.pos / ts;
             draw_text(
@@ -1339,12 +1356,15 @@ impl ActionHost for Game {
         match action {
             Action::Dialog { speaker, text } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                self.ui.show_dialog(speaker, text);
+                let (speaker, text) = (self.world.expand_text(speaker), self.world.expand_text(text));
+                self.ui.show_dialog(&speaker, &text);
                 Step::Block
             }
             Action::Choice { speaker, text, options, var } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                self.ui.show_choice(speaker, text, options, var);
+                let (speaker, text) = (self.world.expand_text(speaker), self.world.expand_text(text));
+                let options: Vec<String> = options.iter().map(|o| self.world.expand_text(o)).collect();
+                self.ui.show_choice(&speaker, &text, &options, var);
                 Step::Block
             }
             Action::Teleport { map, spawn } => {

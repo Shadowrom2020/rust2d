@@ -198,7 +198,7 @@ impl Game {
         }
         y += 14.0;
         if let Some(d) = def {
-            for line in wrap_text(&self.world.fill_vars(&d.description), 20, w) {
+            for line in wrap_text(&self.world.expand_text(&d.description), 20, w) {
                 y += 24.0;
                 draw_text(&line, x, y, 20.0, LIGHTGRAY);
             }
@@ -219,7 +219,7 @@ impl Game {
             } else {
                 ("[ ]", WHITE)
             };
-            let lines = wrap_text(&self.world.fill_vars(s), 20, w - 34.0);
+            let lines = wrap_text(&self.world.expand_text(s), 20, w - 34.0);
             for (n, line) in lines.iter().enumerate() {
                 y += 24.0;
                 if y > r.y + r.h - 44.0 {

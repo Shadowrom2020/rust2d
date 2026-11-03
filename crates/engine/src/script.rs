@@ -176,6 +176,12 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         target: t.into(),
         frame: f.max(0) as u32
     })));
+    engine.register_fn("player_name", with!(ctx, |c| c.world.player_name.clone()));
+    engine.register_fn("player_sex", with!(ctx, |c| c.world.player_sex.key().to_string()));
+    engine.register_fn("is_female", with!(ctx, |c| c.world.player_sex == crate::state::Sex::Female));
+    engine.register_fn("is_male", with!(ctx, |c| c.world.player_sex == crate::state::Sex::Male));
+    // Placeholders like in dialog texts: "{player}", "{sir|madam}", "{var}".
+    engine.register_fn("text", with!(ctx, |c, t: &str| c.world.expand_text(t)));
     engine.register_fn("quest_stage", with!(ctx, |c, q: &str| c.world.quest(q).map_or(-1, |p| p.stage as i64)));
     engine.register_fn("quest_active", with!(ctx, |c, q: &str| c.world.check_quest(q, crate::quest::QuestCheck::Active, 0)));
     engine.register_fn("quest_done", with!(ctx, |c, q: &str| c.world.check_quest(q, crate::quest::QuestCheck::Completed, 0)));

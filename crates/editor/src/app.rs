@@ -144,6 +144,8 @@ pub struct Editor {
     pub quick: crate::maps::QuickSwitch,
     /// Open character model chooser.
     pub model: Option<crate::models::ModelChooser>,
+    /// Open new project wizard.
+    pub new_project: Option<crate::new_project::NewProjectWizard>,
     /// Debug: screen points to report the egui layer under (script command `probe X Y`).
     pub probe: Vec<egui::Pos2>,
     /// Camera (center, zoom) per map, restored when switching back.
@@ -257,6 +259,7 @@ impl Editor {
             link: None,
             quick: Default::default(),
             model: None,
+            new_project: None,
             probe: Vec::new(),
             map_cams: HashMap::new(),
             last_portal_click: None,
@@ -311,7 +314,7 @@ impl Editor {
     }
 
     /// Closes the project (after unsaved changes were handled) and shows the welcome screen.
-    fn close_project(&mut self) {
+    pub fn close_project(&mut self) {
         self.audio.stop_music();
         let rect = self.canvas_rect;
         *self = Editor::empty();
@@ -706,6 +709,7 @@ impl Editor {
             return;
         }
         let start = match purpose {
+            files::Purpose::NewProjectParent => self.new_project.as_ref().map(|w| PathBuf::from(w.parent.trim())).filter(|p| p.is_dir()),
             files::Purpose::OpenProject | files::Purpose::NewProject => match self.project.root.parent() {
                 Some(p) if self.project_open => Some(p.to_path_buf()),
                 _ => std::env::var_os("HOME").map(PathBuf::from),
@@ -736,6 +740,11 @@ impl Editor {
             }
             P::OpenProject => self.request(Pending::OpenProject(path)),
             P::NewProject => self.request(Pending::NewProject(path)),
+            P::NewProjectParent => {
+                if let Some(w) = &mut self.new_project {
+                    w.parent = path.display().to_string();
+                }
+            }
             P::TilesetImage(ref id) | P::SheetImage(ref id) | P::SoundFile(ref id) => {
                 let id = id.clone();
                 let sub = match purpose {
@@ -956,6 +965,7 @@ impl Editor {
         if !self.project_open {
             self.status_bar(ctx);
             self.welcome(ctx);
+            self.new_project_window(ctx);
             self.dialogs(ctx);
             self.canvas_rect = ctx.available_rect();
             self.pointer_over_ui = true;
@@ -981,6 +991,7 @@ impl Editor {
         self.wizard_window(ctx);
         self.map_windows(ctx);
         self.model_window(ctx);
+        self.new_project_window(ctx);
         self.handle_transition_request();
         if let Some((m, zone)) = GOTO.with(|g| g.borrow_mut().take()) {
             self.goto_map(&m, Some(&zone));
@@ -1244,8 +1255,8 @@ impl Editor {
     fn run_pending(&mut self, p: Pending) {
         match p {
             Pending::OpenProject(dir) => self.switch_project(dir),
-            // Unsaved work is settled at this point; now choose the folder.
-            Pending::NewProject(dir) if dir.as_os_str().is_empty() => self.open_file_dialog(files::Purpose::NewProject),
+            // Unsaved work is settled at this point; now the wizard asks for name, place and settings.
+            Pending::NewProject(dir) if dir.as_os_str().is_empty() => self.open_new_project_wizard(),
             Pending::NewProject(dir) => match files::create_project(&dir) {
                 Ok(()) => {
                     // Opening replaces the whole editor state, closing the old project.

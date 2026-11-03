@@ -489,6 +489,9 @@ pub struct Refs {
     pub quest_stages: HashMap<String, Vec<String>>,
 }
 
+/// Placeholders understood in dialog / choice texts (and quest texts).
+pub const TEXT_HELP: &str = "Placeholders: {player} = the player's name, {sir|madam} = first word for a male player, second for a female one, {name} = value of variable 'name'.";
+
 /// Stage number with the stage's objective text as a dropdown.
 fn quest_stage_field(ui: &mut Ui, id: &str, quest: &str, stage: &mut u32, refs: &Refs) {
     let stages = refs.quest_stages.get(quest).cloned().unwrap_or_default();
@@ -651,6 +654,14 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                         quest_stage_field(ui, &format!("{id}/qs"), quest, stage, refs);
                     }
                 }
+                Cond::PlayerSex { sex } => {
+                    ui.label("player is");
+                    egui::ComboBox::from_id_salt(format!("{id}/sex")).selected_text(sex.label()).show_ui(ui, |ui| {
+                        for s in rust2d_engine::state::Sex::ALL {
+                            ui.selectable_value(sex, s, s.label());
+                        }
+                    });
+                }
                 Cond::PropState { target, state } => {
                     ui.label("prop");
                     suggest(ui, &format!("{id}/t"), target, &refs.targets, 90.0);
@@ -740,7 +751,8 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "speaker", |ui| {
                 ui.add(egui::TextEdit::singleline(speaker).desired_width(160.0));
             });
-            ui.add(egui::TextEdit::multiline(text).desired_rows(2).desired_width(f32::INFINITY));
+            ui.add(egui::TextEdit::multiline(text).desired_rows(2).desired_width(f32::INFINITY))
+                .on_hover_text(TEXT_HELP);
         }
         Action::Choice { speaker, text, options, var } => {
             labeled(ui, "speaker", |ui| {

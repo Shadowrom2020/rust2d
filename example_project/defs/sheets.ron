@@ -6,6 +6,36 @@
         frame_h: 48,
     ),
     (
+        id: "hero_2",
+        image: "sprites/hero_2.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "hero_3",
+        image: "sprites/hero_3.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "hero_f",
+        image: "sprites/hero_f.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "hero_f2",
+        image: "sprites/hero_f2.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "hero_f3",
+        image: "sprites/hero_f3.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
         id: "elder",
         image: "sprites/elder.png",
         frame_w: 32,

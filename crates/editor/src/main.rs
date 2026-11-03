@@ -11,6 +11,7 @@ mod files;
 mod library_ui;
 mod maps;
 mod models;
+mod new_project;
 mod pixel;
 mod wizard;
 mod widgets;
@@ -357,6 +358,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             use crate::models::{request_model, ModelTarget};
             match arg(1) {
                 "def" => request_model(ModelTarget::Def(arg(2).to_string())),
+                "look" => request_model(ModelTarget::Look(num(2) as usize)),
                 _ => {
                     let uid = arg(2).parse::<u32>().ok().or_else(|| ed.doc.as_ref()?.map.entities.iter().find(|e| e.name == arg(2)).map(|e| e.uid));
                     if let Some(uid) = uid {
@@ -377,6 +379,47 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.model_script(lib, pick);
         }
         "modeluse" => ed.model_script_use(),
+        // New project wizard: newwizard · wiz name|parent|folder|sex|creator|starter|map|size|scale VALUE... · wizcreate
+        "newwizard" => ed.request(app::Pending::NewProject(std::path::PathBuf::new())),
+        "wiz" => {
+            if let Some(w) = &mut ed.new_project {
+                let rest = cmd[2..].join(" ");
+                match arg(1) {
+                    "name" => {
+                        w.name = rest;
+                        if !w.folder_edited {
+                            w.folder = rust2d_engine::release::slug(&w.name);
+                        }
+                    }
+                    "parent" => w.parent = rest,
+                    "folder" => {
+                        w.folder = rest;
+                        w.folder_edited = true;
+                    }
+                    "sex" => {
+                        w.sex = match arg(2) {
+                            "male" => rust2d_engine::project::SexChoice::Male,
+                            "female" => rust2d_engine::project::SexChoice::Female,
+                            _ => rust2d_engine::project::SexChoice::Both,
+                        }
+                    }
+                    "creator" => w.creator = arg(2) != "off",
+                    "starter" => w.starter = arg(2) != "off",
+                    "map" => w.map_name = rest,
+                    "size" => {
+                        w.width = num(2) as u32;
+                        w.height = num(3) as u32;
+                    }
+                    "scale" => w.scale = num(2),
+                    _ => println!("[script] wiz: unknown field {}", arg(1)),
+                }
+                println!("[script] wizard problem: {:?}", w.problem());
+            }
+        }
+        "wizcreate" => {
+            let r = ed.create_from_wizard().map(|d| format!("created {}", d.display()));
+            println!("[script] {r:?}");
+        }
         // scriptsel FILE: what clicking a file in Database > Scripts does
         "scriptsel" => {
             let f = ed.project.scripts_dir().join(arg(1));

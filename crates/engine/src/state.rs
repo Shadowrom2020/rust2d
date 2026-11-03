@@ -100,9 +100,77 @@ pub struct WorldState {
     /// quest id -> progress (started quests only).
     #[serde(default)]
     pub quests: BTreeMap<String, crate::quest::QuestProgress>,
+    /// The player character's name, sex and look (sprite sheet; "" = the player
+    /// character definition's), chosen in the character creator.
+    #[serde(default)]
+    pub player_name: String,
+    #[serde(default)]
+    pub player_sex: Sex,
+    #[serde(default)]
+    pub player_look: String,
+}
+
+/// The player character's sex (for dialogs, conditions and scripts).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Sex {
+    #[default]
+    Male,
+    Female,
+}
+
+impl Sex {
+    pub const ALL: [Sex; 2] = [Sex::Male, Sex::Female];
+    pub fn label(self) -> &'static str {
+        match self {
+            Sex::Male => "Male",
+            Sex::Female => "Female",
+        }
+    }
+    /// "male" / "female" (scripts).
+    pub fn key(self) -> &'static str {
+        match self {
+            Sex::Male => "male",
+            Sex::Female => "female",
+        }
+    }
 }
 
 impl WorldState {
+    /// Fills in text placeholders (dialogs, choices, quest texts):
+    /// `{player}` = the player's name, `{his|her}` = the first word for a male player, the
+    /// second for a female one, `{name}` = the value of variable `name`. Anything else in
+    /// braces is kept as it is.
+    pub fn expand_text(&self, text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(i) = rest.find('{') {
+            out.push_str(&rest[..i]);
+            let after = &rest[i + 1..];
+            let Some(j) = after.find('}') else {
+                out.push_str(&rest[i..]);
+                return out;
+            };
+            let inner = &after[..j];
+            let ident = !inner.is_empty() && inner.chars().all(|c| c.is_alphanumeric() || c == '_');
+            if inner == "player" {
+                out.push_str(&self.player_name);
+            } else if inner.contains('|') && !inner.contains('{') {
+                let mut parts = inner.splitn(2, '|');
+                let (m, f) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+                out.push_str(if self.player_sex == Sex::Female { f } else { m });
+            } else if ident {
+                out.push_str(&self.var(inner).to_string());
+            } else {
+                out.push('{');
+                rest = after;
+                continue;
+            }
+            rest = &after[j + 1..];
+        }
+        out.push_str(rest);
+        out
+    }
+
     pub fn flag(&self, name: &str) -> bool {
         self.flags.contains(name)
     }

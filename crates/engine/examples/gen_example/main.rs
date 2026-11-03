@@ -12,6 +12,7 @@ use rust2d_engine::audio::wav_bytes;
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
 use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
+use rust2d_engine::state::Sex;
 
 mod art;
 use art::*;
@@ -331,7 +332,7 @@ fn village() -> Map {
             TriggerOn::Interact,
             vec![not(flag("quest_accepted"))],
             vec![
-                dialog("Elder Rowan", "Ah, a traveller! Strange lights have been seen in Whisperwood, east of here."),
+                dialog("Elder Rowan", "Ah, a traveller! Welcome to Emberbrook, {player}. Strange lights have been seen in Whisperwood, east of here."),
                 Action::Choice {
                     speaker: "Elder Rowan".into(),
                     text: "Would you investigate the old shrine for us?".into(),
@@ -358,7 +359,7 @@ fn village() -> Map {
             TriggerOn::Interact,
             vec![cond(flag("shrine_lit"))],
             vec![
-                dialog("Elder Rowan", "The lights have calmed! You have my thanks, hero."),
+                dialog("Elder Rowan", "The lights have calmed! You have my thanks, brave {lad|lass}."),
                 Action::If {
                     conditions: vec![not(flag("rewarded"))],
                     then: vec![
@@ -376,7 +377,7 @@ fn village() -> Map {
     v.name = "mira".into();
     v.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "mira_talk".into() }])];
     let v2 = b.entity(EntityKind::Character, "villager", 34, 14);
-    v2.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Villager", "Lovely weather today, isn't it?")])];
+    v2.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Villager", "Lovely weather today, isn't it, {sir|miss}?")])];
     b.entity(EntityKind::Item, "apple", 8, 12);
     b.entity(EntityKind::Item, "apple", 37, 21);
 
@@ -455,7 +456,7 @@ fn shop() -> Map {
             vec![not(flag("met_tilda"))],
             vec![
                 Action::SetFlag { name: "met_tilda".into(), value: true },
-                dialog("Tilda", "Welcome, welcome! Potions, arrows, armor - and I pay fair coin for whatever you find out there."),
+                dialog("Tilda", "Welcome, welcome, {good sir|my lady}! Potions, arrows, armor - and I pay fair coin for whatever you find out there."),
             ],
         ),
         // Quest "Pest Control": offered until accepted, rewarded once five slimes are gone.
@@ -480,7 +481,7 @@ fn shop() -> Map {
             TriggerOn::Interact,
             vec![quest_is("pest_control", QuestCheck::AtStage, 1)],
             vec![
-                dialog("Tilda", "Five slimes? My deliveries are safe again - thank you! Here, as promised."),
+                dialog("Tilda", "Five slimes? My deliveries are safe again - thank you, {player}! Here, as promised."),
                 Action::GiveItem { item: "coin".into(), count: 30 },
                 Action::GiveItem { item: "potion".into(), count: 1 },
                 quest("pest_control", QuestOp::Complete, 0),
@@ -870,6 +871,12 @@ fn database() -> Database {
         sounds: SOUNDS.iter().map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.wav"), volume: if id.starts_with("music") { 0.35 } else { 0.6 } }).collect(),
         sheets: vec![
             SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 32, frame_h: 48 },
+            // More looks for the character creator.
+            SheetDef { id: "hero_2".into(), image: "sprites/hero_2.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_3".into(), image: "sprites/hero_3.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_f".into(), image: "sprites/hero_f.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_f2".into(), image: "sprites/hero_f2.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_f3".into(), image: "sprites/hero_f3.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "elder".into(), image: "sprites/elder.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "villager".into(), image: "sprites/villager.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "merchant_f".into(), image: "sprites/merchant_f.png".into(), frame_w: 32, frame_h: 48 },
@@ -1048,6 +1055,8 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
 //               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
 //               quest_done(id)
+// Player:       player_name() player_sex() ("male"/"female") is_female() is_male()
+//               text("...") fills in placeholders: {player} {sir|madam} {variable}
 // Other:        player_hp() random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
@@ -1055,9 +1064,14 @@ fn mira_talk() {
     add_var("mira_talks", 1);
     let n = get_var("mira_talks");
     if n == 1 {
-        say("Mira", "Hi! I'm Mira. Have you met Elder Rowan by the well?");
+        say("Mira", "Hi! I'm Mira. " + player_name() + ", right? Have you met Elder Rowan by the well?");
     } else if flag("shrine_lit") {
-        say("Mira", "You lit the shrine? Amazing!");
+        // Scripts can check the player's sex too (or use "{hero|heroine}" in the text).
+        if is_female() {
+            say("Mira", "You lit the shrine? When I grow up I want to be a heroine like you!");
+        } else {
+            say("Mira", "You lit the shrine? When I grow up I want to be a hero like you!");
+        }
     } else if n < 4 {
         say("Mira", "Talked to me " + n + " times now. You must be bored!");
     } else {
@@ -1127,6 +1141,12 @@ fn main() {
     std::fs::create_dir_all(&out).unwrap();
     terrain(&out);
     character(&out, "hero", &Look { skin: 0xf2c49b, hair: 0x5d3a1a, shirt: 0x2e6fdb, pants: 0x3b3b4f, beard: false, ears: false, ..Default::default() });
+    // Character creator looks (hero_f matches the library's "Heroine").
+    character(&out, "hero_2", &Look { skin: 0xe8b88a, hair: 0xe0c060, shirt: 0x2e8b57, pants: 0x4a3a2a, ..Default::default() });
+    character(&out, "hero_3", &Look { skin: 0x8d5a3b, hair: 0x1e1612, shirt: 0xb03a2e, pants: 0x2f2f3f, ..Default::default() });
+    character(&out, "hero_f", &Look { skin: 0xf2c49b, hair: 0x7a4a22, shirt: 0x2e6fdb, pants: 0x3b3b4f, female: true, ..Default::default() });
+    character(&out, "hero_f2", &Look { skin: 0xf5d0b0, hair: 0xd35400, shirt: 0x8e44ad, pants: 0x3b3b4f, female: true, ..Default::default() });
+    character(&out, "hero_f3", &Look { skin: 0x8d5a3b, hair: 0x101010, shirt: 0x16a085, pants: 0x4a3a2a, female: true, ..Default::default() });
     character(&out, "elder", &Look { skin: 0xe8b88a, hair: 0xdedede, shirt: 0x7b4fa0, pants: 0x4a3a5a, beard: true, ears: false, ..Default::default() });
     character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false, ..Default::default() });
     // Same look as the library's "Merchant (female)".
@@ -1165,6 +1185,22 @@ fn main() {
                 unlock: "unlock".into(),
             },
             inventory_size: 24,
+            creation: rust2d_engine::project::CharacterCreation {
+                enabled: true,
+                sex: rust2d_engine::project::SexChoice::Both,
+                default_name: "Alex".into(),
+                looks: [
+                    ("hero", Sex::Male, "Blue tunic"),
+                    ("hero_2", Sex::Male, "Green tunic"),
+                    ("hero_3", Sex::Male, "Red tunic"),
+                    ("hero_f", Sex::Female, "Blue tunic"),
+                    ("hero_f2", Sex::Female, "Purple tunic"),
+                    ("hero_f3", Sex::Female, "Teal tunic"),
+                ]
+                .iter()
+                .map(|(sheet, sex, label)| rust2d_engine::project::PlayerLook { sheet: sheet.to_string(), sex: *sex, label: label.to_string() })
+                .collect(),
+            },
         },
         db: database(),
     };

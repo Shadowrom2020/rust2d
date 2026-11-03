@@ -17,4 +17,41 @@
         unlock: "unlock",
     ),
     inventory_size: 24,
+    creation: (
+        enabled: true,
+        sex: Both,
+        default_name: "Alex",
+        looks: [
+            (
+                sheet: "hero",
+                sex: Male,
+                label: "Blue tunic",
+            ),
+            (
+                sheet: "hero_2",
+                sex: Male,
+                label: "Green tunic",
+            ),
+            (
+                sheet: "hero_3",
+                sex: Male,
+                label: "Red tunic",
+            ),
+            (
+                sheet: "hero_f",
+                sex: Female,
+                label: "Blue tunic",
+            ),
+            (
+                sheet: "hero_f2",
+                sex: Female,
+                label: "Purple tunic",
+            ),
+            (
+                sheet: "hero_f3",
+                sex: Female,
+                label: "Teal tunic",
+            ),
+        ],
+    ),
 )

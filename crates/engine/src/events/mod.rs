@@ -163,6 +163,8 @@ pub enum Cond {
     PropState { target: TargetName, state: String },
     /// A quest's status / stage (`stage` is used by the stage checks).
     Quest { quest: String, check: crate::quest::QuestCheck, stage: u32 },
+    /// The player character is male / female.
+    PlayerSex { sex: crate::state::Sex },
 }
 
 impl Cond {
@@ -175,6 +177,7 @@ impl Cond {
             Cond::PlayerHp { .. } => "Player HP",
             Cond::PropState { .. } => "Prop state",
             Cond::Quest { .. } => "Quest",
+            Cond::PlayerSex { .. } => "Player sex",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -186,6 +189,7 @@ impl Cond {
             Cond::PlayerHp { op: CmpOp::Lt, value: 3 },
             Cond::PropState { target: "self".into(), state: String::new() },
             Cond::Quest { quest: String::new(), check: crate::quest::QuestCheck::Active, stage: 0 },
+            Cond::PlayerSex { sex: crate::state::Sex::Female },
         ]
     }
 }
@@ -212,6 +216,7 @@ impl Condition {
             // Needs the running game (see `conditions_met`).
             Cond::PropState { .. } => false,
             Cond::Quest { quest, check, stage } => world.check_quest(quest, *check, *stage),
+            Cond::PlayerSex { sex } => world.player_sex == *sex,
         };
         v != self.negate
     }

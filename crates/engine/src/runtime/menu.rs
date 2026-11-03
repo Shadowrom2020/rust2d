@@ -284,8 +284,12 @@ impl Game {
         self.menu.message = None;
         match (self.menu.page.clone(), row) {
             (_, Row::NewGame) => {
-                self.new_game();
-                self.close_title();
+                if self.project.config.creation.enabled {
+                    self.open_creator();
+                } else {
+                    self.new_game();
+                    self.close_title();
+                }
             }
             (_, Row::Continue) => match self.menu.saves.first().map(|s| s.slot.clone()) {
                 Some(slot) => match self.load_game(&slot) {
@@ -375,7 +379,7 @@ impl Game {
         }
     }
 
-    fn close_title(&mut self) {
+    pub(super) fn close_title(&mut self) {
         self.menu.open = false;
         self.menu.title = false;
         // The start map's "map enter" from startup must not fire after loading another game;
