@@ -183,6 +183,7 @@ impl Editor {
                 weapon: None,
                 armor: None,
                 max_stack: 99,
+                value: 0,
             }),
             WKind::Character => db.characters.push(CharacterDef {
                 id: id.clone(),
@@ -198,6 +199,7 @@ impl Editor {
                 weapon: None,
                 defense: 0,
                 triggers: vec![],
+                shop: None,
             }),
             WKind::Tileset | WKind::Sheet => {}
         }

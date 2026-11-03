@@ -105,7 +105,7 @@ pub struct Project {
     pub db: Database,
 }
 
-const DEFS: [&str; 6] = ["tilesets", "sheets", "items", "props", "characters", "sounds"];
+const DEFS: [&str; 7] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests"];
 
 fn read_ron<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
     if !path.exists() {
@@ -140,6 +140,7 @@ impl Project {
             props: read_ron(&d(DEFS[3]))?,
             characters: read_ron(&d(DEFS[4]))?,
             sounds: read_ron(&d(DEFS[5]))?,
+            quests: read_ron(&d(DEFS[6]))?,
         };
         let mut db = db;
         db.upgrade_prop_states();
@@ -157,7 +158,8 @@ impl Project {
         write_ron(&d(DEFS[2]), &self.db.items)?;
         write_ron(&d(DEFS[3]), &self.db.props)?;
         write_ron(&d(DEFS[4]), &self.db.characters)?;
-        write_ron(&d(DEFS[5]), &self.db.sounds)
+        write_ron(&d(DEFS[5]), &self.db.sounds)?;
+        write_ron(&d(DEFS[6]), &self.db.quests)
     }
 
     pub fn path(&self, rel: &str) -> PathBuf {

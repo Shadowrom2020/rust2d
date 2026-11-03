@@ -230,6 +230,9 @@ pub struct ItemDef {
     /// How many fit in one inventory slot.
     #[serde(default = "default_max_stack")]
     pub max_stack: u32,
+    /// Base trade value (merchants without their own price use it; 0 = worthless).
+    #[serde(default)]
+    pub value: u32,
 }
 
 fn default_max_stack() -> u32 {
@@ -489,6 +492,89 @@ pub struct CharacterDef {
     pub defense: i32,
     #[serde(default)]
     pub triggers: Vec<Trigger>,
+    /// Makes the character a merchant (placed instances can override it).
+    #[serde(default)]
+    pub shop: Option<ShopSpec>,
+}
+
+/// One line of a merchant's stock.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShopEntry {
+    pub item: String,
+    /// How many the merchant has (ignored when `unlimited`).
+    #[serde(default = "one")]
+    pub count: u32,
+    #[serde(default)]
+    pub unlimited: bool,
+    /// Price in currency; 0 = the item's value.
+    #[serde(default)]
+    pub price: u32,
+}
+
+impl ShopEntry {
+    pub fn new(item: &str, count: u32, price: u32) -> Self {
+        ShopEntry { item: item.to_string(), count, unlimited: false, price }
+    }
+    /// Whether the merchant still has one to sell.
+    pub fn available(&self) -> bool {
+        self.unlimited || self.count > 0
+    }
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// A merchant: what they sell, for what, and what they pay for the player's items.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShopSpec {
+    /// Trade window title ("" = the character's name).
+    #[serde(default)]
+    pub title: String,
+    /// Item used as money.
+    #[serde(default = "default_currency")]
+    pub currency: String,
+    /// Stock (and prices) when the game starts.
+    #[serde(default)]
+    pub items: Vec<ShopEntry>,
+    /// Percent of the price paid when the player sells an item; 0 = doesn't buy.
+    #[serde(default = "default_sell_rate")]
+    pub sell_rate: u32,
+    /// Talking to the character opens the shop (after its Interact triggers). Otherwise
+    /// only the "Open shop" action / open_shop() does.
+    #[serde(default = "yes")]
+    pub open_on_talk: bool,
+}
+
+fn default_currency() -> String {
+    "coin".into()
+}
+fn default_sell_rate() -> u32 {
+    50
+}
+
+impl Default for ShopSpec {
+    fn default() -> Self {
+        ShopSpec { title: String::new(), currency: default_currency(), items: Vec::new(), sell_rate: default_sell_rate(), open_on_talk: true }
+    }
+}
+
+impl ShopSpec {
+    /// What the merchant asks for one `item` (stock entries are looked up in `stock`).
+    pub fn buy_price(stock: &[ShopEntry], item: &str, db: &Database) -> u32 {
+        match stock.iter().find(|e| e.item == item) {
+            Some(e) if e.price > 0 => e.price,
+            _ => db.item(item).map_or(0, |d| d.value),
+        }
+    }
+    /// What the merchant pays for one `item` (None = won't buy it).
+    pub fn sell_price(&self, stock: &[ShopEntry], item: &str, db: &Database) -> Option<u32> {
+        if self.sell_rate == 0 || item == self.currency {
+            return None;
+        }
+        let base = Self::buy_price(stock, item, db);
+        (base > 0).then(|| (base * self.sell_rate / 100).max(1))
+    }
 }
 
 fn default_box() -> [f32; 2] {
@@ -513,6 +599,7 @@ pub struct Database {
     pub props: Vec<PropDef>,
     pub characters: Vec<CharacterDef>,
     pub sounds: Vec<SoundDef>,
+    pub quests: Vec<crate::quest::QuestDef>,
 }
 
 impl Database {
@@ -530,6 +617,9 @@ impl Database {
     }
     pub fn character(&self, id: &str) -> Option<&CharacterDef> {
         self.characters.iter().find(|d| d.id == id)
+    }
+    pub fn quest(&self, id: &str) -> Option<&crate::quest::QuestDef> {
+        self.quests.iter().find(|d| d.id == id)
     }
     pub fn sound(&self, id: &str) -> Option<&SoundDef> {
         self.sounds.iter().find(|d| d.id == id)
@@ -556,6 +646,14 @@ impl Database {
             return None;
         }
         e.container.as_ref().or_else(|| self.prop(&e.def).and_then(|d| d.container.as_ref()))
+    }
+
+    /// The merchant spec of a placed character (instance override or its definition's).
+    pub fn shop_of<'a>(&'a self, e: &'a crate::entity::EntityInstance) -> Option<&'a ShopSpec> {
+        if e.kind != EntityKind::Character {
+            return None;
+        }
+        e.shop.as_ref().or_else(|| self.character(&e.def).and_then(|d| d.shop.as_ref()))
     }
 
     /// Converts legacy frame offsets in all prop definitions to named states.
@@ -613,6 +711,39 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shop_prices() {
+        let mut db = Database::default();
+        for (id, value) in [("apple", 3), ("rock", 0), ("coin", 1)] {
+            db.items.push(ItemDef {
+                id: id.into(),
+                name: id.into(),
+                description: String::new(),
+                icon: SpriteRef::default(),
+                consumable: false,
+                on_use: vec![],
+                weapon: None,
+                armor: None,
+                max_stack: 99,
+                value,
+            });
+        }
+        let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };
+        // Own price wins over the item's value; unlisted items use their value.
+        assert_eq!(ShopSpec::buy_price(&spec.items, "apple", &db), 10);
+        assert_eq!(ShopSpec::buy_price(&[], "apple", &db), 3);
+        // Sells at 50 %, at least 1; worthless items and the currency can't be sold.
+        assert_eq!(spec.sell_price(&spec.items, "apple", &db), Some(5));
+        assert_eq!(spec.sell_price(&[], "apple", &db), Some(1));
+        assert_eq!(spec.sell_price(&[], "rock", &db), None);
+        assert_eq!(spec.sell_price(&[], "coin", &db), None);
+        let closed = ShopSpec { sell_rate: 0, ..spec.clone() };
+        assert_eq!(closed.sell_price(&spec.items, "apple", &db), None);
+        // Older files without the new fields still load.
+        let old: ShopSpec = ron::from_str("(items: [(item: \"apple\")])").unwrap();
+        assert_eq!((old.currency.as_str(), old.sell_rate, old.open_on_talk, old.items[0].count), ("coin", 50, true, 1));
+    }
 
     #[test]
     fn multi_cell_sprites() {

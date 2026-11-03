@@ -11,6 +11,7 @@ pub mod map;
 pub mod migrate;
 pub mod path;
 pub mod project;
+pub mod quest;
 pub mod refactor;
 pub mod release;
 pub mod render;

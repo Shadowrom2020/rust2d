@@ -25,6 +25,9 @@ enum Page {
     ConfirmDelete(String),
     /// Quit to the title screen without saving?
     ConfirmQuit,
+    /// The window's close button was clicked: save before exiting? Holds the page to go back
+    /// to on Cancel (None = back to the game).
+    ConfirmClose(Option<Box<Page>>),
 }
 
 struct SaveInfo {
@@ -70,6 +73,10 @@ enum Row {
     Slot(String),
     Yes,
     No,
+    /// Save, then exit the program.
+    SaveExit,
+    /// Exit the program without saving.
+    ExitNoSave,
 }
 
 pub(super) fn now_secs() -> u64 {
@@ -164,6 +171,19 @@ impl Game {
                 (Row::Yes, "Quit".into(), "Progress since the last save is lost".into()),
                 (Row::No, "Cancel".into(), String::new()),
             ],
+            Page::ConfirmClose(_) => vec![
+                (
+                    Row::SaveExit,
+                    "Save and exit".into(),
+                    if self.runner.busy() {
+                        "Not possible during an event: Cancel, finish it, then close again".into()
+                    } else {
+                        format!("Saves to \"{}\", then closes the game", display_name(&self.save_quit_slot()))
+                    },
+                ),
+                (Row::ExitNoSave, "Exit without saving".into(), "Progress since the last save is lost".into()),
+                (Row::No, "Cancel".into(), "Back to the game".into()),
+            ],
             Page::ConfirmOverwrite(_) | Page::ConfirmDelete(_) => {
                 vec![(Row::Yes, "Yes".into(), String::new()), (Row::No, "No".into(), String::new())]
             }
@@ -180,6 +200,7 @@ impl Game {
             Page::ConfirmOverwrite(s) => format!("Overwrite \"{}\"?", display_name(s)),
             Page::ConfirmDelete(s) => format!("Delete \"{}\"?", display_name(s)),
             Page::ConfirmQuit => "Quit without saving?".into(),
+            Page::ConfirmClose(_) => "Exit the game?".into(),
         }
     }
 
@@ -224,6 +245,10 @@ impl Game {
                 self.go(Page::Main);
                 self.menu.sel = 4; // back on "Quit"
             }
+            Page::ConfirmClose(back) => match back {
+                Some(p) => self.go(*p),
+                None => self.menu.open = false,
+            },
         }
     }
 
@@ -291,6 +316,17 @@ impl Game {
                 }
             }
             (_, Row::Quit) => self.go(Page::ConfirmQuit),
+            (_, Row::SaveExit) => {
+                let slot = self.save_quit_slot();
+                match self.save_game(&slot) {
+                    Ok(()) => self.menu.quit = true,
+                    Err(_) if self.runner.busy() => {
+                        self.menu.message = Some("You can't save in the middle of an event. Cancel, finish it, then exit.".into())
+                    }
+                    Err(e) => self.menu.message = Some(format!("Save failed: {e}")),
+                }
+            }
+            (_, Row::ExitNoSave) => self.menu.quit = true,
             (Page::ConfirmQuit, Row::Yes) => self.quit_to_title(),
             (_, Row::NewSave) => {
                 let n = (1..).find(|n| !self.menu.saves.iter().any(|s| s.slot == format!("Save {n}"))).unwrap();
@@ -311,6 +347,23 @@ impl Game {
             (_, Row::No) => self.back(),
             _ => {}
         }
+    }
+
+    /// The window's close button was clicked: asks whether to save first while a game is
+    /// running; on the title / game over screen the game just exits.
+    pub fn request_close(&mut self) {
+        if (self.menu.open && self.menu.title) || self.game_over.is_some() {
+            self.menu.quit = true;
+            return;
+        }
+        if self.menu.open && matches!(self.menu.page, Page::ConfirmClose(_)) {
+            return; // already asking
+        }
+        let back = self.menu.open.then(|| Box::new(self.menu.page.clone()));
+        self.menu.open = true;
+        self.menu.message = None;
+        self.scan_saves();
+        self.go(Page::ConfirmClose(back));
     }
 
     /// Shows the title screen (main menu). The selection starts on Continue if there are saves.

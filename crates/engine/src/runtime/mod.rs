@@ -3,6 +3,8 @@
 mod combat;
 mod equipment;
 mod inventory_ui;
+mod journal;
+mod shop_ui;
 mod locks;
 mod menu;
 pub mod input;
@@ -84,6 +86,8 @@ struct RtEntity {
     kind: EntityKind,
     def: String,
     name: String,
+    /// Character model override ("" = the definition's sheet).
+    sheet: String,
     body: Body,
     home: Vec2,
     active: bool,
@@ -157,6 +161,8 @@ pub struct Game {
     next_spawn_uid: u32,
     mouse: mouse::MouseState,
     inv: inventory_ui::InvUi,
+    shop: shop_ui::ShopUi,
+    journal: journal::Journal,
     menu: menu::Menu,
     pub world: WorldState,
     scripts: ScriptHost,
@@ -220,6 +226,8 @@ impl Game {
             next_spawn_uid: spawner::SPAWN_UID_BASE,
             mouse: Default::default(),
             inv: Default::default(),
+            shop: Default::default(),
+            journal: Default::default(),
             menu: Default::default(),
             world: WorldState::default(),
             scripts,
@@ -303,6 +311,7 @@ impl Game {
             kind,
             def: def.to_string(),
             name: name.to_string(),
+            sheet: String::new(),
             body: Body { pos, facing, hitbox, speed, moving: false, anim: 0.0, move_target: None },
             home: pos,
             active,
@@ -364,6 +373,7 @@ impl Game {
                     st.map_or(e.frame, |s| s.frame),
                 );
                 rt.count = count;
+                rt.sheet = e.sheet.clone();
                 rt.unlocked = st.is_some_and(|s| s.unlocked);
                 if let Some(d) = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten() {
                     // Saved state; saves from before named states store a frame offset.
@@ -700,7 +710,11 @@ impl Game {
         let allow_inventory = !self.runner.busy() && matches!(self.fade, Fade::None);
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
-        let (inv_key, inv_mouse) = self.update_inventory_ui(allow_windows, input.consumed);
+        let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
+        let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open(), input.consumed || shop_key);
+        let others = self.shop_open() || self.journal_open();
+        let (inv_key, inv_mouse) = self.update_inventory_ui(allow_windows && !others, input.consumed || shop_key || j_key);
+        let (inv_key, inv_mouse) = (inv_key || shop_key || j_key, inv_mouse || shop_mouse || j_mouse);
         let consumed = input.consumed || inv_key;
         if !input.mouse_consumed && !inv_mouse && allow_inventory && !self.modal() {
             self.handle_mouse();
@@ -821,7 +835,34 @@ impl Game {
     }
 
     /// The entity in front of the player, if any.
+    /// A character two tiles away in a straight line with a solid tile in between (e.g. a
+    /// merchant behind a counter) can be talked to across it.
+    fn across_counter(&self, i: usize) -> bool {
+        let e = &self.loaded.entities[i];
+        if e.kind != EntityKind::Character || !e.active || e.hostile {
+            return false;
+        }
+        let ts = self.ts();
+        let tile = |p: Vec2| ((p.x / ts).floor() as i32, ((p.y - 1.0) / ts).floor() as i32);
+        let ((px, py), (ex, ey)) = (tile(self.player.pos), tile(e.body.pos));
+        let (dx, dy) = (ex - px, ey - py);
+        let straight = (dx.abs() == 2 && dy == 0) || (dy.abs() == 2 && dx == 0);
+        straight && self.tile_solid(px + dx / 2, py + dy / 2)
+    }
+
     fn facing_entity(&self) -> Option<usize> {
+        self.facing_entity_near().or_else(|| {
+            // Nothing right in front: someone across a counter in the facing direction?
+            let ts = self.ts();
+            let (fx, fy) = self.player.facing.dir();
+            (0..self.loaded.entities.len()).find(|&i| {
+                let d = self.loaded.entities[i].body.pos - self.player.pos;
+                self.across_counter(i) && (d.x * fx + d.y * fy) > ts
+            })
+        })
+    }
+
+    fn facing_entity_near(&self) -> Option<usize> {
         let ts = self.ts();
         let (dx, dy) = self.player.facing.dir();
         let center = self.player.pos + vec2(dx, dy) * ts * 0.6 - vec2(0.0, self.player.hitbox.y / 2.0);
@@ -894,8 +935,12 @@ impl Game {
                 }
             }
             self.fire(GameEvent::Interact, Source::Entity(uid));
-            if self.loaded.entities[i].kind == EntityKind::Prop {
-                self.try_open_container(i);
+            match self.loaded.entities[i].kind {
+                EntityKind::Prop => self.try_open_container(i),
+                EntityKind::Character => {
+                    self.try_open_shop(i, true);
+                }
+                EntityKind::Item => {}
             }
         }
     }
@@ -1025,7 +1070,9 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
+            self.shop_status(),
             self.loaded.map.name,
             p.x.floor(),
             p.y.floor(),
@@ -1193,7 +1240,13 @@ impl Game {
         }
         if !self.on_title() {
             self.draw_hud();
-            self.draw_inventory_ui();
+            if self.shop_open() {
+                self.draw_shop_ui();
+            } else if self.journal_open() {
+                self.draw_journal();
+            } else {
+                self.draw_inventory_ui();
+            }
         }
         self.ui.draw_toasts();
         self.ui.draw_dialog();
@@ -1220,7 +1273,8 @@ impl Game {
             EntityKind::Character => db.character(&e.def).is_some_and(|d| {
                 let frames = d.walk_frames.max(1);
                 let col = if e.body.moving { (e.body.anim * 8.0) as u32 % frames } else { 0 };
-                self.assets.draw_frame(&d.sheet, e.body.facing as u32 * frames + col, e.body.pos, tint)
+                let sheet = if e.sheet.is_empty() { &d.sheet } else { &e.sheet };
+                self.assets.draw_frame(sheet, e.body.facing as u32 * frames + col, e.body.pos, tint)
             }),
             EntityKind::Item => db.item(&e.def).is_some_and(|d| {
                 let u = self.u();
@@ -1336,6 +1390,17 @@ impl ActionHost for Game {
             Action::SetState { target, state } => {
                 if let Some(i) = self.entity_index(target, ctx.owner) {
                     self.set_prop_state(i, state);
+                }
+                Step::Continue
+            }
+            Action::Quest { quest, op, stage } => {
+                self.quest_changed(quest, *op, *stage);
+                Step::Continue
+            }
+            Action::OpenShop { target } => {
+                match self.entity_index(target, ctx.owner) {
+                    Some(i) if self.try_open_shop(i, false) => {}
+                    _ => eprintln!("Open shop: '{target}' is not a merchant on this map"),
                 }
                 Step::Continue
             }

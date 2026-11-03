@@ -154,7 +154,7 @@ impl Game {
         if !key_consumed && input::pressed(KeyCode::Q) {
             self.cycle_weapon();
         }
-        if !key_consumed && self.combat.cooldown <= 0.0 && input::any_pressed(&[KeyCode::J, KeyCode::X]) {
+        if !key_consumed && self.combat.cooldown <= 0.0 && input::any_pressed(&[KeyCode::X]) {
             self.order = None;
             self.attack_at(None);
         }

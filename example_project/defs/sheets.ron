@@ -18,6 +18,12 @@
         frame_h: 48,
     ),
     (
+        id: "merchant_f",
+        image: "sprites/merchant_f.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
         id: "slime",
         image: "sprites/slime.png",
         frame_w: 32,

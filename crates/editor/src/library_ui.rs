@@ -59,7 +59,7 @@ impl LibState {
         }
     }
 
-    fn textures(&mut self, ctx: &egui::Context) {
+    pub(crate) fn textures(&mut self, ctx: &egui::Context) {
         if !self.tex_dirty {
             return;
         }
@@ -76,7 +76,7 @@ impl LibState {
     }
 
     /// Paints a sprite of a library sheet into `rect` (aspect kept, bottom-centered).
-    fn paint_sprite(&self, ui: &egui::Ui, sprite: &SpriteRef, rect: Rect) -> bool {
+    pub(crate) fn paint_sprite(&self, ui: &egui::Ui, sprite: &SpriteRef, rect: Rect) -> bool {
         let (Some(lib), Some(t)) = (&self.lib, self.tex.get(&format!("sh:{}", sprite.sheet))) else { return false };
         let Some(s) = lib.db.sheet(&sprite.sheet) else { return false };
         let (fw, fh) = (s.frame_w.max(1) as f32, s.frame_h.max(1) as f32);

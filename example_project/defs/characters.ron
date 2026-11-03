@@ -13,6 +13,7 @@
         weapon: None,
         defense: 0,
         triggers: [],
+        shop: None,
     ),
     (
         id: "elder",
@@ -28,6 +29,7 @@
         weapon: None,
         defense: 0,
         triggers: [],
+        shop: None,
     ),
     (
         id: "villager",
@@ -45,6 +47,7 @@
         weapon: None,
         defense: 0,
         triggers: [],
+        shop: None,
     ),
     (
         id: "slime",
@@ -73,6 +76,7 @@
                 once: false,
             ),
         ],
+        shop: None,
     ),
     (
         id: "goblin",
@@ -116,5 +120,41 @@
                 once: false,
             ),
         ],
+        shop: None,
+    ),
+    (
+        id: "merchant_f",
+        name: "Merchant (female)",
+        sheet: "merchant_f",
+        walk_frames: 4,
+        speed: 70.0,
+        hitbox: (20.0, 12.0),
+        behavior: Static,
+        max_hp: 0,
+        damage: 0,
+        hostile: false,
+        weapon: None,
+        defense: 0,
+        triggers: [],
+        shop: Some((
+            title: "",
+            currency: "coin",
+            items: [
+                (
+                    item: "apple",
+                    count: 0,
+                    unlimited: true,
+                    price: 0,
+                ),
+                (
+                    item: "potion",
+                    count: 3,
+                    unlimited: false,
+                    price: 0,
+                ),
+            ],
+            sell_rate: 50,
+            open_on_talk: true,
+        )),
     ),
 ]

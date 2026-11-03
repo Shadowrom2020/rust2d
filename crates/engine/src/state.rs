@@ -94,6 +94,12 @@ pub struct WorldState {
     /// map -> entity uid -> contents of containers that have been opened.
     #[serde(default)]
     pub containers: BTreeMap<String, BTreeMap<u32, Inventory>>,
+    /// map -> entity uid -> current stock of merchants the player traded with.
+    #[serde(default)]
+    pub shops: BTreeMap<String, BTreeMap<u32, Vec<crate::defs::ShopEntry>>>,
+    /// quest id -> progress (started quests only).
+    #[serde(default)]
+    pub quests: BTreeMap<String, crate::quest::QuestProgress>,
 }
 
 impl WorldState {

@@ -44,6 +44,15 @@ impl Renamer<'_> {
         }
     }
 
+    fn shop(&mut self, s: &mut Option<crate::defs::ShopSpec>) {
+        if let Some(s) = s {
+            self.fix(RefKind::Item, &mut s.currency);
+            for e in &mut s.items {
+                self.fix(RefKind::Item, &mut e.item);
+            }
+        }
+    }
+
     fn weapon(&mut self, w: &mut Option<crate::defs::Weapon>) {
         if let Some(r) = w.as_mut().and_then(|w| w.ranged.as_mut()) {
             self.fix(RefKind::Sheet, &mut r.projectile.sheet);
@@ -124,6 +133,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.fix(RefKind::Sheet, &mut d.sheet);
         r.triggers(&mut d.triggers);
         r.weapon(&mut d.weapon);
+        r.shop(&mut d.shop);
     }
     r.fix(RefKind::Character, &mut config.player);
     r.fix(RefKind::Map, &mut config.start_map);
@@ -148,9 +158,11 @@ pub fn rename_in_map(map: &mut Map, kind: RefKind, old: &str, new: &str) -> usiz
             EntityKind::Item => RefKind::Item,
         };
         r.fix(k, &mut e.def);
+        r.fix(RefKind::Sheet, &mut e.sheet);
         r.triggers(&mut e.triggers);
         r.container(&mut e.container);
         r.lock(&mut e.lock);
+        r.shop(&mut e.shop);
     }
     for z in &mut map.zones {
         match &mut z.kind {
@@ -207,6 +219,7 @@ pub fn refs_of_character(d: &crate::defs::CharacterDef) -> Vec<(RefKind, String)
     r.fix(RefKind::Sheet, &mut d.sheet);
     r.triggers(&mut d.triggers);
     r.weapon(&mut d.weapon);
+    r.shop(&mut d.shop);
     r.found.unwrap_or_default()
 }
 
@@ -280,6 +293,7 @@ mod tests {
             weapon: None,
             armor: None,
             max_stack: 99,
+            value: 0,
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),

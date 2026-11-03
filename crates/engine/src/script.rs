@@ -176,6 +176,24 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         target: t.into(),
         frame: f.max(0) as u32
     })));
+    engine.register_fn("quest_stage", with!(ctx, |c, q: &str| c.world.quest(q).map_or(-1, |p| p.stage as i64)));
+    engine.register_fn("quest_active", with!(ctx, |c, q: &str| c.world.check_quest(q, crate::quest::QuestCheck::Active, 0)));
+    engine.register_fn("quest_done", with!(ctx, |c, q: &str| c.world.check_quest(q, crate::quest::QuestCheck::Completed, 0)));
+    {
+        use crate::quest::QuestOp;
+        let op = |o: QuestOp| move |q: &str| Action::Quest { quest: q.into(), op: o, stage: 0 };
+        let (st, adv, done, fail) = (op(QuestOp::Start), op(QuestOp::Advance), op(QuestOp::Complete), op(QuestOp::Fail));
+        engine.register_fn("start_quest", with!(ctx, |c, q: &str| c.actions.push(st(q))));
+        engine.register_fn("advance_quest", with!(ctx, |c, q: &str| c.actions.push(adv(q))));
+        engine.register_fn("complete_quest", with!(ctx, |c, q: &str| c.actions.push(done(q))));
+        engine.register_fn("fail_quest", with!(ctx, |c, q: &str| c.actions.push(fail(q))));
+    }
+    engine.register_fn("set_quest_stage", with!(ctx, |c, q: &str, n: i64| c.actions.push(Action::Quest {
+        quest: q.into(),
+        op: crate::quest::QuestOp::SetStage,
+        stage: n.max(0) as u32
+    })));
+    engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
     engine.register_fn("set_state", with!(ctx, |c, t: &str, s: &str| c.actions.push(Action::SetState { target: t.into(), state: s.into() })));
     engine.register_fn("move_by", with!(ctx, |c, t: &str, dx: i64, dy: i64| c.actions.push(Action::Move {
         target: t.into(),

@@ -132,7 +132,7 @@ fn make_grid(side: Side, title: String, origin: Vec2, n: usize, cols: usize) -> 
 
 impl Game {
     pub(super) fn inventory_open(&self) -> bool {
-        self.inv.is_open()
+        self.inv.is_open() || self.shop.is_open() || self.journal.is_open()
     }
 
     fn container_name(&self, uid: u32) -> String {

@@ -11,6 +11,7 @@ use rust2d_engine::map::{EdgeLink, Map, Respawn, Tile, Zone, ZoneKind};
 use rust2d_engine::audio::wav_bytes;
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
+use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
 
 mod art;
 use art::*;
@@ -206,6 +207,13 @@ impl B {
     }
 }
 
+fn quest(id: &str, op: QuestOp, stage: u32) -> Action {
+    Action::Quest { quest: id.into(), op, stage }
+}
+fn quest_is(id: &str, check: QuestCheck, stage: u32) -> Condition {
+    cond(Cond::Quest { quest: id.into(), check, stage })
+}
+
 fn dialog(speaker: &str, text: &str) -> Action {
     Action::Dialog { speaker: speaker.into(), text: text.into() }
 }
@@ -240,10 +248,9 @@ fn village() -> Map {
     // Houses.
     let door = b.house(17, 3, 7);
     b.fill(0, door.0, door.1 + 1, 1, 4, t::PATH);
+    // Second house: Tilda's shop.
     let door2 = b.house(30, 6, 6);
     b.fill(0, door2.0, door2.1 + 1, 1, 6, t::PATH);
-    b.set(1, door2.0, door2.1, t::HOUSE_WALL); // second house is decorative
-    b.m.set_collision(door2.0 as u32, door2.1 as u32, rust2d_engine::map::CollisionOverride::Auto);
     // Fences around a garden.
     b.fill(1, 30, 24, 10, 1, t::FENCE);
     // Gap in the top fence for a double gate (placed after the random trees below).
@@ -301,6 +308,8 @@ fn village() -> Map {
             vec![],
             vec![Action::SetFlag { name: "gate_open".into(), value: true }, dialog("", "The gate creaks open. The forest lies beyond.")],
         ),
+        // Quest "The Strange Lights": the gate is open, now find the shrine.
+        trig(TriggerOn::Unlock, vec![quest_is("strange_lights", QuestCheck::AtStage, 0)], vec![quest("strange_lights", QuestOp::SetStage, 1)]),
         trig(TriggerOn::Lock, vec![], vec![Action::SetFlag { name: "gate_open".into(), value: false }]),
     ];
     for y in [14, 15, 16, 20, 21, 22] {
@@ -333,6 +342,7 @@ fn village() -> Map {
                     conditions: vec![cond(Cond::Var { name: "elder_answer".into(), op: CmpOp::Eq, value: 0 })],
                     then: vec![
                         Action::SetFlag { name: "quest_accepted".into(), value: true },
+                        quest("strange_lights", QuestOp::Start, 0),
                         dialog("Elder Rowan", "Wonderful! The gate key is in the chest in my house, just north of here."),
                     ],
                     otherwise: vec![dialog("Elder Rowan", "I understand. Come back if you change your mind.")],
@@ -353,6 +363,7 @@ fn village() -> Map {
                     conditions: vec![not(flag("rewarded"))],
                     then: vec![
                         Action::SetFlag { name: "rewarded".into(), value: true },
+                        quest("strange_lights", QuestOp::Complete, 0),
                         Action::GiveItem { item: "coin".into(), count: 25 },
                         dialog("", "Received 25 coins!"),
                     ],
@@ -369,17 +380,119 @@ fn village() -> Map {
     b.entity(EntityKind::Item, "apple", 8, 12);
     b.entity(EntityKind::Item, "apple", 37, 21);
 
+
+    // Tilda's shop: door portal + a sign in front (added last so older uids stay the same).
+    b.spawn("shop_door", door2.0 as u32, door2.1 as u32 + 1);
+    b.portal(door2.0 as u32, door2.1 as u32, "shop", "entrance");
+    for (x, y) in [(door2.0 - 1, door2.1 + 1), (door2.0 - 1, door2.1 + 2)] {
+        b.m.layers[1].set(x as u32, y as u32, Tile::EMPTY);
+        b.m.layers[2].set(x as u32, y as u32, Tile::EMPTY);
+    }
+    let shop_sign = b.entity(EntityKind::Prop, "sign", door2.0 - 1, door2.1 + 1);
+    shop_sign.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Sign", "TILDA'S WARES - Potions, arrows, armor. Fair prices, we buy too!")])];
+
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
     b.m.triggers = vec![Trigger {
         on: TriggerOn::MapEnter,
         conditions: vec![],
         actions: vec![dialog(
             "",
-            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: J/X or left-click an enemy. Switch weapon: Q. Inventory & character: I or C. Save/Load: F5/F9. Debug: F3.",
+            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Inventory & character: I or C. Quest journal: J. Save/Load: F5/F9. Debug: F3.",
         )],
         once: true,
     }];
     b.m.background = [20, 40, 20];
+    b.m.music = "music_village".into();
+    b.m
+}
+
+fn shop() -> Map {
+    let (w, h) = (12, 10);
+    let mut b = B::new("shop", w, h);
+    b.fill(0, 0, 0, w as i32, h as i32, t::VOID);
+    b.fill(0, 1, 2, 10, 7, t::WOOD_FLOOR);
+    b.fill(1, 1, 0, 10, 2, t::HOUSE_WALL);
+    b.set(1, 2, 1, t::WINDOW);
+    b.set(1, 9, 1, t::WINDOW);
+    b.fill(1, 0, 0, 1, h as i32, t::VOID);
+    b.fill(1, 11, 0, 1, h as i32, t::VOID);
+    b.fill(1, 0, 9, w as i32, 1, t::VOID);
+    // Shelves along the back wall, Tilda behind the counter, a rug for customers.
+    b.fill(1, 3, 2, 6, 1, t::SHELF);
+    // The counter spans the room: customers stay in front and talk to Tilda across it.
+    b.fill(1, 1, 4, 10, 1, t::TABLE);
+    b.fill(0, 4, 6, 5, 2, t::RUG);
+    b.set(0, 6, 9, t::WOOD_FLOOR);
+    b.set(1, 6, 9, t::DOOR);
+    b.m.set_collision(6, 9, rust2d_engine::map::CollisionOverride::Walkable);
+    b.spawn("entrance", 6, 8);
+    b.portal(6, 9, "village", "shop_door");
+    // Tilda behind her counter, with her own stock and prices.
+    let merchant = b.entity(EntityKind::Character, "merchant_f", 6, 3);
+    merchant.name = "tilda".into();
+    merchant.facing = rust2d_engine::entity::Facing::Down;
+    merchant.shop = Some(ShopSpec {
+        title: "Tilda's Wares".into(),
+        currency: "coin".into(),
+        items: vec![
+            ShopEntry { unlimited: true, ..ShopEntry::new("apple", 0, 4) },
+            ShopEntry::new("potion", 5, 0),
+            ShopEntry { unlimited: true, ..ShopEntry::new("arrows", 0, 2) },
+            ShopEntry::new("bolts", 20, 0),
+            ShopEntry::new("leather_cap", 1, 0),
+            ShopEntry::new("spear", 1, 0),
+            ShopEntry::new("iron_helmet", 1, 0),
+            ShopEntry::new("chainmail", 1, 0),
+        ],
+        sell_rate: 50,
+        open_on_talk: true,
+    });
+    // Talked to across the counter: a greeting the first time, her quest, then (after these
+    // triggers) her shop opens because the merchant spec has "talking opens the shop".
+    merchant.triggers = vec![
+        trig(
+            TriggerOn::Interact,
+            vec![not(flag("met_tilda"))],
+            vec![
+                Action::SetFlag { name: "met_tilda".into(), value: true },
+                dialog("Tilda", "Welcome, welcome! Potions, arrows, armor - and I pay fair coin for whatever you find out there."),
+            ],
+        ),
+        // Quest "Pest Control": offered until accepted, rewarded once five slimes are gone.
+        trig(
+            TriggerOn::Interact,
+            vec![quest_is("pest_control", QuestCheck::NotStarted, 0)],
+            vec![
+                Action::Choice {
+                    speaker: "Tilda".into(),
+                    text: "Slimes from Whisperwood keep eating my deliveries! Could you get rid of five of them? 30 coins and a potion are yours.".into(),
+                    options: vec!["I'll do it.".into(), "Not right now.".into()],
+                    var: "tilda_answer".into(),
+                },
+                Action::If {
+                    conditions: vec![cond(Cond::Var { name: "tilda_answer".into(), op: CmpOp::Eq, value: 0 })],
+                    then: vec![quest("pest_control", QuestOp::Start, 0), dialog("Tilda", "Wonderful! Come back when it's done. Now, care to look at my wares?")],
+                    otherwise: vec![dialog("Tilda", "The offer stands. Now, care to look at my wares?")],
+                },
+            ],
+        ),
+        trig(
+            TriggerOn::Interact,
+            vec![quest_is("pest_control", QuestCheck::AtStage, 1)],
+            vec![
+                dialog("Tilda", "Five slimes? My deliveries are safe again - thank you! Here, as promised."),
+                Action::GiveItem { item: "coin".into(), count: 30 },
+                Action::GiveItem { item: "potion".into(), count: 1 },
+                quest("pest_control", QuestOp::Complete, 0),
+            ],
+        ),
+    ];
+    // Stock in the corners (barrels are small containers).
+    let barrel = b.entity(EntityKind::Prop, "barrel", 1, 6);
+    barrel.container = Some(ContainerSpec { size: 4, items: vec![ItemStack::new("apple", 1)], ..Default::default() });
+    b.entity(EntityKind::Prop, "barrel", 10, 6);
+    b.entity(EntityKind::Prop, "barrel", 10, 8);
+    b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
     b.m
 }
@@ -687,6 +800,7 @@ fn database() -> Database {
         weapon: None,
         defense: 0,
         triggers: vec![],
+        shop: None,
     };
     let item = |id: &str, name: &str, desc: &str, frame: u32, consumable: bool, on_use: Vec<Trigger>| ItemDef {
         id: id.into(),
@@ -698,6 +812,7 @@ fn database() -> Database {
         weapon: None,
         armor: None,
         max_stack: 99,
+        value: 0,
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -727,18 +842,37 @@ fn database() -> Database {
     let mut hero = ch("hero", "Hero", "hero", 70.0, Behavior::Static);
     hero.max_hp = 12; // 6 hearts
     hero.damage = 1;
-    Database {
+    let mut db = Database {
         tilesets: vec![TilesetDef {
             id: "terrain".into(),
             image: "tilesets/terrain.png".into(),
             solid: SOLID.to_vec(),
             animations: vec![TileAnim { tile: t::WATER, frames: vec![t::WATER, t::WATER_2, t::WATER_3, t::WATER_2], fps: 3.0 }],
         }],
+        quests: vec![
+            QuestDef {
+                id: "strange_lights".into(),
+                title: "The Strange Lights".into(),
+                description: "Strange lights have been seen in Whisperwood, east of Emberbrook. Elder Rowan asked me to investigate the old shrine there.".into(),
+                stages: vec![
+                    "Take the gate key from the chest in Elder Rowan's house, north of the well.".into(),
+                    "Open the east gate and find the old shrine deep in Whisperwood.".into(),
+                    "Return to Elder Rowan.".into(),
+                ],
+            },
+            QuestDef {
+                id: "pest_control".into(),
+                title: "Pest Control".into(),
+                description: "Slimes from Whisperwood keep eating Tilda's deliveries. She promised 30 coins and a potion if I get rid of five of them.".into(),
+                stages: vec!["Defeat slimes in Whisperwood ({pest_slimes}/5).".into(), "Return to Tilda's shop for the reward.".into()],
+            },
+        ],
         sounds: SOUNDS.iter().map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.wav"), volume: if id.starts_with("music") { 0.35 } else { 0.6 } }).collect(),
         sheets: vec![
             SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "elder".into(), image: "sprites/elder.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "villager".into(), image: "sprites/villager.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "merchant_f".into(), image: "sprites/merchant_f.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "slime".into(), image: "sprites/slime.png".into(), frame_w: 32, frame_h: 32 },
             SheetDef { id: "goblin".into(), image: "sprites/goblin.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "ov_cap".into(), image: "sprites/ov_cap.png".into(), frame_w: 32, frame_h: 48 },
@@ -867,8 +1001,36 @@ fn database() -> Database {
             ch("villager", "Villager", "villager", 35.0, Behavior::Wander { radius: 3.0 }),
             slime,
             goblin,
+            // Every merchant sells these by default; the one in the village has their own stock.
+            CharacterDef {
+                shop: Some(ShopSpec {
+                    items: vec![ShopEntry { unlimited: true, ..ShopEntry::new("apple", 0, 0) }, ShopEntry::new("potion", 3, 0)],
+                    ..Default::default()
+                }),
+                ..ch("merchant_f", "Merchant (female)", "merchant_f", 35.0, Behavior::Static)
+            },
         ],
+    };
+    // Trade values (merchants use them unless their stock sets a price).
+    for (id, v) in [
+        ("potion", 15),
+        ("apple", 3),
+        ("bow", 40),
+        ("crossbow", 70),
+        ("arrows", 1),
+        ("bolts", 2),
+        ("sword", 30),
+        ("spear", 35),
+        ("axe", 60),
+        ("leather_cap", 20),
+        ("iron_helmet", 45),
+        ("leather_armor", 35),
+        ("chainmail", 90),
+        ("bronze_key", 5),
+    ] {
+        db.items.iter_mut().find(|i| i.id == id).expect(id).value = v;
     }
+    db
 }
 
 const SCRIPT: &str = r#"// Rhai scripts for the example project.
@@ -882,6 +1044,10 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               move_by(target, dx, dy) face(target, "up"|"down"|"left"|"right")
 //               wait(seconds) emit(event) then_call(fn)
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
+//               open_shop(target) set_state(target, state)
+// Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
+//               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
+//               quest_done(id)
 // Other:        player_hp() random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
@@ -924,6 +1090,7 @@ fn shrine_touch() {
     say("You touch the shrine. Ancient runes begin to glow!");
     set_flag("shrine_lit", true);
     set_state("self", "glowing");
+    set_quest_stage("strange_lights", 2);
     emit("shrine_lit");
 }
 
@@ -935,6 +1102,13 @@ fn goblin_defeated() {
 
 fn slime_defeated() {
     add_var("slimes_defeated", 1);
+    // Tilda's quest counts slimes once it was accepted.
+    if quest_active("pest_control") && quest_stage("pest_control") == 0 {
+        add_var("pest_slimes", 1);
+        if get_var("pest_slimes") >= 5 {
+            set_quest_stage("pest_control", 1);
+        }
+    }
     if random(2) == 0 {
         give_item("coin", 1 + random(3));
     }
@@ -955,6 +1129,8 @@ fn main() {
     character(&out, "hero", &Look { skin: 0xf2c49b, hair: 0x5d3a1a, shirt: 0x2e6fdb, pants: 0x3b3b4f, beard: false, ears: false, ..Default::default() });
     character(&out, "elder", &Look { skin: 0xe8b88a, hair: 0xdedede, shirt: 0x7b4fa0, pants: 0x4a3a5a, beard: true, ears: false, ..Default::default() });
     character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false, ..Default::default() });
+    // Same look as the library's "Merchant (female)".
+    character(&out, "merchant_f", &Look { skin: 0xe8b88a, hair: 0x3a2418, shirt: 0x7a3a8a, pants: 0x4a3a2a, robe: Some(0x6a3a7a), apron: Some(0xe8dcc0), female: true, ..Default::default() });
     character(&out, "goblin", &Look { skin: 0x7cb342, hair: 0x33691e, shirt: 0x5d4037, pants: 0x3e2723, beard: false, ears: true, ..Default::default() });
     overlay(&out, "ov_cap", Gear::Cap);
     overlay(&out, "ov_helmet", Gear::Helmet);
@@ -994,7 +1170,7 @@ fn main() {
     };
     project.save_config().unwrap();
     project.save_defs().unwrap();
-    for map in [village(), house(), forest(), wilds()] {
+    for map in [village(), house(), shop(), forest(), wilds()] {
         project.save_map(&map).unwrap();
         println!("map {:<8} {}x{}", map.name, map.width, map.height);
     }
@@ -1011,11 +1187,16 @@ fn write_starter_pack(project: &Project) {
     let mut b = Bundle::collect(&project.db, &project.root, TS, "rust2d starter assets", &all_assets(&project.db)).unwrap();
     // Library-only extras: more tilesets, props and characters.
     let extra = art::extra::library_extras();
+    // (The example project's own version wins when an id exists in both, e.g. "merchant_f".)
+    let sheets: Vec<String> = b.db.sheets.iter().map(|d| d.id.clone()).collect();
+    let chars: Vec<String> = b.db.characters.iter().map(|d| d.id.clone()).collect();
     b.db.tilesets.extend(extra.db.tilesets);
-    b.db.sheets.extend(extra.db.sheets);
+    b.db.sheets.extend(extra.db.sheets.into_iter().filter(|d| !sheets.contains(&d.id)));
     b.db.props.extend(extra.db.props);
-    b.db.characters.extend(extra.db.characters);
-    b.files.extend(extra.files);
+    b.db.characters.extend(extra.db.characters.into_iter().filter(|d| !chars.contains(&d.id)));
+    for (path, bytes) in extra.files {
+        b.files.entry(path).or_insert(bytes);
+    }
     let scripted = |t: &Trigger| t.actions.iter().any(|a| matches!(a, Action::RunScript { .. }));
     for d in &mut b.db.items {
         d.on_use.retain(|t| !scripted(t));

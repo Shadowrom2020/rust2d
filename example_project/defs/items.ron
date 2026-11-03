@@ -12,6 +12,7 @@
         weapon: None,
         armor: None,
         max_stack: 1,
+        value: 0,
     ),
     (
         id: "bronze_key",
@@ -26,6 +27,7 @@
         weapon: None,
         armor: None,
         max_stack: 5,
+        value: 5,
     ),
     (
         id: "potion",
@@ -76,6 +78,7 @@
         weapon: None,
         armor: None,
         max_stack: 10,
+        value: 15,
     ),
     (
         id: "coin",
@@ -103,6 +106,7 @@
         weapon: None,
         armor: None,
         max_stack: 99,
+        value: 0,
     ),
     (
         id: "apple",
@@ -130,6 +134,7 @@
         weapon: None,
         armor: None,
         max_stack: 20,
+        value: 3,
     ),
     (
         id: "bow",
@@ -159,6 +164,7 @@
         )),
         armor: None,
         max_stack: 1,
+        value: 40,
     ),
     (
         id: "crossbow",
@@ -188,6 +194,7 @@
         )),
         armor: None,
         max_stack: 1,
+        value: 70,
     ),
     (
         id: "arrows",
@@ -202,6 +209,7 @@
         weapon: None,
         armor: None,
         max_stack: 50,
+        value: 1,
     ),
     (
         id: "bolts",
@@ -216,6 +224,7 @@
         weapon: None,
         armor: None,
         max_stack: 30,
+        value: 2,
     ),
     (
         id: "sword",
@@ -237,6 +246,7 @@
         )),
         armor: None,
         max_stack: 1,
+        value: 30,
     ),
     (
         id: "spear",
@@ -258,6 +268,7 @@
         )),
         armor: None,
         max_stack: 1,
+        value: 35,
     ),
     (
         id: "axe",
@@ -279,6 +290,7 @@
         )),
         armor: None,
         max_stack: 1,
+        value: 60,
     ),
     (
         id: "leather_cap",
@@ -298,6 +310,7 @@
             overlay: "ov_cap",
         )),
         max_stack: 1,
+        value: 20,
     ),
     (
         id: "iron_helmet",
@@ -317,6 +330,7 @@
             overlay: "ov_helmet",
         )),
         max_stack: 1,
+        value: 45,
     ),
     (
         id: "leather_armor",
@@ -336,6 +350,7 @@
             overlay: "ov_leather",
         )),
         max_stack: 1,
+        value: 35,
     ),
     (
         id: "chainmail",
@@ -355,6 +370,7 @@
             overlay: "ov_chain",
         )),
         max_stack: 1,
+        value: 90,
     ),
     (
         id: "letter",
@@ -383,5 +399,6 @@
         weapon: None,
         armor: None,
         max_stack: 1,
+        value: 0,
     ),
 ]

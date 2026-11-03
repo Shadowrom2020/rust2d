@@ -718,7 +718,8 @@ impl Editor {
                 let drawn = match e.kind {
                     EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(d.state_index(&e.state).unwrap_or(0)).0, e.frame, pos, col)),
                     EntityKind::Character => db.character(&e.def).is_some_and(|d| {
-                        self.assets.draw_frame(&d.sheet, e.facing as u32 * d.walk_frames.max(1), pos, col)
+                        let sheet = if e.sheet.is_empty() { &d.sheet } else { &e.sheet };
+                        self.assets.draw_frame(sheet, e.facing as u32 * d.walk_frames.max(1), pos, col)
                     }),
                     EntityKind::Item => db.item(&e.def).is_some_and(|d| self.assets.draw_sprite(&d.icon, 0, pos, col)),
                 };

@@ -112,7 +112,7 @@ impl Game {
         self.persist(i);
     }
 
-    fn item_name(&self, id: &str) -> String {
+    pub(super) fn item_name(&self, id: &str) -> String {
         self.project.db.item(id).map_or(id.to_string(), |d| d.name.clone())
     }
 

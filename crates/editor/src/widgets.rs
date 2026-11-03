@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui};
-use rust2d_engine::defs::{ContainerSpec, LockSpec, OnUnlock, PropDef, SpriteRef};
+use rust2d_engine::defs::{ContainerSpec, LockSpec, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::entity::Facing;
 use rust2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, VarOp};
@@ -292,6 +292,101 @@ pub fn container_ui(ui: &mut Ui, id: &str, spec: &mut ContainerSpec, refs: &Refs
     });
 }
 
+/// Merchant editor: currency, sell rate, and the stock with quantities and prices.
+pub fn shop_ui(ui: &mut Ui, id: &str, spec: &mut ShopSpec, refs: &Refs, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database) {
+    ui.horizontal(|ui| {
+        ui.label("Shop title");
+        ui.add(egui::TextEdit::singleline(&mut spec.title).hint_text("(character name)").desired_width(180.0));
+    });
+    ui.horizontal(|ui| {
+        ui.label("Currency");
+        let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+        if let Some(d) = db.item(&spec.currency) {
+            paint_frame(ui, tex, assets, &d.icon.sheet, d.icon.frame, rect);
+        }
+        suggest(ui, &format!("{id}/cur"), &mut spec.currency, &refs.items, 110.0);
+        if db.item(&spec.currency).is_none() {
+            ui.colored_label(Color32::LIGHT_RED, "unknown item");
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Buys the player's items for");
+        ui.add(egui::DragValue::new(&mut spec.sell_rate).range(0..=200).suffix(" %"))
+            .on_hover_text("Percent of the price (or the item's value) paid to the player; 0 = this merchant doesn't buy anything");
+        if spec.sell_rate == 0 {
+            ui.weak("(doesn't buy)");
+        }
+    });
+    ui.checkbox(&mut spec.open_on_talk, "Talking opens the shop")
+        .on_hover_text("Off: only an 'Open shop' action (e.g. after a dialog choice) or open_shop(\"name\") opens it");
+    ui.label("Stock:");
+    let mut remove = None;
+    let mut swap = None;
+    let n = spec.items.len();
+    egui::Grid::new(format!("{id}/stock")).num_columns(6).striped(true).show(ui, |ui| {
+        ui.weak("");
+        ui.weak("Item");
+        ui.weak("Quantity");
+        ui.weak("Price");
+        ui.weak("");
+        ui.weak("");
+        ui.end_row();
+        for (k, e) in spec.items.iter_mut().enumerate() {
+            let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+            let def = db.item(&e.item);
+            if let Some(d) = def {
+                paint_frame(ui, tex, assets, &d.icon.sheet, d.icon.frame, rect);
+            }
+            ui.horizontal(|ui| {
+                suggest(ui, &format!("{id}/i{k}"), &mut e.item, &refs.items, 120.0);
+                if !e.item.is_empty() && def.is_none() {
+                    ui.colored_label(Color32::LIGHT_RED, "unknown");
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add_enabled(!e.unlimited, egui::DragValue::new(&mut e.count).range(0..=9999));
+                ui.checkbox(&mut e.unlimited, "unlimited");
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut e.price).range(0..=999_999));
+                if e.price == 0 {
+                    let v = def.map_or(0, |d| d.value);
+                    ui.weak(if v > 0 { format!("= value {v}") } else { "free!".to_string() })
+                        .on_hover_text("0 uses the item's Value (set in Database > Items)");
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.add_enabled(k > 0, egui::Button::new("^").small()).on_hover_text("Move up").clicked() {
+                    swap = Some(k - 1);
+                }
+                if ui.add_enabled(k + 1 < n, egui::Button::new("v").small()).on_hover_text("Move down").clicked() {
+                    swap = Some(k);
+                }
+            });
+            if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                remove = Some(k);
+            }
+            ui.end_row();
+        }
+    });
+    if let Some(k) = swap {
+        spec.items.swap(k, k + 1);
+    }
+    if let Some(k) = remove {
+        spec.items.remove(k);
+    }
+    ui.horizontal(|ui| {
+        if ui.button("+ Item").clicked() {
+            let first = refs.items.iter().find(|i| **i != spec.currency).cloned().unwrap_or_default();
+            spec.items.push(ShopEntry::new(&first, 1, 0));
+        }
+        let dup = spec.items.iter().enumerate().any(|(k, e)| spec.items[..k].iter().any(|o| o.item == e.item));
+        if dup {
+            ui.colored_label(Color32::LIGHT_RED, "an item is listed twice (only the first price counts)");
+        }
+    });
+}
+
 pub fn sprite_picker(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Textures, assets: &Assets) {
     let mut sheets: Vec<&String> = assets.sheets.keys().collect();
     sheets.sort();
@@ -389,6 +484,20 @@ pub struct Refs {
     pub characters: Vec<String>,
     /// All prop state names (for "Set prop state" / "Prop state").
     pub states: Vec<String>,
+    /// Quest ids with their number of stages.
+    pub quests: Vec<String>,
+    pub quest_stages: HashMap<String, Vec<String>>,
+}
+
+/// Stage number with the stage's objective text as a dropdown.
+fn quest_stage_field(ui: &mut Ui, id: &str, quest: &str, stage: &mut u32, refs: &Refs) {
+    let stages = refs.quest_stages.get(quest).cloned().unwrap_or_default();
+    let text = |k: u32| stages.get(k as usize).map_or(format!("stage {k}"), |s| format!("{k}: {}", s.chars().take(40).collect::<String>()));
+    egui::ComboBox::from_id_salt(id).width(200.0).selected_text(text(*stage)).show_ui(ui, |ui| {
+        for k in 0..stages.len().max(*stage as usize + 1) as u32 {
+            ui.selectable_value(stage, k, text(k));
+        }
+    });
 }
 
 /// Single-line text field with a dropdown of suggestions.
@@ -528,6 +637,19 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                     ui.label("script");
                     suggest(ui, &id, function, &refs.functions, 110.0);
                     ui.label("()");
+                }
+                Cond::Quest { quest, check, stage } => {
+                    ui.label("quest");
+                    suggest(ui, &format!("{id}/q"), quest, &refs.quests, 100.0);
+                    ui.label("is");
+                    egui::ComboBox::from_id_salt(format!("{id}/qc")).selected_text(check.label()).show_ui(ui, |ui| {
+                        for c in rust2d_engine::quest::QuestCheck::ALL {
+                            ui.selectable_value(check, c, c.label());
+                        }
+                    });
+                    if check.uses_stage() {
+                        quest_stage_field(ui, &format!("{id}/qs"), quest, stage, refs);
+                    }
                 }
                 Cond::PropState { target, state } => {
                     ui.label("prop");
@@ -672,6 +794,26 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
         Action::SetState { target, state } => {
             target_field(ui, id, target, refs);
             labeled(ui, "state", |ui| suggest(ui, &format!("{id}/state"), state, &refs.states, 100.0));
+        }
+        Action::Quest { quest, op, stage } => {
+            labeled(ui, "quest", |ui| suggest(ui, &format!("{id}/q"), quest, &refs.quests, 120.0));
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt(format!("{id}/qop")).selected_text(op.label()).show_ui(ui, |ui| {
+                    for o in rust2d_engine::quest::QuestOp::ALL {
+                        ui.selectable_value(op, o, o.label());
+                    }
+                });
+                if *op == rust2d_engine::quest::QuestOp::SetStage {
+                    quest_stage_field(ui, &format!("{id}/qs"), quest, stage, refs);
+                }
+            });
+            if !quest.is_empty() && !refs.quests.contains(quest) {
+                ui.colored_label(Color32::LIGHT_RED, "unknown quest (Database → Quests)");
+            }
+        }
+        Action::OpenShop { target } => {
+            target_field(ui, id, target, refs);
+            ui.weak("(a merchant character)");
         }
         Action::SetFrame { target, frame } => {
             target_field(ui, id, target, refs);

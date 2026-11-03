@@ -1,0 +1,501 @@
+//! Merchant trade window: the merchant's stock on the left, the player's items on the right.
+//!
+//! Click a row to select it, click its price button (or double-click the row, or press
+//! Enter / E) to buy or sell one; hold Shift for up to ten. Up/Down select, Left/Right or
+//! Tab switch sides, mouse wheel scrolls, Esc closes.
+
+use macroquad::prelude::*;
+
+use super::{input, ui::panel, Game};
+use crate::defs::{ShopEntry, ShopSpec};
+use crate::render::wrap_text;
+
+const ROW: f32 = 44.0;
+const ROWS: usize = 8;
+const COL_W: f32 = 380.0;
+const PAD: f32 = 14.0;
+const TITLE_H: f32 = 44.0;
+const FOOT_H: f32 = 96.0;
+const BTN_W: f32 = 92.0;
+const DOUBLE_CLICK: f64 = 0.35;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ShopSide {
+    Merchant,
+    Player,
+}
+
+impl ShopSide {
+    fn idx(self) -> usize {
+        self as usize
+    }
+    fn other(self) -> ShopSide {
+        match self {
+            ShopSide::Merchant => ShopSide::Player,
+            ShopSide::Player => ShopSide::Merchant,
+        }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct ShopUi {
+    /// Entity uid of the merchant being traded with.
+    open: Option<u32>,
+    /// Merchant to open once the current event sequence has finished.
+    pub pending: Option<u32>,
+    side: Option<ShopSide>,
+    sel: [usize; 2],
+    scroll: [usize; 2],
+    last_click: Option<(ShopSide, usize, f64)>,
+    /// Result of the last trade (shown in the footer) and when it happened.
+    msg: Option<(String, bool, f64)>,
+}
+
+impl ShopUi {
+    pub fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+    pub fn close(&mut self) {
+        self.open = None;
+        self.pending = None;
+    }
+}
+
+/// One line in either list.
+struct Row {
+    item: String,
+    /// Stock / owned count (None = unlimited).
+    count: Option<u32>,
+    /// Price per piece (None = the merchant won't buy it).
+    price: Option<u32>,
+}
+
+struct Layout {
+    panel: Rect,
+    lists: [Rect; 2],
+    close: Rect,
+    foot: Rect,
+}
+
+fn layout() -> Layout {
+    let (sw, sh) = (screen_width(), screen_height());
+    let w = 2.0 * COL_W + 3.0 * PAD;
+    let h = TITLE_H + ROWS as f32 * ROW + FOOT_H + 3.0 * PAD;
+    let x = ((sw - w) / 2.0).max(4.0).round();
+    let y = ((sh - h) / 2.0).max(4.0).round();
+    let list = |k: f32| Rect::new(x + PAD + k * (COL_W + PAD), y + TITLE_H + PAD, COL_W, ROWS as f32 * ROW);
+    Layout {
+        panel: Rect::new(x, y, w, h),
+        lists: [list(0.0), list(1.0)],
+        close: Rect::new(x + w - 30.0, y + 8.0, 22.0, 22.0),
+        foot: Rect::new(x + PAD, y + TITLE_H + 2.0 * PAD + ROWS as f32 * ROW, w - 2.0 * PAD, FOOT_H),
+    }
+}
+
+fn row_rect(list: Rect, k: usize) -> Rect {
+    Rect::new(list.x, list.y + k as f32 * ROW, list.w, ROW - 4.0)
+}
+
+fn button_rect(row: Rect) -> Rect {
+    Rect::new(row.x + row.w - BTN_W - 6.0, row.y + 6.0, BTN_W, row.h - 12.0)
+}
+
+impl Game {
+    pub(super) fn shop_open(&self) -> bool {
+        self.shop.is_open()
+    }
+
+    /// The merchant spec of a character on the current map.
+    fn shop_spec(&self, uid: u32) -> Option<ShopSpec> {
+        let e = self.loaded.map.entity(uid)?;
+        self.project.db.shop_of(e).cloned()
+    }
+
+    /// Current stock of a merchant (created from its spec the first time).
+    fn shop_stock(&mut self, uid: u32) -> Option<&mut Vec<ShopEntry>> {
+        let map = self.loaded.map.name.clone();
+        if self.world.shops.get(&map).is_none_or(|m| !m.contains_key(&uid)) {
+            let spec = self.shop_spec(uid)?;
+            let stock = spec.items.into_iter().filter(|e| !e.item.is_empty()).collect();
+            self.world.shops.entry(map.clone()).or_default().insert(uid, stock);
+        }
+        self.world.shops.get_mut(&map)?.get_mut(&uid)
+    }
+
+    /// Queues the trade window of a merchant (opens once the current events have finished).
+    /// `talk`: opened by talking to the character (respects `open_on_talk`).
+    pub(super) fn try_open_shop(&mut self, i: usize, talk: bool) -> bool {
+        let uid = self.loaded.entities[i].uid;
+        match self.shop_spec(uid) {
+            Some(spec) if !talk || spec.open_on_talk => {
+                self.shop_stock(uid);
+                self.shop.pending = Some(uid);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn merchant_name(&self, uid: u32) -> String {
+        let def = self.loaded.map.entity(uid).map(|e| e.def.clone()).unwrap_or_default();
+        self.project.db.character(&def).map_or("Merchant".into(), |d| d.name.clone())
+    }
+
+    /// Window title: the shop's title or the merchant's name.
+    fn shop_title(&self, uid: u32) -> String {
+        match self.shop_spec(uid) {
+            Some(s) if !s.title.is_empty() => s.title,
+            _ => self.merchant_name(uid),
+        }
+    }
+
+    fn shop_msg(&mut self, text: String, ok: bool) {
+        self.shop.msg = Some((text, ok, get_time()));
+    }
+
+    fn shop_rows(&self, side: ShopSide) -> Vec<Row> {
+        let Some(uid) = self.shop.open else { return Vec::new() };
+        let Some(spec) = self.shop_spec(uid) else { return Vec::new() };
+        let empty = Vec::new();
+        let stock = self.world.shops.get(&self.loaded.map.name).and_then(|m| m.get(&uid)).unwrap_or(&empty);
+        let db = &self.project.db;
+        match side {
+            ShopSide::Merchant => stock
+                .iter()
+                .filter(|e| e.available())
+                .map(|e| Row {
+                    item: e.item.clone(),
+                    count: (!e.unlimited).then_some(e.count),
+                    price: Some(ShopSpec::buy_price(stock, &e.item, db)),
+                })
+                .collect(),
+            ShopSide::Player => {
+                let mut rows: Vec<Row> = Vec::new();
+                for s in self.world.inventory.slots.iter().flatten() {
+                    if s.item == spec.currency {
+                        continue;
+                    }
+                    match rows.iter_mut().find(|r| r.item == s.item) {
+                        Some(r) => r.count = Some(r.count.unwrap_or(0) + s.count),
+                        None => rows.push(Row { item: s.item.clone(), count: Some(s.count), price: spec.sell_price(stock, &s.item, db) }),
+                    }
+                }
+                rows
+            }
+        }
+    }
+
+    fn money(&self) -> (String, u32) {
+        let cur = self.shop.open.and_then(|u| self.shop_spec(u)).map_or_else(|| "coin".to_string(), |s| s.currency);
+        let n = self.world.item_count(&cur);
+        (cur, n)
+    }
+
+    /// Buys up to `n` of merchant row `k`. Returns how many were bought.
+    fn buy(&mut self, k: usize, n: u32) -> u32 {
+        let Some(uid) = self.shop.open else { return 0 };
+        let Some(row) = self.shop_rows(ShopSide::Merchant).into_iter().nth(k) else { return 0 };
+        let (cur, mut money) = self.money();
+        let price = row.price.unwrap_or(0);
+        let mut bought = 0;
+        while bought < n && row.count.is_none_or(|c| bought < c) {
+            if money < price {
+                if bought == 0 {
+                    self.shop_msg(format!("Not enough {}.", self.item_name(&cur).to_lowercase()), false);
+                }
+                break;
+            }
+            if self.world.give_item(&row.item, 1) > 0 {
+                if bought == 0 {
+                    self.shop_msg("Your inventory is full.".into(), false);
+                }
+                break;
+            }
+            self.world.take_item(&cur, price);
+            money -= price;
+            bought += 1;
+        }
+        if bought > 0 {
+            if let Some(e) = self.shop_stock(uid).and_then(|s| s.iter_mut().find(|e| e.item == row.item)) {
+                if !e.unlimited {
+                    e.count -= bought.min(e.count);
+                }
+            }
+            self.audio.play(&self.project.config.sfx.pickup);
+            let name = self.item_name(&row.item);
+            self.shop_msg(if bought > 1 { format!("Bought {bought} {name}") } else { format!("Bought {name}") }, true);
+        }
+        bought
+    }
+
+    /// Sells up to `n` of player row `k`. Returns how many were sold.
+    fn sell(&mut self, k: usize, n: u32) -> u32 {
+        let Some(uid) = self.shop.open else { return 0 };
+        let Some(row) = self.shop_rows(ShopSide::Player).into_iter().nth(k) else { return 0 };
+        let Some(price) = row.price else {
+            self.shop_msg(format!("{} isn't interested in that.", self.merchant_name(uid)), false);
+            return 0;
+        };
+        let (cur, _) = self.money();
+        let base = match self.shop_stock(uid) {
+            Some(s) => s.clone(),
+            None => return 0,
+        };
+        let base = ShopSpec::buy_price(&base, &row.item, &self.project.db);
+        let mut sold = 0;
+        while sold < n && sold < row.count.unwrap_or(0) {
+            if self.world.take_item(&row.item, 1) == 0 {
+                break;
+            }
+            // Payment must fit (normally the freed slot makes room).
+            let left = self.world.give_item(&cur, price);
+            if left > 0 {
+                self.world.take_item(&cur, price - left);
+                self.world.give_item(&row.item, 1);
+                if sold == 0 {
+                    self.shop_msg("No room for the payment.".into(), false);
+                }
+                break;
+            }
+            sold += 1;
+        }
+        if sold > 0 {
+            // The merchant now sells it (at their price, or the item's value).
+            if let Some(stock) = self.shop_stock(uid) {
+                match stock.iter_mut().find(|e| e.item == row.item) {
+                    Some(e) if e.unlimited => {}
+                    Some(e) => e.count += sold,
+                    None => stock.push(ShopEntry::new(&row.item, sold, if base > 0 { base } else { 0 })),
+                }
+            }
+            self.audio.play(&self.project.config.sfx.pickup);
+            let name = self.item_name(&row.item);
+            let total = sold * price;
+            self.shop_msg(if sold > 1 { format!("Sold {sold} {name} for {total}") } else { format!("Sold {name} for {total}") }, true);
+        }
+        sold
+    }
+
+    fn trade(&mut self, side: ShopSide, k: usize) {
+        let n = if input::down(KeyCode::LeftShift) || input::down(KeyCode::RightShift) { 10 } else { 1 };
+        match side {
+            ShopSide::Merchant => self.buy(k, n),
+            ShopSide::Player => self.sell(k, n),
+        };
+        self.clamp_selection();
+    }
+
+    fn clamp_selection(&mut self) {
+        for side in [ShopSide::Merchant, ShopSide::Player] {
+            let n = self.shop_rows(side).len();
+            let s = side.idx();
+            self.shop.sel[s] = self.shop.sel[s].min(n.saturating_sub(1));
+            self.shop.scroll[s] = self.shop.scroll[s].min(n.saturating_sub(ROWS));
+            if self.shop.sel[s] < self.shop.scroll[s] {
+                self.shop.scroll[s] = self.shop.sel[s];
+            } else if self.shop.sel[s] >= self.shop.scroll[s] + ROWS {
+                self.shop.scroll[s] = self.shop.sel[s] + 1 - ROWS;
+            }
+        }
+    }
+
+    /// Open merchant and its stock (for automated play-throughs).
+    pub(super) fn shop_status(&self) -> Option<String> {
+        let uid = self.shop.open?;
+        let stock = self.world.shops.get(&self.loaded.map.name)?.get(&uid)?;
+        let list: Vec<String> = stock.iter().map(|e| if e.unlimited { format!("{}:inf", e.item) } else { format!("{}:{}", e.item, e.count) }).collect();
+        let msg = self.shop.msg.as_ref().map_or("", |m| m.0.as_str());
+        Some(format!("{} [{}] msg={msg:?}", self.shop_title(uid), list.join(" ")))
+    }
+
+    /// Screen position of a row's trade button (for automated play-throughs):
+    /// side "buy" or "sell", `k` = row index.
+    pub fn shop_button_pos(&self, side: &str, k: usize) -> Option<Vec2> {
+        let side = if side == "sell" { ShopSide::Player } else { ShopSide::Merchant };
+        let l = layout();
+        let vis = k.checked_sub(self.shop.scroll[side.idx()]).filter(|v| *v < ROWS)?;
+        (k < self.shop_rows(side).len()).then(|| button_rect(row_rect(l.lists[side.idx()], vis)).center())
+    }
+
+    /// Handles the trade window. Returns (key consumed, mouse consumed).
+    pub(super) fn update_shop_ui(&mut self, allow: bool) -> (bool, bool) {
+        if !allow {
+            return (false, false);
+        }
+        if let Some(uid) = self.shop.pending.take() {
+            self.inv.close();
+            self.shop.open = Some(uid);
+            self.shop.side = Some(ShopSide::Merchant);
+            self.shop.sel = [0, 0];
+            self.shop.scroll = [0, 0];
+            self.shop.msg = None;
+            self.audio.play(&self.project.config.sfx.open_container);
+        }
+        if !self.shop.is_open() {
+            return (false, false);
+        }
+        let l = layout();
+        let m = input::mouse_pos();
+        if input::any_pressed(&[KeyCode::Escape, KeyCode::I]) || (input::mouse_pressed(MouseButton::Left) && l.close.contains(m)) {
+            self.shop.close();
+            return (true, true);
+        }
+        let side = self.shop.side.unwrap_or(ShopSide::Merchant);
+        if input::any_pressed(&[KeyCode::Tab, KeyCode::Left, KeyCode::Right, KeyCode::A, KeyCode::D]) {
+            self.shop.side = Some(side.other());
+        }
+        let side = self.shop.side.unwrap_or(ShopSide::Merchant);
+        let s = side.idx();
+        if input::any_pressed(&[KeyCode::Down, KeyCode::S]) {
+            self.shop.sel[s] += 1;
+        }
+        if input::any_pressed(&[KeyCode::Up, KeyCode::W]) {
+            self.shop.sel[s] = self.shop.sel[s].saturating_sub(1);
+        }
+        self.clamp_selection();
+        if input::any_pressed(&[KeyCode::Enter, KeyCode::E, KeyCode::Space]) && !self.shop_rows(side).is_empty() {
+            self.trade(side, self.shop.sel[s]);
+        }
+
+        // ---- mouse
+        let wheel = mouse_wheel().1;
+        if wheel != 0.0 {
+            for side in [ShopSide::Merchant, ShopSide::Player] {
+                if l.lists[side.idx()].contains(m) {
+                    let n = self.shop_rows(side).len();
+                    let sc = &mut self.shop.scroll[side.idx()];
+                    *sc = if wheel > 0.0 { sc.saturating_sub(1) } else { (*sc + 1).min(n.saturating_sub(ROWS)) };
+                }
+            }
+        }
+        if input::mouse_pressed(MouseButton::Left) {
+            for side in [ShopSide::Merchant, ShopSide::Player] {
+                let list = l.lists[side.idx()];
+                let n = self.shop_rows(side).len();
+                for vis in 0..ROWS {
+                    let k = self.shop.scroll[side.idx()] + vis;
+                    let r = row_rect(list, vis);
+                    if k >= n || !r.contains(m) {
+                        continue;
+                    }
+                    self.shop.side = Some(side);
+                    self.shop.sel[side.idx()] = k;
+                    let now = get_time();
+                    let double = self.shop.last_click.is_some_and(|(s, i, t)| s == side && i == k && now - t < DOUBLE_CLICK);
+                    self.shop.last_click = Some((side, k, now));
+                    if button_rect(r).contains(m) || double {
+                        self.shop.last_click = None;
+                        self.trade(side, k);
+                    }
+                }
+            }
+        }
+        (true, l.panel.contains(m) || input::mouse_pressed(MouseButton::Left))
+    }
+
+    pub(super) fn draw_shop_ui(&self) {
+        let Some(uid) = self.shop.open else { return };
+        let l = layout();
+        let m = input::mouse_pos();
+        let p = l.panel;
+        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
+        panel(p.x, p.y, p.w, p.h);
+        let titles = [self.shop_title(uid), "Your items".to_string()];
+        let (cur, money) = self.money();
+        let side = self.shop.side.unwrap_or(ShopSide::Merchant);
+        for (s, list) in l.lists.iter().enumerate() {
+            let this = if s == 0 { ShopSide::Merchant } else { ShopSide::Player };
+            let title_col = if this == side { GOLD } else { Color::new(0.85, 0.8, 0.6, 1.0) };
+            draw_text(&titles[s], list.x, p.y + 32.0, 28.0, title_col);
+            draw_rectangle(list.x, list.y, list.w, list.h, Color::new(0.0, 0.0, 0.0, 0.25));
+            let rows = self.shop_rows(this);
+            if rows.is_empty() {
+                let msg = if this == ShopSide::Merchant { "Sold out." } else { "Nothing to sell." };
+                draw_text(msg, list.x + 12.0, list.y + 28.0, 22.0, GRAY);
+            }
+            let scroll = self.shop.scroll[s];
+            for (vis, row) in rows.iter().skip(scroll).take(ROWS).enumerate() {
+                let k = scroll + vis;
+                let r = row_rect(*list, vis);
+                let selected = this == side && self.shop.sel[s] == k;
+                let hover = r.contains(m);
+                let bg = if selected {
+                    Color::new(0.85, 0.7, 0.3, 0.22)
+                } else if hover {
+                    Color::new(1.0, 1.0, 1.0, 0.1)
+                } else {
+                    Color::new(0.0, 0.0, 0.0, 0.25)
+                };
+                draw_rectangle(r.x, r.y, r.w, r.h, bg);
+                if selected {
+                    draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, GOLD);
+                }
+                if let Some(d) = self.project.db.item(&row.item) {
+                    self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, Rect::new(r.x + 4.0, r.y + 4.0, 32.0, 32.0), WHITE);
+                }
+                let count = match row.count {
+                    None => "in stock".to_string(),
+                    Some(c) => format!("x{c}"),
+                };
+                draw_text(self.item_name(&row.item), r.x + 44.0, r.y + 18.0, 21.0, WHITE);
+                draw_text(&count, r.x + 44.0, r.y + 36.0, 17.0, LIGHTGRAY);
+                // Price button.
+                let b = button_rect(r);
+                let (label, ok) = match (this, row.price) {
+                    (ShopSide::Merchant, Some(pr)) => (format!("Buy {pr}"), money >= pr),
+                    (ShopSide::Player, Some(pr)) => (format!("Sell {pr}"), true),
+                    (_, None) => ("-".to_string(), false),
+                };
+                let fill = if !ok {
+                    Color::new(0.25, 0.1, 0.1, 0.8)
+                } else if b.contains(m) {
+                    Color::new(0.45, 0.35, 0.12, 1.0)
+                } else {
+                    Color::new(0.3, 0.24, 0.1, 0.9)
+                };
+                draw_rectangle(b.x, b.y, b.w, b.h, fill);
+                draw_rectangle_lines(b.x, b.y, b.w, b.h, 1.0, Color::new(0.85, 0.8, 0.6, 0.8));
+                let tw = measure_text(&label, None, 18, 1.0).width;
+                draw_text(&label, b.x + (b.w - tw) / 2.0, b.y + b.h / 2.0 + 6.0, 18.0, if ok { WHITE } else { Color::new(0.9, 0.5, 0.5, 1.0) });
+            }
+            // Scroll hints.
+            if scroll > 0 {
+                draw_text("more above", list.x + list.w - 80.0, list.y - 2.0, 14.0, LIGHTGRAY);
+            }
+            if rows.len() > scroll + ROWS {
+                draw_text("more below", list.x + list.w - 80.0, list.y + list.h + 12.0, 14.0, LIGHTGRAY);
+            }
+        }
+        // Close button.
+        let c = l.close;
+        draw_rectangle_lines(c.x, c.y, c.w, c.h, 1.5, Color::new(0.85, 0.8, 0.6, 1.0));
+        draw_line(c.x + 6.0, c.y + 6.0, c.x + c.w - 6.0, c.y + c.h - 6.0, 2.0, WHITE);
+        draw_line(c.x + c.w - 6.0, c.y + 6.0, c.x + 6.0, c.y + c.h - 6.0, 2.0, WHITE);
+
+        // Footer: money, details of the selected item, help.
+        let f = l.foot;
+        draw_rectangle(f.x, f.y, f.w, f.h, Color::new(0.0, 0.0, 0.0, 0.25));
+        if let Some(d) = self.project.db.item(&cur) {
+            self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, Rect::new(f.x + f.w - 150.0, f.y + 8.0, 28.0, 28.0), WHITE);
+        }
+        draw_text(format!("{money}"), f.x + f.w - 116.0, f.y + 30.0, 26.0, GOLD);
+        let sel = self.shop_rows(side).into_iter().nth(self.shop.sel[side.idx()]);
+        if let Some(d) = sel.as_ref().and_then(|r| self.project.db.item(&r.item)) {
+            draw_text(&d.name, f.x + 10.0, f.y + 24.0, 22.0, GOLD);
+            for (k, line) in wrap_text(&d.description, 18, f.w - 190.0).iter().take(2).enumerate() {
+                draw_text(line, f.x + 10.0, f.y + 46.0 + k as f32 * 18.0, 18.0, LIGHTGRAY);
+            }
+        }
+        if let Some((text, ok, t)) = &self.shop.msg {
+            let age = (get_time() - t) as f32;
+            if age < 4.0 {
+                let a = (4.0 - age).min(1.0);
+                let c = if *ok { Color::new(0.6, 0.95, 0.6, a) } else { Color::new(1.0, 0.55, 0.5, a) };
+                let tw = measure_text(text, None, 20, 1.0).width;
+                draw_text(text, f.x + f.w - tw - 10.0, f.y + 62.0, 20.0, c);
+            }
+        }
+        let hint = "Click price / Enter: trade one   Shift: ten   Tab: switch side   Esc: close";
+        draw_text(hint, f.x + 10.0, f.y + f.h - 8.0, 16.0, GRAY);
+    }
+}

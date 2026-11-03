@@ -96,6 +96,12 @@ pub struct EntityInstance {
     /// Overrides the prop definition's key lock.
     #[serde(default)]
     pub lock: Option<crate::defs::LockSpec>,
+    /// Characters: sprite sheet ("model") used instead of the definition's ("" = definition's).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sheet: String,
+    /// Overrides the character definition's merchant spec (stock, prices).
+    #[serde(default)]
+    pub shop: Option<crate::defs::ShopSpec>,
 }
 
 fn yes() -> bool {
@@ -122,6 +128,8 @@ impl EntityInstance {
             triggers: Vec::new(),
             container: None,
             lock: None,
+            shop: None,
+            sheet: String::new(),
         }
     }
 

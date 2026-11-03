@@ -169,6 +169,7 @@ impl Bundle {
             items: db.items.iter().filter(|d| has(RefKind::Item, &d.id)).cloned().collect(),
             props: db.props.iter().filter(|d| has(RefKind::Prop, &d.id)).cloned().collect(),
             characters: db.characters.iter().filter(|d| has(RefKind::Character, &d.id)).cloned().collect(),
+            quests: Vec::new(),
         };
         let mut files = BTreeMap::new();
         let paths = out.tilesets.iter().map(|d| &d.image).chain(out.sheets.iter().map(|d| &d.image)).chain(out.sounds.iter().map(|d| &d.file));
@@ -236,7 +237,7 @@ impl Bundle {
             f.read_to_end(&mut data)?;
             files.insert(rel, data);
         }
-        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, characters: m.characters };
+        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters };
         let b = Bundle { name: m.name, tile_size: m.tile_size, db, files };
         for rel in b.db.tilesets.iter().map(|d| &d.image).chain(b.db.sheets.iter().map(|d| &d.image)).chain(b.db.sounds.iter().map(|d| &d.file)) {
             if !rel.is_empty() && !b.files.contains_key(rel) {
@@ -557,6 +558,7 @@ mod tests {
             weapon: None,
             armor: None,
             max_stack: 99,
+            value: 0,
         };
         let mut bow = item("bow");
         bow.weapon = Some(Weapon::ranged(1, 0.5, Ranged { projectile: SpriteRef::new("items", 1), speed: 100.0, range: 6.0, ammo: "arrows".into() }));

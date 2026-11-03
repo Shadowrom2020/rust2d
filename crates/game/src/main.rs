@@ -116,11 +116,19 @@ async fn main() {
         (_, Ok(path)) => Some(Autoplay::parse(&format!("wait 1; shot {path}; quit"))),
         _ => None,
     };
+    // The window's close button asks whether to save first (see Game::request_close).
+    prevent_quit();
     loop {
         if let Some(a) = &mut auto {
             if !a.step(&game) {
                 break;
             }
+            if std::mem::take(&mut a.close) {
+                game.request_close();
+            }
+        }
+        if is_quit_requested() {
+            game.request_close();
         }
         game.frame();
         if game.wants_quit() {
@@ -142,6 +150,8 @@ struct Autoplay {
     shot: Option<String>,
     mouse: Option<Vec2>,
     mouse_frames: std::collections::VecDeque<rust2d_engine::runtime::input::MouseInject>,
+    /// Simulates the window's close button.
+    close: bool,
 }
 
 impl Autoplay {
@@ -151,7 +161,7 @@ impl Autoplay {
             .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .filter(|c| !c.is_empty())
             .collect();
-        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default() }
+        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false }
     }
 
     /// Advances the script; returns false to quit.
@@ -217,6 +227,15 @@ impl Autoplay {
                     }
                     return true;
                 }
+                // shop buy|sell ROW [shift]: click the trade button of a row in the open shop
+                "shop" => {
+                    let Some(p) = game.shop_button_pos(arg(1), secs(2) as usize) else {
+                        println!("[autoplay] shop: no {} row {}", arg(1), arg(2));
+                        continue;
+                    };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
                 // slotdrag player|chest IDX player|chest IDX
                 "slotdrag" => {
                     let (Some(a), Some(b)) = (game.slot_screen_pos(arg(1), secs(2) as usize), game.slot_screen_pos(arg(3), secs(4) as usize)) else { continue };
@@ -244,6 +263,11 @@ impl Autoplay {
                 "status" => println!("[autoplay] {} order={}", game.status(), game.order_debug()),
                 "spawners" => println!("[autoplay] spawners: {}", game.spawner_status()),
                 "quit" => return false,
+                // close: as if the window's close button was clicked
+                "close" => {
+                    self.close = true;
+                    return true;
+                }
                 other => eprintln!("[autoplay] unknown command '{other}'"),
             }
         }

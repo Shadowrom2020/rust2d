@@ -161,6 +161,8 @@ pub enum Cond {
     PlayerHp { op: CmpOp, value: i64 },
     /// A prop is in the given state.
     PropState { target: TargetName, state: String },
+    /// A quest's status / stage (`stage` is used by the stage checks).
+    Quest { quest: String, check: crate::quest::QuestCheck, stage: u32 },
 }
 
 impl Cond {
@@ -172,6 +174,7 @@ impl Cond {
             Cond::Script { .. } => "Script",
             Cond::PlayerHp { .. } => "Player HP",
             Cond::PropState { .. } => "Prop state",
+            Cond::Quest { .. } => "Quest",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -182,6 +185,7 @@ impl Cond {
             Cond::Script { function: String::new() },
             Cond::PlayerHp { op: CmpOp::Lt, value: 3 },
             Cond::PropState { target: "self".into(), state: String::new() },
+            Cond::Quest { quest: String::new(), check: crate::quest::QuestCheck::Active, stage: 0 },
         ]
     }
 }
@@ -207,6 +211,7 @@ impl Condition {
             Cond::PlayerHp { op, value } => op.apply(world.player_hp.unwrap_or(0) as i64, *value),
             // Needs the running game (see `conditions_met`).
             Cond::PropState { .. } => false,
+            Cond::Quest { quest, check, stage } => world.check_quest(quest, *check, *stage),
         };
         v != self.negate
     }
@@ -263,6 +268,10 @@ pub enum Action {
     SetLocked { target: TargetName, locked: bool },
     /// Switches a prop to one of its states (sprite and whether it blocks movement).
     SetState { target: TargetName, state: String },
+    /// Opens the trade window of a merchant character.
+    OpenShop { target: TargetName },
+    /// Starts / advances / completes / fails a quest (`stage` is used by `SetStage`).
+    Quest { quest: String, op: crate::quest::QuestOp, stage: u32 },
 }
 
 impl Action {
@@ -288,6 +297,8 @@ impl Action {
             Action::Heal { .. } => "Heal player",
             Action::SetLocked { .. } => "Set locked",
             Action::SetState { .. } => "Set prop state",
+            Action::OpenShop { .. } => "Open shop",
+            Action::Quest { .. } => "Quest",
         }
     }
 
@@ -314,6 +325,8 @@ impl Action {
             Action::Heal { amount: 1 },
             Action::SetLocked { target: "self".into(), locked: false },
             Action::SetState { target: "self".into(), state: String::new() },
+            Action::OpenShop { target: "self".into() },
+            Action::Quest { quest: s(), op: crate::quest::QuestOp::Start, stage: 0 },
         ]
     }
 }

@@ -8,7 +8,7 @@ use macroquad::prelude::{get_time, Vec2};
 use rust2d_engine::entity::{EntityInstance, EntityKind, Facing};
 use rust2d_engine::map::{Edge, EdgeLink, Map, Respawn, Tile, Zone, ZoneKind, MAX_MAP_SIZE};
 use rust2d_engine::audio::Audio;
-use rust2d_engine::defs::{ContainerSpec, LockSpec, SpriteRef};
+use rust2d_engine::defs::{ContainerSpec, LockSpec, ShopSpec, SpriteRef};
 
 /// Definitions remembered in the entity palette's "Recent" row.
 const RECENT_MAX: usize = 10;
@@ -142,6 +142,10 @@ pub struct Editor {
     /// Transition tool draft.
     pub link: Option<crate::maps::LinkDraft>,
     pub quick: crate::maps::QuickSwitch,
+    /// Open character model chooser.
+    pub model: Option<crate::models::ModelChooser>,
+    /// Debug: screen points to report the egui layer under (script command `probe X Y`).
+    pub probe: Vec<egui::Pos2>,
     /// Camera (center, zoom) per map, restored when switching back.
     pub map_cams: HashMap<String, (Vec2, f32)>,
     /// Last click on a portal (uid, time) to detect double-clicks.
@@ -252,6 +256,8 @@ impl Editor {
         Editor {
             link: None,
             quick: Default::default(),
+            model: None,
+            probe: Vec::new(),
             map_cams: HashMap::new(),
             last_portal_click: None,
             project_open,
@@ -475,6 +481,8 @@ impl Editor {
                 v.dedup();
                 v
             },
+            quests: self.project.db.quests.iter().map(|q| q.id.clone()).collect(),
+            quest_stages: self.project.db.quests.iter().map(|q| (q.id.clone(), q.stages.clone())).collect(),
         };
     }
 
@@ -934,6 +942,11 @@ impl Editor {
     // ------------------------------------------------------------ egui
 
     pub fn ui(&mut self, ctx: &egui::Context) {
+        for p in std::mem::take(&mut self.probe) {
+            let layer = ctx.layer_id_at(p);
+            let ppp = ctx.pixels_per_point();
+            println!("[probe] {p:?}: layer {layer:?} (pixels per point {ppp})");
+        }
         self.poll_file_dialog();
         if self.tex_dirty {
             self.tex = Textures::build(ctx, &self.assets);
@@ -967,6 +980,7 @@ impl Editor {
         }
         self.wizard_window(ctx);
         self.map_windows(ctx);
+        self.model_window(ctx);
         self.handle_transition_request();
         if let Some((m, zone)) = GOTO.with(|g| g.borrow_mut().take()) {
             self.goto_map(&m, Some(&zone));
@@ -1742,6 +1756,34 @@ impl Editor {
                     ui.label("Active");
                     ui.checkbox(&mut e.active, "visible at start");
                     ui.end_row();
+                    if e.kind == EntityKind::Character {
+                        ui.label("Model");
+                        ui.horizontal(|ui| {
+                            let def_sheet = db.character(&e.def).map(|d| d.sheet.clone()).unwrap_or_default();
+                            let sheet = if e.sheet.is_empty() { def_sheet.clone() } else { e.sheet.clone() };
+                            let frames = db.character(&e.def).map_or(4, |d| d.walk_frames.max(1));
+                            let thumb = widgets::frame_thumb(ui, &self.tex, &self.assets, &sheet, e.facing as u32 * frames, 40.0, false);
+                            if thumb.clicked() {
+                                crate::models::request_model(crate::models::ModelTarget::Instance(e.uid));
+                            }
+                            ui.vertical(|ui| {
+                                if e.sheet.is_empty() {
+                                    ui.weak(format!("{sheet} (definition's)"));
+                                } else {
+                                    ui.label(format!("{sheet} (own)"));
+                                }
+                                ui.horizontal(|ui| {
+                                    if ui.button("Change…").on_hover_text("Choose another look for this NPC only — from the project or the asset library").clicked() {
+                                        crate::models::request_model(crate::models::ModelTarget::Instance(e.uid));
+                                    }
+                                    if !e.sheet.is_empty() && ui.button("Reset").on_hover_text("Use the definition's model again").clicked() {
+                                        e.sheet.clear();
+                                    }
+                                });
+                            });
+                        });
+                        ui.end_row();
+                    }
                     if let Some(d) = (e.kind == EntityKind::Prop).then(|| db.prop(&e.def)).flatten() {
                         ui.label("State");
                         ui.horizontal(|ui| {
@@ -1779,6 +1821,38 @@ impl Editor {
                     duplicate = ui.button("Duplicate").clicked();
                     delete = ui.button("Delete").clicked();
                 });
+                if e.kind == EntityKind::Character {
+                    ui.separator();
+                    ui.heading("Merchant");
+                    let def_shop = db.character(&e.def).and_then(|d| d.shop.clone());
+                    let mut set: Option<Option<ShopSpec>> = None;
+                    match &mut e.shop {
+                        Some(spec) => {
+                            widgets::shop_ui(ui, &format!("shop{uid}"), spec, refs, &self.tex, &self.assets, db);
+                            let label = if def_shop.is_some() { "Reset to the definition's stock" } else { "Not a merchant" };
+                            if ui.button(label).clicked() {
+                                set = Some(None);
+                            }
+                        }
+                        None => match def_shop {
+                            Some(d) => {
+                                ui.weak(format!("Uses the definition's stock: {} item(s).", d.items.len()));
+                                if ui.button("Customize stock & prices").clicked() {
+                                    set = Some(Some(d));
+                                }
+                            }
+                            None => {
+                                ui.weak("Not a merchant.");
+                                if ui.button("Make this a merchant").clicked() {
+                                    set = Some(Some(ShopSpec::default()));
+                                }
+                            }
+                        },
+                    }
+                    if let Some(v) = set {
+                        e.shop = v;
+                    }
+                }
                 if e.kind == EntityKind::Prop {
                     ui.separator();
                     ui.heading("Container");

@@ -21,6 +21,7 @@ pub enum Tab {
     Tilesets,
     Sheets,
     Sounds,
+    Quests,
     Project,
     Scripts,
 }
@@ -41,6 +42,8 @@ pub struct DbState {
     pub script_text: String,
     pub script_dirty: bool,
     pub new_script: String,
+    /// Character index to move the script editor's cursor to (and scroll to) next frame.
+    pub script_jump: Option<usize>,
     pub rename: RenameUi,
     /// Tileset editor: animation that clicked tiles are appended to (None = toggle solidity).
     pub anim_target: Option<usize>,
@@ -133,6 +136,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             (Tab::Tilesets, "Tilesets"),
             (Tab::Sheets, "Sprite sheets"),
             (Tab::Sounds, "Sounds"),
+            (Tab::Quests, "Quests"),
             (Tab::Project, "Project"),
             (Tab::Scripts, "Scripts"),
         ];
@@ -212,6 +216,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         weapon: None,
                         armor: None,
                         max_stack: 99,
+                        value: 0,
                     },
                     |d| &mut d.id,
                 ),
@@ -253,6 +258,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         weapon: None,
                         defense: 0,
                         triggers: vec![],
+                        shop: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -278,6 +284,14 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     sel,
                     |d| d.id.clone(),
                     |ids| SoundDef { id: unique("sound", ids), file: "sounds/new.wav".into(), volume: 1.0 },
+                    |d| &mut d.id,
+                ),
+                Tab::Quests => list_ui(
+                    ui,
+                    &mut db.quests,
+                    sel,
+                    |d| format!("{}  ({})", d.title, d.id),
+                    |ids| rust2d_engine::quest::QuestDef { id: unique("quest", ids), title: "New quest".into(), description: String::new(), stages: vec!["First objective".into()] },
                     |d| &mut d.id,
                 ),
                 _ => false,
@@ -355,6 +369,11 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                             sound_form(ui, d, &mut cx);
                         }
                     }
+                    Tab::Quests => {
+                        if let Some(d) = db.quests.get_mut(i) {
+                            quest_form(ui, d, &mut cx);
+                        }
+                    }
                     _ => {}
                 }
             });
@@ -400,6 +419,10 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     }
     if list_changed || before.0 != ed.project.db || before.1 != ed.project.config {
         ed.defs_dirty = true;
+        if before.0.quests != ed.project.db.quests {
+            ed.refs.quests = ed.project.db.quests.iter().map(|q| q.id.clone()).collect();
+            ed.refs.quest_stages = ed.project.db.quests.iter().map(|q| (q.id.clone(), q.stages.clone())).collect();
+        }
         if before.0.items != ed.project.db.items || before.0.sounds != ed.project.db.sounds {
             ed.refs.items = ed.project.db.items.iter().map(|i| i.id.clone()).collect();
             ed.refs.sounds = ed.project.db.sounds.iter().map(|i| i.id.clone()).collect();
@@ -527,6 +550,9 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     ui.horizontal(|ui| {
         ui.label("Stack size");
         ui.add(egui::DragValue::new(&mut d.max_stack).range(1..=9999)).on_hover_text("How many fit into one inventory slot");
+        ui.label("Value");
+        ui.add(egui::DragValue::new(&mut d.value).range(0..=999_999))
+            .on_hover_text("Base trade price; merchants use it when their stock has no own price (0 = worthless, can't be sold)");
     });
     ui.separator();
     ui.heading("Equipment");
@@ -842,6 +868,9 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
                     ui.selectable_value(&mut d.sheet, s.to_string(), s.as_str());
                 }
             });
+            if ui.button("👤 Choose model…").on_hover_text("Pick a look from this project or the asset library (library models are copied into the project)").clicked() {
+                crate::models::request_model(crate::models::ModelTarget::Def(d.id.clone()));
+            }
             let mut on = *cx.art_open;
             if ui.toggle_value(&mut on, "🎨 Edit art").on_hover_text("Show the pixel editor for this character's sheet").changed() {
                 *cx.art_open = on;
@@ -923,6 +952,16 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     ui.label("Ranged attack (hostile characters shoot at the player when in range and in sight):");
     weapon_ui(ui, "chr_weapon", &mut d.weapon, cx, true);
     ui.separator();
+    ui.heading("Merchant");
+    let mut on = d.shop.is_some();
+    if ui.checkbox(&mut on, "Merchant (trades items with the player)").changed() {
+        d.shop = on.then(ShopSpec::default);
+    }
+    if let Some(spec) = &mut d.shop {
+        ui.weak("Default stock for every placed instance; instances can have their own stock and prices in the map inspector.");
+        widgets::shop_ui(ui, "chr_shop", spec, cx.refs, cx.tex, cx.assets, cx.db);
+    }
+    ui.separator();
     ui.weak("Sheet layout: 4 rows (down, left, right, up) × walk frames; frame 0 of a row is the idle pose.");
     // Animated preview of all directions.
     let frames = d.walk_frames.max(1);
@@ -936,6 +975,54 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     ui.separator();
     ui.heading("Default triggers");
     widgets::triggers_ui(ui, &format!("chr/{}", d.id), &mut d.triggers, cx.refs);
+}
+
+fn quest_form(ui: &mut egui::Ui, d: &mut rust2d_engine::quest::QuestDef, _cx: &mut Cx) {
+    ui.heading("Quest");
+    egui::Grid::new("quest").num_columns(2).show(ui, |ui| {
+        ui.label("Id");
+        ui.add(egui::TextEdit::singleline(&mut d.id).desired_width(200.0))
+            .on_hover_text("Used by 'Quest' actions / conditions and scripts (start_quest(\"id\")). Changing it does not update them.");
+        ui.end_row();
+        ui.label("Title");
+        ui.add(egui::TextEdit::singleline(&mut d.title).desired_width(320.0));
+        ui.end_row();
+    });
+    ui.label("Description (shown in the journal)");
+    ui.add(egui::TextEdit::multiline(&mut d.description).desired_rows(3).desired_width(f32::INFINITY));
+    ui.separator();
+    ui.heading("Stages");
+    ui.weak("One objective per stage. The journal shows the objectives reached so far: earlier ones ticked, the current one open. \
+             Triggers move the quest on with the Quest action (start, advance to the next stage, set stage, complete, fail) \
+             and check it with the Quest condition; scripts use start_quest / advance_quest / set_quest_stage / complete_quest / fail_quest \
+             and quest_stage / quest_active / quest_done. Write {name} to show the value of variable 'name', e.g. \"Defeat slimes ({slimes}/5)\".");
+    let n = d.stages.len();
+    let mut swap = None;
+    let mut remove = None;
+    for (k, s) in d.stages.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(format!("{k}"));
+            ui.add(egui::TextEdit::multiline(s).desired_rows(1).desired_width(460.0));
+            if ui.add_enabled(k > 0, egui::Button::new("^").small()).on_hover_text("Move up").clicked() {
+                swap = Some(k - 1);
+            }
+            if ui.add_enabled(k + 1 < n, egui::Button::new("v").small()).on_hover_text("Move down").clicked() {
+                swap = Some(k);
+            }
+            if ui.small_button("✖").on_hover_text("Remove (later stages move up: check your triggers)").clicked() {
+                remove = Some(k);
+            }
+        });
+    }
+    if let Some(k) = swap {
+        d.stages.swap(k, k + 1);
+    }
+    if let Some(k) = remove {
+        d.stages.remove(k);
+    }
+    if ui.button("+ Stage").clicked() {
+        d.stages.push(String::new());
+    }
 }
 
 fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
@@ -1176,6 +1263,52 @@ fn project_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     ui.label(format!("Project folder: {}", ed.project.root.display()));
 }
 
+/// `fn name(` definitions in a script, with the character index where each starts.
+fn script_functions(text: &str) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
+    let mut chars = 0;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_start();
+        if let Some(rest) = t.strip_prefix("fn ").or_else(|| t.strip_prefix("private fn ")) {
+            let name: String = rest.trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            if !name.is_empty() {
+                out.push((name, chars + (line.chars().count() - t.chars().count())));
+            }
+        }
+        chars += line.chars().count();
+    }
+    out
+}
+
+impl Editor {
+    /// Opens a script in Database → Scripts (saving the open one first if it was edited),
+    /// optionally with the cursor at character `jump`.
+    pub fn open_script(&mut self, f: &std::path::Path, jump: Option<usize>) {
+        if self.db.script_file.as_deref() != Some(f) {
+            self.save_script_if_dirty();
+            self.db.script_text = std::fs::read_to_string(f).unwrap_or_default();
+            self.db.script_file = Some(f.to_path_buf());
+            self.db.script_dirty = false;
+        }
+        self.db.script_jump = jump;
+    }
+
+    fn save_script_if_dirty(&mut self) {
+        if !self.db.script_dirty {
+            return;
+        }
+        if let Some(f) = self.db.script_file.clone() {
+            match std::fs::write(&f, &self.db.script_text) {
+                Ok(()) => {
+                    self.db.script_dirty = false;
+                    self.set_status(format!("Saved {}", f.file_name().unwrap_or_default().to_string_lossy()));
+                }
+                Err(e) => self.set_status(format!("Saving script failed: {e}")),
+            }
+        }
+    }
+}
+
 fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let dir = ed.project.scripts_dir();
     let mut files: Vec<_> = std::fs::read_dir(&dir)
@@ -1186,79 +1319,119 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
         .filter(|p| p.extension().is_some_and(|e| e == "rhai"))
         .collect();
     files.sort();
-    let st = &mut ed.db;
-    let mut save = false;
-    egui::SidePanel::left("scripts_left").default_width(200.0).show_inside(ui, |ui| {
-        for f in &files {
-            let name = f.file_name().unwrap().to_string_lossy();
-            if ui.selectable_label(st.script_file.as_ref() == Some(f), name).clicked() && st.script_file.as_ref() != Some(f) {
-                st.script_file = Some(f.clone());
-                st.script_text = std::fs::read_to_string(f).unwrap_or_default();
-                st.script_dirty = false;
-            }
+    // Always show a script: the first one when none (or a deleted one) is open.
+    if ed.db.script_file.as_ref().is_none_or(|f| !files.contains(f)) {
+        if let Some(f) = files.first().cloned() {
+            ed.db.script_dirty = false;
+            ed.open_script(&f, None);
         }
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut st.new_script).hint_text("new_file").desired_width(110.0));
-            if ui.button("+ New").clicked() && !st.new_script.is_empty() {
-                let p = dir.join(format!("{}.rhai", st.new_script.trim_end_matches(".rhai")));
-                let _ = std::fs::create_dir_all(&dir);
-                if !p.exists() {
-                    let _ = std::fs::write(&p, "// New script\n\nfn my_function() {\n    say(\"Hello!\");\n}\n");
+    }
+    let mut open: Option<(std::path::PathBuf, Option<usize>)> = None;
+    let mut create: Option<std::path::PathBuf> = None;
+    let mut save = false;
+    egui::SidePanel::left("scripts_left").default_width(220.0).show_inside(ui, |ui| {
+        let st = &mut ed.db;
+        ui.weak("Click a file or one of its functions to edit it.");
+        egui::ScrollArea::vertical().id_salt("script_files").max_height(ui.available_height() - 40.0).show(ui, |ui| {
+            for f in &files {
+                let name = f.file_name().unwrap().to_string_lossy().to_string();
+                let current = st.script_file.as_ref() == Some(f);
+                let row = ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| ui.selectable_label(current, format!("📄 {name}")));
+                if row.inner.clicked() {
+                    open = Some((f.clone(), None));
                 }
-                st.script_text = std::fs::read_to_string(&p).unwrap_or_default();
-                st.script_file = Some(p);
-                st.new_script.clear();
+                // Its functions (from the editor text for the open file, so new ones show at once).
+                let text = if current { st.script_text.clone() } else { std::fs::read_to_string(f).unwrap_or_default() };
+                for (func, at) in script_functions(&text) {
+                    ui.horizontal(|ui| {
+                        ui.add_space(14.0);
+                        let label = egui::RichText::new(format!("{func}()")).monospace();
+                        let r = ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| ui.selectable_label(false, label));
+                        if r.inner.on_hover_text(format!("Go to fn {func} in {name}")).clicked() {
+                            open = Some((f.clone(), Some(at)));
+                        }
+                    });
+                }
+                ui.add_space(4.0);
+            }
+            if files.is_empty() {
+                ui.weak("No scripts yet.");
             }
         });
         ui.separator();
-        ui.label("Functions:");
-        for f in &ed.refs.functions {
-            ui.monospace(f);
-        }
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut st.new_script).hint_text("new file name").desired_width(120.0));
+            if ui.button("+ New").on_hover_text("Creates scripts/<name>.rhai (without a name: script_N.rhai)").clicked() {
+                let base = st.new_script.trim().trim_end_matches(".rhai").to_string();
+                let name = if base.is_empty() {
+                    (1..).map(|n| format!("script_{n}")).find(|n| !dir.join(format!("{n}.rhai")).exists()).unwrap()
+                } else {
+                    base
+                };
+                create = Some(dir.join(format!("{name}.rhai")));
+                st.new_script.clear();
+            }
+        });
     });
+    if let Some(p) = create {
+        let _ = std::fs::create_dir_all(&dir);
+        if !p.exists() {
+            let _ = std::fs::write(&p, "// New script\n\nfn my_function() {\n    say(\"Hello!\");\n}\n");
+        }
+        ed.refresh_refs();
+        open = Some((p, None));
+    }
+    if let Some((f, jump)) = open {
+        ed.open_script(&f, jump);
+    }
+    let st = &mut ed.db;
     egui::CentralPanel::default().show_inside(ui, |ui| {
         let Some(f) = st.script_file.clone() else {
-            ui.label("Select a script file. Functions can be called from triggers with the 'Run script' action, or used as 'Script' conditions (returning bool).");
+            ui.label("No script files yet: create one on the left. Functions can be called from triggers with the 'Run script' action, or used as 'Script' conditions (returning bool).");
             return;
         };
         ui.horizontal(|ui| {
             ui.strong(f.file_name().unwrap().to_string_lossy());
             if st.script_dirty {
-                ui.colored_label(Color32::YELLOW, "•");
+                ui.colored_label(Color32::YELLOW, "• edited");
             }
-            save = ui.button("💾 Save & check").clicked();
+            save = ui.button("💾 Save & check").on_hover_text("Ctrl+S").clicked();
         });
-        let resp = egui::ScrollArea::vertical().id_salt("script_edit").show(ui, |ui| {
-            ui.add(
-                egui::TextEdit::multiline(&mut st.script_text)
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(30),
-            )
-        });
-        if resp.inner.changed() {
-            st.script_dirty = true;
+        let id = egui::Id::new("script_editor");
+        let jump = st.script_jump.take();
+        if let Some(ci) = jump {
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(ci))));
+            state.store(ui.ctx(), id);
+            ui.ctx().memory_mut(|m| m.request_focus(id));
         }
+        egui::ScrollArea::vertical().id_salt("script_edit").show(ui, |ui| {
+            let out = egui::TextEdit::multiline(&mut st.script_text).id(id).code_editor().desired_width(f32::INFINITY).desired_rows(30).show(ui);
+            if out.response.changed() {
+                st.script_dirty = true;
+            }
+            if let Some(ci) = jump {
+                // Scroll the function to the top of the view.
+                let cursor = out.galley.from_ccursor(egui::text::CCursor::new(ci));
+                let r = out.galley.pos_from_cursor(&cursor).translate(out.galley_pos.to_vec2());
+                ui.scroll_to_rect(r.expand2(egui::vec2(0.0, 2.0)), Some(egui::Align::TOP));
+            }
+        });
         if ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
             save = true;
         }
     });
     if save {
-        if let Some(f) = ed.db.script_file.clone() {
-            match std::fs::write(&f, &ed.db.script_text) {
-                Ok(()) => {
-                    ed.db.script_dirty = false;
-                    let mut host = rust2d_engine::script::ScriptHost::new();
-                    host.load_dir(&dir);
-                    ed.refresh_refs();
-                    if host.errors.is_empty() {
-                        ed.set_status("Script saved, no errors");
-                    } else {
-                        ed.set_status(format!("Script error: {}", host.errors.join("; ")));
-                    }
-                }
-                Err(e) => ed.set_status(format!("Saving script failed: {e}")),
+        ed.db.script_dirty = true;
+        ed.save_script_if_dirty();
+        if !ed.db.script_dirty {
+            let mut host = rust2d_engine::script::ScriptHost::new();
+            host.load_dir(&dir);
+            ed.refresh_refs();
+            if host.errors.is_empty() {
+                ed.set_status("Script saved, no errors");
+            } else {
+                ed.set_status(format!("Script error: {}", host.errors.join("; ")));
             }
         }
     }

@@ -9,6 +9,10 @@
 //               move_by(target, dx, dy) face(target, "up"|"down"|"left"|"right")
 //               wait(seconds) emit(event) then_call(fn)
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
+//               open_shop(target) set_state(target, state)
+// Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
+//               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
+//               quest_done(id)
 // Other:        player_hp() random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
@@ -51,6 +55,7 @@ fn shrine_touch() {
     say("You touch the shrine. Ancient runes begin to glow!");
     set_flag("shrine_lit", true);
     set_state("self", "glowing");
+    set_quest_stage("strange_lights", 2);
     emit("shrine_lit");
 }
 
@@ -62,6 +67,13 @@ fn goblin_defeated() {
 
 fn slime_defeated() {
     add_var("slimes_defeated", 1);
+    // Tilda's quest counts slimes once it was accepted.
+    if quest_active("pest_control") && quest_stage("pest_control") == 0 {
+        add_var("pest_slimes", 1);
+        if get_var("pest_slimes") >= 5 {
+            set_quest_stage("pest_control", 1);
+        }
+    }
     if random(2) == 0 {
         give_item("coin", 1 + random(3));
     }

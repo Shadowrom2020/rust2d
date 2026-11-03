@@ -109,7 +109,7 @@ impl Game {
         let r = self.player.rect();
         let reach = Rect::new(r.x - ts * 0.45, r.y - ts * 0.45, r.w + ts * 0.9, r.h + ts * 0.9);
         let e = &self.loaded.entities[i];
-        reach.overlaps(&e.body.rect()) || self.player.pos.distance(e.body.pos) <= ts * 1.5
+        reach.overlaps(&e.body.rect()) || self.player.pos.distance(e.body.pos) <= ts * 1.5 || self.across_counter(i)
     }
 
     fn face_towards(&mut self, p: Vec2) {
@@ -169,7 +169,15 @@ impl Game {
                 let t = self.entity_tile(&self.loaded.entities[i]);
                 // Prefer standing straight next to the target (facing it); diagonal as a fallback.
                 let beside = |p: TilePos| (p.0 - t.0).abs() + (p.1 - t.1).abs() == 1;
-                find_path(start, t, beside, blocked, MAX_NODES).or_else(|| find_path(start, t, |p| near(p, t) && p != t, blocked, MAX_NODES))
+                let path = find_path(start, t, beside, blocked, MAX_NODES).or_else(|| find_path(start, t, |p| near(p, t) && p != t, blocked, MAX_NODES));
+                // Characters behind a counter: stand in front of it (two tiles away, a solid
+                // tile in between) and talk across.
+                let counter = |p: TilePos| {
+                    let (dx, dy) = (t.0 - p.0, t.1 - p.1);
+                    ((dx.abs() == 2 && dy == 0) || (dy.abs() == 2 && dx == 0)) && self.tile_solid(p.0 + dx / 2, p.1 + dy / 2)
+                };
+                let talk = matches!(goal, Goal::Interact(_)) && self.loaded.entities[i].kind == EntityKind::Character;
+                path.or_else(|| talk.then(|| find_path(start, t, counter, blocked, MAX_NODES)).flatten())
             }
         };
         path.map(VecDeque::from)

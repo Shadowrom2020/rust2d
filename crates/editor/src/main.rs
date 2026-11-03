@@ -10,6 +10,7 @@ mod export;
 mod files;
 mod library_ui;
 mod maps;
+mod models;
 mod pixel;
 mod wizard;
 mod widgets;
@@ -351,6 +352,38 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
             }
         }
+        // model def ID | model inst UID|NAME: open the model chooser
+        "model" => {
+            use crate::models::{request_model, ModelTarget};
+            match arg(1) {
+                "def" => request_model(ModelTarget::Def(arg(2).to_string())),
+                _ => {
+                    let uid = arg(2).parse::<u32>().ok().or_else(|| ed.doc.as_ref()?.map.entities.iter().find(|e| e.name == arg(2)).map(|e| e.uid));
+                    if let Some(uid) = uid {
+                        request_model(ModelTarget::Instance(uid));
+                    }
+                }
+            }
+        }
+        // modelpick lib CHAR | modelpick proj SHEET | modelpick lib: preview in the open chooser
+        "modelpick" => {
+            use crate::models::ModelPick;
+            let lib = arg(1) == "lib";
+            let pick = match (lib, arg(2)) {
+                (_, "") => None,
+                (true, c) => Some(ModelPick::Library(c.to_string())),
+                (false, s) => Some(ModelPick::Project(s.to_string())),
+            };
+            ed.model_script(lib, pick);
+        }
+        "modeluse" => ed.model_script_use(),
+        // scriptsel FILE: what clicking a file in Database > Scripts does
+        "scriptsel" => {
+            let f = ed.project.scripts_dir().join(arg(1));
+            ed.open_script(&f, None);
+        }
+        // probe X Y: print the egui layer under that screen point (next frame)
+        "probe" => ed.probe.push(egui_macroquad::egui::pos2(num(1), num(2))),
         "wizard" => ed.wizard = Some(wizard::Wizard::new(&ed.project)),
         // Pixel editor: pxopen REL FW FH · pxtool NAME · pxcolor RRGGBB · pxat X Y [right] · pxsave
         "pxopen" => ed.open_pixel(arg(1), (num(2) as u32, num(3) as u32), pixel::Layout::Plain),
@@ -374,6 +407,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "tilesets" => Tab::Tilesets,
                 "sheets" => Tab::Sheets,
                 "project" => Tab::Project,
+                "quests" => Tab::Quests,
                 "scripts" => Tab::Scripts,
                 _ => Tab::Items,
             };
@@ -395,6 +429,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.sel = match arg(1) {
                 "entity" => Selection::Entity(num(2) as u32),
                 "zone" => Selection::Zone(num(2) as u32),
+                // select named NAME: the entity with that instance name
+                "named" => ed.doc.as_ref().and_then(|d| d.map.entities.iter().find(|e| e.name == arg(2))).map_or(Selection::None, |e| Selection::Entity(e.uid)),
                 _ => Selection::None,
             }
         }

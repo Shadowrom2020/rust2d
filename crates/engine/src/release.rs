@@ -81,7 +81,7 @@ pub fn check(project: &Project) -> (Vec<String>, Check) {
     }
     let mut files: BTreeSet<String> = BTreeSet::new();
     files.insert("project.ron".into());
-    for d in ["tilesets", "sheets", "items", "props", "characters", "sounds"] {
+    for d in ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests"] {
         let rel = format!("defs/{d}.ron");
         if root.join(&rel).exists() {
             files.insert(rel);
