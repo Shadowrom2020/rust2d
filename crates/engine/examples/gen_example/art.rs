@@ -90,6 +90,10 @@ impl Canvas {
     }
     /// Sets a pixel; translucent colors are blended over what is there.
     pub fn px(&mut self, x: i32, y: i32, c: Color) {
+        // Never spill into the cell above / to the left of the current origin.
+        if x < 0 || y < 0 {
+            return;
+        }
         let Some((ax, ay)) = self.abs(x, y) else { return };
         if c.a >= 0.999 {
             self.img.set_pixel(ax, ay, c);
@@ -305,6 +309,8 @@ impl Canvas {
 }
 
 // ------------------------------------------------------------------ terrain tileset
+
+pub mod extra;
 
 pub mod t {
     pub const GRASS: u32 = 0;
@@ -782,6 +788,7 @@ pub fn terrain(out: &Path) {
 
 // ------------------------------------------------------------------ characters
 
+#[derive(Default)]
 pub struct Look {
     pub skin: u32,
     pub hair: u32,
@@ -790,6 +797,30 @@ pub struct Look {
     pub beard: bool,
     /// Pointy ears (goblins).
     pub ears: bool,
+    pub hat: Hat,
+    /// A long robe or dress (covers the legs).
+    pub robe: Option<u32>,
+    pub apron: Option<u32>,
+    /// Cloth over the lower face (nomads, bandits).
+    pub veil: Option<u32>,
+    /// Bones instead of skin and clothes.
+    pub skeleton: bool,
+    /// Female look: longer hair, eyelashes, lips.
+    pub female: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum Hat {
+    #[default]
+    None,
+    Straw(u32),
+    Wizard(u32),
+    /// Head wrap / turban.
+    Wrap(u32),
+    Helmet,
+    Cap(u32),
+    Tiara,
+    Hood(u32),
 }
 
 #[derive(Clone, Copy)]
@@ -837,12 +868,25 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
         _ => 0,
     };
 
-    // Legs.
+    // Legs (or a robe reaching the ground).
     let leg = |c: &mut Canvas, x: i32, lift: i32, pal: [u32; 4]| {
         c.shade_box(x, 34 - lift, 5, 9, pal);
         c.shade_box(x, 41 - lift, 5, 4, boots);
     };
-    if side {
+    if let Some(col) = look.robe {
+        let pal = ramp(col);
+        for (k, y) in (by + 9..45).enumerate() {
+            let half = 7 + (k as i32) / 4;
+            c.hline(16 - half, y, 2 * half + 1, hex(pal[2]));
+            c.px(16 - half, y, hex(pal[3]));
+            c.px(16 + half, y, hex(pal[1]));
+        }
+        c.hline(9, 44, 15, hex(pal[0]));
+        // Shoes peeking out while walking.
+        if l_up > 0 || r_up > 0 {
+            c.rect(if l_up > 0 { 11 } else { 18 }, 44, 4, 2, hex(boots[1]));
+        }
+    } else if side {
         leg(c, 14 - swing * dir, r_up, [pants[0], pants[0], pants[1], pants[2]]);
         leg(c, 14 + swing * dir, l_up, pants);
     } else {
@@ -850,6 +894,10 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
         leg(c, 17, r_up, pants);
     }
 
+    // Hood mass behind the head.
+    if let Hat::Hood(col) = look.hat {
+        c.rrect(6, hy - 3, 21, 22, 6, hex(ramp(col)[1]));
+    }
     // Back arm (side view) goes behind the torso.
     if side {
         c.shade_box(14 + swing * dir, by + 2, 4, 9, [shirt[0], shirt[0], shirt[1], shirt[1]]);
@@ -861,7 +909,28 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
     c.vline(22, by + 1, 11, hex(shirt[1]));
     c.hline(10, by + 12, 13, hex(shirt[1]));
     c.rect(9, by + 10, 15, 2, hex(0x4a2c14)); // belt
-    if f == Facing::Down {
+    if look.skeleton {
+        // Rib cage over a dark torso.
+        let bone = ramp(look.skin);
+        c.rrect(9, by, 15, 13, 2, hex(0x2b2620));
+        for y in [by + 2, by + 5, by + 8] {
+            c.hline(11, y, 11, hex(bone[2]));
+        }
+        c.vline(16, by + 1, 11, hex(bone[3]));
+    }
+    if let Some(col) = look.apron {
+        let pal = ramp(col);
+        match f {
+            Facing::Down => {
+                c.shade_box(11, by + 3, 11, 17, pal);
+                c.hline(11, by + 3, 11, hex(pal[3]));
+            }
+            Facing::Left => c.shade_box(9, by + 4, 6, 15, pal),
+            Facing::Right => c.shade_box(18, by + 4, 6, 15, pal),
+            Facing::Up => c.hline(9, by + 4, 15, hex(pal[1])),
+        }
+    }
+    if f == Facing::Down && !look.skeleton {
         c.rect(15, by + 10, 3, 2, hex(GOLD[2]));
         c.px(16, by, hex(skin[2]));
         c.px(15, by, hex(skin[2]));
@@ -901,9 +970,15 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
             Facing::Right => ear(c, hx - 1, -1),
         }
     }
+    let skeleton = look.skeleton;
     let eye = |c: &mut Canvas, x: i32| {
-        c.rect(x, hy + 8, 2, 3, hex(0x1a1a22));
-        c.px(x, hy + 8, hex(0xffffff));
+        if skeleton {
+            c.rect(x - 1, hy + 7, 4, 4, hex(0x1a1612)); // dark sockets
+            c.px(x, hy + 8, hex(0xd84343));
+        } else {
+            c.rect(x, hy + 8, 2, 3, hex(0x1a1a22));
+            c.px(x, hy + 8, hex(0xffffff));
+        }
     };
     // Hair cap (lit from the top-left).
     let cap = |c: &mut Canvas, x: i32, w: i32, h: i32| {
@@ -921,30 +996,57 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
             c.rect(hx + hw - 2, hy + 4, 2, 7, hex(hair[1]));
             eye(c, 11);
             eye(c, 20);
-            c.px(10, hy + 12, hex(0xe8907a)); // cheeks
-            c.px(22, hy + 12, hex(0xe8907a));
-            if look.beard {
+            if !skeleton {
+                c.px(10, hy + 12, hex(0xe8907a)); // cheeks
+                c.px(22, hy + 12, hex(0xe8907a));
+            }
+            if skeleton {
+                for x in (12..21).step_by(2) {
+                    c.px(x, hy + 13, hex(0x1a1612)); // teeth
+                }
+            } else if look.beard {
                 c.rrect(10, hy + 10, 13, 9, 3, hex(hair[2]));
                 c.hline(12, hy + 10, 9, hex(hair[3]));
                 c.hline(14, hy + 13, 5, hex(hair[0]));
+            } else if look.female {
+                c.hline(15, hy + 13, 3, hex(0xc0505a)); // lips
+                c.px(16, hy + 14, hex(0xa03a46));
             } else {
                 c.hline(15, hy + 13, 3, hex(skin[0]));
+            }
+            if look.female {
+                // Long hair falling past the face, eyelashes.
+                c.rect(hx - 1, hy + 4, 3, 15, hex(hair[2]));
+                c.vline(hx - 1, hy + 5, 13, hex(hair[3]));
+                c.rect(hx + hw - 2, hy + 4, 3, 15, hex(hair[1]));
+                for x in [11, 20] {
+                    c.hline(x - 1, hy + 7, 3, hex(0x1a1a22));
+                }
             }
         }
         Facing::Up => {
             cap(c, hx, hw, hh);
             c.vline(hx + hw - 2, hy + 3, hh - 6, hex(hair[1]));
             c.hline(hx + 3, hy + hh - 2, hw - 6, hex(hair[1]));
+            if look.female {
+                c.rrect(hx, hy + 8, hw, 14, 4, hex(hair[2]));
+                c.vline(hx + hw - 2, hy + 9, 12, hex(hair[1]));
+                c.vline(hx + 2, hy + 9, 11, hex(hair[3]));
+            }
         }
         Facing::Left | Facing::Right => {
             let mirror = |x: i32| if f == Facing::Left { x } else { 2 * 16 - x };
             cap(c, hx, hw, 7);
             // Hair at the back of the head.
             let (bx, bw) = if f == Facing::Left { (hx + 8, 9) } else { (hx, 9) };
-            c.rrect(bx, hy + 2, bw, 12, 3, hex(hair[2]));
+            c.rrect(bx, hy + 2, bw, if look.female { 19 } else { 12 }, 3, hex(hair[2]));
             c.vline(if f == Facing::Left { hx + hw - 2 } else { hx + 1 }, hy + 4, 9, hex(hair[1]));
             let ex = if f == Facing::Left { 10 } else { 21 };
             eye(c, ex);
+            if look.female && !skeleton {
+                c.hline(ex - 1, hy + 7, 3, hex(0x1a1a22));
+                c.px(if f == Facing::Left { 9 } else { 23 }, hy + 13, hex(0xc0505a));
+            }
             c.px(mirror(8) - if f == Facing::Left { 1 } else { 0 }, hy + 11, hex(skin[2])); // nose
             c.px(mirror(8) - if f == Facing::Left { 1 } else { 0 }, hy + 12, hex(skin[1]));
             if !look.ears {
@@ -955,6 +1057,126 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
                 let x = if f == Facing::Left { hx } else { hx + 7 };
                 c.rrect(x, hy + 10, 10, 9, 3, hex(hair[2]));
             }
+        }
+    }
+    draw_headwear(c, look, f, hy);
+}
+
+/// Hats, hoods and veils (drawn over the finished head).
+fn draw_headwear(c: &mut Canvas, look: &Look, f: Facing, hy: i32) {
+    let side = matches!(f, Facing::Left | Facing::Right);
+    let back = if f == Facing::Left { 1 } else { -1 }; // direction of the back of the head
+    match look.hat {
+        Hat::None => {}
+        Hat::Straw(col) => {
+            let p = ramp(col);
+            c.ellipse(16.0, hy as f32 + 2.5, 15.0, 3.5, hex(p[1]));
+            c.rrect(10, hy - 5, 13, 8, 3, hex(p[2]));
+            c.hline(12, hy - 4, 8, hex(p[3]));
+            c.hline(10, hy + 1, 13, hex(0xb03a2e)); // band
+        }
+        Hat::Wizard(col) => {
+            let p = ramp(col);
+            c.ellipse(16.0, hy as f32 + 1.5, 13.0, 3.0, hex(p[1]));
+            // A cone whose tip flops over to the side (there is only ~5 px above the head).
+            let tip = if side { -back } else { 1 };
+            for row in 0..6 {
+                let half = 8.0 - row as f32 * 1.2;
+                let cx = 16.0 + (row * row) as f32 / 8.0 * tip as f32;
+                let y = hy + 1 - row;
+                for x in (cx - half).round() as i32..=(cx + half).round() as i32 {
+                    let shade = if (x as f32) < cx - half / 3.0 { p[3] } else if (x as f32) > cx + half / 2.0 { p[1] } else { p[2] };
+                    c.px(x, y, hex(shade));
+                }
+            }
+            for k in 0..6 {
+                c.px(16 + tip * (5 + k), hy - 4 + k / 2, hex(p[1])); // drooping tip
+            }
+            c.px(16 + tip * 11, hy - 1, hex(GOLD[3]));
+            c.px(13, hy - 1, hex(GOLD[3]));
+            c.px(18, hy - 3, hex(GOLD[3]));
+        }
+        Hat::Wrap(col) => {
+            let p = ramp(col);
+            c.rrect(7, hy - 3, 19, 9, 4, hex(p[2]));
+            c.hline(9, hy, 15, hex(p[1]));
+            c.hline(10, hy + 3, 13, hex(p[1]));
+            c.hline(10, hy - 2, 10, hex(p[3]));
+            if side {
+                let x = if back > 0 { 23 } else { 7 };
+                c.rect(x, hy + 3, 3, 10, hex(p[1])); // loose end
+            }
+        }
+        Hat::Helmet => {
+            let p = ramp(0x9ea7b0);
+            c.rrect(7, hy - 3, 19, 11, 5, hex(p[2]));
+            c.hline(11, hy - 2, 10, hex(p[3]));
+            c.hline(7, hy + 6, 19, hex(p[1]));
+            match f {
+                Facing::Down => {
+                    c.shade_box(7, hy + 6, 4, 8, p);
+                    c.shade_box(22, hy + 6, 4, 8, p);
+                    c.rect(16, hy + 6, 2, 5, hex(p[1]));
+                }
+                Facing::Up => c.rrect(7, hy - 3, 19, 18, 5, hex(p[2])),
+                _ => {
+                    let x = if back > 0 { 16 } else { 8 };
+                    c.shade_box(x, hy + 6, 9, 9, p);
+                }
+            }
+            c.rect(14, hy - 6, 5, 4, hex(0xb03a2e)); // plume
+        }
+        Hat::Cap(col) => {
+            let p = ramp(col);
+            c.rrect(8, hy - 2, 17, 7, 3, hex(p[2]));
+            c.hline(11, hy - 1, 10, hex(p[3]));
+            match f {
+                Facing::Down => c.rect(7, hy + 4, 19, 2, hex(p[0])),
+                Facing::Left => c.rect(4, hy + 4, 12, 2, hex(p[0])),
+                Facing::Right => c.rect(17, hy + 4, 12, 2, hex(p[0])),
+                Facing::Up => {}
+            }
+        }
+        Hat::Tiara => {
+            if f != Facing::Up {
+                c.hline(10, hy + 1, 13, hex(GOLD[2]));
+                c.px(12, hy, hex(GOLD[3]));
+                c.px(20, hy, hex(GOLD[3]));
+                if f == Facing::Down {
+                    c.rect(15, hy - 1, 3, 2, hex(0xd84343));
+                }
+            } else {
+                c.hline(10, hy + 1, 13, hex(GOLD[1]));
+            }
+        }
+        Hat::Hood(col) => {
+            let p = ramp(col);
+            match f {
+                Facing::Down => {
+                    c.rrect(7, hy - 3, 19, 8, 4, hex(p[2]));
+                    c.rect(7, hy + 3, 3, 12, hex(p[2]));
+                    c.rect(23, hy + 3, 3, 12, hex(p[1]));
+                    c.hline(11, hy - 2, 10, hex(p[3]));
+                }
+                Facing::Up => c.rrect(7, hy - 3, 19, 20, 6, hex(p[2])),
+                _ => {
+                    let x = if back > 0 { 15 } else { 7 };
+                    c.rrect(x, hy - 3, 11, 19, 5, hex(p[2]));
+                    c.rrect(7, hy - 3, 19, 7, 4, hex(p[2]));
+                }
+            }
+        }
+    }
+    if let Some(col) = look.veil {
+        let p = ramp(col);
+        match f {
+            Facing::Down => {
+                c.rrect(9, hy + 10, 15, 6, 2, hex(p[2]));
+                c.hline(10, hy + 12, 13, hex(p[1]));
+            }
+            Facing::Left => c.rrect(7, hy + 10, 10, 6, 2, hex(p[2])),
+            Facing::Right => c.rrect(16, hy + 10, 10, 6, 2, hex(p[2])),
+            Facing::Up => {}
         }
     }
 }

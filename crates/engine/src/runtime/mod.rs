@@ -41,6 +41,8 @@ const FADE_TIME: f32 = 0.25;
 #[derive(Clone, Debug)]
 pub enum Arrival {
     Spawn(String),
+    /// Next to the named zone (the far end of a map transition).
+    Beside(String),
     Pos(Vec2),
     Edge { edge: Edge, pos: Vec2, link: EdgeLink },
 }
@@ -411,6 +413,13 @@ impl Game {
             Arrival::Edge { edge, pos, link } => {
                 edge_destination(*edge, *pos, link, m.width, m.height, &m.edges, ts)
             }
+            Arrival::Beside(name) => match m.zones.iter().find(|z| z.name == *name) {
+                Some(z) => z.beside_point(m.width, m.height, ts),
+                None => {
+                    eprintln!("[game] map '{}' has no transition zone '{name}', using center", m.name);
+                    center
+                }
+            },
         };
         self.player.pos = pos;
         self.player.move_target = None;
@@ -444,6 +453,7 @@ impl Game {
             self.player.pos = match &arrival {
                 Arrival::Pos(p) => *p,
                 Arrival::Spawn(s) => m.spawn_point(s).map_or(self.player.pos, |z| z.arrival_point(ts)),
+                Arrival::Beside(n) => m.zones.iter().find(|z| z.name == *n).map_or(self.player.pos, |z| z.beside_point(m.width, m.height, ts)),
                 Arrival::Edge { .. } => self.player.pos,
             };
             self.zones_inside = self.zones_at(self.player.pos);
@@ -794,12 +804,13 @@ impl Game {
         for uid in entered {
             self.fire(GameEvent::Enter, Source::Zone(uid));
             let portal = self.loaded.map.zones.iter().find(|z| z.uid == uid).and_then(|z| match &z.kind {
-                ZoneKind::Portal { target_map, target_spawn } => Some((target_map.clone(), target_spawn.clone())),
+                ZoneKind::Portal { target_map, target_spawn } => Some((target_map.clone(), Arrival::Spawn(target_spawn.clone()))),
+                ZoneKind::Transition { target_map, target_zone } if !target_map.is_empty() => Some((target_map.clone(), Arrival::Beside(target_zone.clone()))),
                 _ => None,
             });
-            if let Some((map, spawn)) = portal {
+            if let Some((map, arrival)) = portal {
                 self.audio.play(&self.project.config.sfx.portal);
-                self.transition(&map, Arrival::Spawn(spawn));
+                self.transition(&map, arrival);
                 return;
             }
         }

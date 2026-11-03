@@ -370,23 +370,6 @@ pub fn region_picker(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Textur
     });
 }
 
-pub fn frame_grid(ui: &mut Ui, id: &str, sheet: &str, frame: &mut u32, tex: &Textures, assets: &Assets) {
-    let Some(s) = assets.sheets.get(sheet) else {
-        ui.colored_label(Color32::LIGHT_RED, "unknown sheet");
-        return;
-    };
-    egui::ScrollArea::vertical().id_salt(format!("{id}/frames")).max_height(160.0).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-            for f in 0..s.count {
-                if frame_thumb(ui, tex, assets, sheet, f, 36.0, f == *frame).clicked() {
-                    *frame = f;
-                }
-            }
-        });
-    });
-}
-
 /// Values offered by dropdowns in the trigger editor.
 #[derive(Default, Clone)]
 pub struct Refs {
@@ -397,6 +380,10 @@ pub struct Refs {
     pub functions: Vec<String>,
     /// map -> spawn names
     pub spawns: HashMap<String, Vec<String>>,
+    /// map -> its transition zones: (zone, target map, target zone)
+    pub transitions: HashMap<String, Vec<(String, String, String)>>,
+    /// Name of the open map.
+    pub current_map: String,
     pub flags: Vec<String>,
     pub sounds: Vec<String>,
     pub characters: Vec<String>,
@@ -748,4 +735,285 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             ui.indent(format!("{id}/ie"), |ui| actions_ui(ui, &format!("{id}/else"), otherwise, refs));
         }
     }
+}
+
+// ---------------------------------------------------------------- visual sprite chooser
+
+thread_local! {
+    /// Debug-script request to open the chooser of the field with this id.
+    static OPEN_CHOOSER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Opens the sprite chooser of field `id` the next time it is shown (editor debug scripts).
+pub fn request_chooser(id: &str) {
+    OPEN_CHOOSER.with(|r| *r.borrow_mut() = Some(id.to_string()));
+}
+
+/// State of an open "Choose a sprite" window (kept in egui memory per field).
+#[derive(Clone, Default)]
+struct Chooser {
+    open: bool,
+    sheet: String,
+    pick: SpriteRef,
+    filter: String,
+    zoom: f32,
+}
+
+/// Who uses which frames of a sheet: frame → names (item icons, prop states).
+fn frame_users(db: &rust2d_engine::defs::Database, sheet: &str, columns: u32) -> HashMap<u32, Vec<String>> {
+    let mut out: HashMap<u32, Vec<String>> = HashMap::new();
+    let mut add = |s: &SpriteRef, who: String| {
+        if s.sheet != sheet {
+            return;
+        }
+        let (w, h) = s.cells();
+        for dy in 0..h {
+            for dx in 0..w {
+                out.entry(s.frame + dy * columns.max(1) + dx).or_default().push(who.clone());
+            }
+        }
+    };
+    for d in &db.items {
+        add(&d.icon, format!("item {}", d.name));
+    }
+    for d in &db.props {
+        add(&d.sprite, format!("prop {} ({})", d.name, d.default_state));
+        for st in &d.states {
+            add(&st.sprite, format!("prop {} ({})", d.name, st.name));
+        }
+    }
+    out
+}
+
+/// A sprite as a large preview with a "Choose…" button that opens a visual chooser: all sheets
+/// as thumbnails, the chosen sheet as a zoomable grid (frame numbers and users on hover),
+/// click to pick (drag for several cells if `multi`), double-click to pick and close.
+#[allow(clippy::too_many_arguments)]
+pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database, multi: bool) -> bool {
+    let key = egui::Id::new(("sprite_chooser", id));
+    let mut st: Chooser = ui.ctx().data(|d| d.get_temp(key)).unwrap_or_default();
+    let requested = OPEN_CHOOSER.with(|r| r.borrow().as_deref() == Some(id));
+    if requested {
+        OPEN_CHOOSER.with(|r| *r.borrow_mut() = None);
+    }
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let (r, resp) = ui.allocate_exact_size(vec2(72.0, 72.0), Sense::click());
+        ui.painter().rect_filled(r, 4.0, Color32::from_gray(40));
+        let drawn = !sprite.sheet.is_empty() && paint_sprite(ui, tex, assets, sprite, r.shrink(4.0));
+        if !drawn {
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "none", egui::FontId::proportional(14.0), Color32::GRAY);
+        }
+        ui.painter().rect_stroke(r, 4.0, Stroke::new(1.0_f32, Color32::from_gray(80)), StrokeKind::Inside);
+        ui.vertical(|ui| {
+            if sprite.sheet.is_empty() {
+                ui.weak("No sprite chosen yet.");
+            } else {
+                let (w, h) = sprite.cells();
+                let size = if (w, h) == (1, 1) { String::new() } else { format!(" · {w}×{h} cells") };
+                ui.label(format!("{} · frame {}{size}", sprite.sheet, sprite.frame));
+            }
+            let open_it = ui.button("🖼 Choose…").on_hover_text("Pick a frame visually from any sprite sheet").clicked() || resp.double_clicked() || requested;
+            if open_it {
+                st.open = true;
+                st.pick = sprite.clone();
+                st.sheet = if assets.sheets.contains_key(&sprite.sheet) {
+                    sprite.sheet.clone()
+                } else {
+                    // Default to a sheet that looks right for the field, else the first one.
+                    let mut ids: Vec<&String> = assets.sheets.keys().collect();
+                    ids.sort();
+                    ids.iter().find(|s| s.contains("item")).or(ids.first()).map(|s| s.to_string()).unwrap_or_default()
+                };
+                st.zoom = 0.0;
+            }
+        });
+    });
+    if st.open {
+        let mut open = true;
+        let mut done: Option<bool> = None;
+        egui::Window::new("Choose a sprite").id(key.with("win")).open(&mut open).default_size([900.0, 560.0]).max_height(620.0).collapsible(false).resizable(true).show(ui.ctx(), |ui| {
+            ui.set_min_width(860.0);
+            // The current pick and the buttons first, so they never scroll out of view.
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
+                ui.painter().rect_filled(r, 3.0, Color32::from_gray(45));
+                if !st.pick.sheet.is_empty() {
+                    paint_sprite(ui, tex, assets, &st.pick, r.shrink(3.0));
+                    ui.label(format!("{} · frame {}", st.pick.sheet, st.pick.frame));
+                }
+                if ui.add_enabled(!st.pick.sheet.is_empty(), egui::Button::new("✔ Use this")).clicked() {
+                    done = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    done = Some(false);
+                }
+            });
+            ui.separator();
+            ui.horizontal_top(|ui| {
+                // Sheets.
+                ui.vertical(|ui| {
+                    ui.set_width(200.0);
+                    ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text("🔍 search sheets").desired_width(190.0));
+                    egui::ScrollArea::vertical().id_salt(key.with("sheets")).max_height(440.0).show(ui, |ui| {
+                        let mut ids: Vec<&String> = assets.sheets.keys().collect();
+                        ids.sort();
+                        let q = st.filter.to_lowercase();
+                        for sid in ids.into_iter().filter(|s| q.is_empty() || s.to_lowercase().contains(&q)) {
+                            let s = &assets.sheets[sid];
+                            let on = st.sheet == *sid;
+                            let row = ui.horizontal(|ui| {
+                                let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+                                ui.painter().rect_filled(r, 2.0, Color32::from_gray(45));
+                                paint_frame(ui, tex, assets, sid, 0, r.shrink(2.0));
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new(sid.as_str()).strong().color(if on { Color32::YELLOW } else { Color32::WHITE }));
+                                    ui.weak(format!("{} frames · {}×{}", s.count, s.frame_w as u32, s.frame_h as u32));
+                                });
+                            });
+                            let resp = ui.interact(row.response.rect, key.with(("sheet", sid.as_str())), Sense::click());
+                            if on {
+                                ui.painter().rect_stroke(row.response.rect.expand(1.0), 3.0, Stroke::new(1.5_f32, Color32::YELLOW), StrokeKind::Outside);
+                            }
+                            if resp.clicked() {
+                                st.sheet = sid.clone();
+                                st.zoom = 0.0; // fit the new sheet
+                            }
+                        }
+                    });
+                });
+                ui.separator();
+                // The chosen sheet's frames.
+                ui.vertical(|ui| {
+                    // Fit the sheet's width (1x-4x) when it is first shown (thumbnails: 2).
+                    if st.zoom <= 0.0 && !multi {
+                        st.zoom = 2.0;
+                    }
+                    if st.zoom <= 0.0 {
+                        let w = assets.sheets.get(&st.sheet).map_or(256.0, |s| s.image.width as f32);
+                        st.zoom = ((ui.available_width() - 20.0) / w).floor().clamp(1.0, 4.0);
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label("Zoom");
+                        ui.add(egui::Slider::new(&mut st.zoom, 1.0..=4.0).step_by(1.0));
+                        ui.weak(if multi { "click a frame · drag for several cells · double-click to use it" } else { "click a frame · double-click to use it" });
+                    });
+                    let Some(s) = assets.sheets.get(&st.sheet) else {
+                        ui.weak("Choose a sheet on the left.");
+                        return;
+                    };
+                    let Some(t) = tex.sheets.get(&st.sheet) else { return };
+                    let users = frame_users(db, &st.sheet, s.columns);
+                    if !multi {
+                        // Single frames: big wrapped thumbnails (readable even for long strips).
+                        let cell = 28.0 + 16.0 * st.zoom;
+                        egui::ScrollArea::vertical().id_salt(key.with("thumbs")).max_height(420.0).show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                                for f in 0..s.count {
+                                    let (r, resp) = ui.allocate_exact_size(vec2(cell, cell + 12.0), Sense::click());
+                                    let on = st.pick.sheet == st.sheet && st.pick.frame == f;
+                                    let img = Rect::from_min_size(r.min, vec2(cell, cell));
+                                    ui.painter().rect_filled(img, 3.0, if resp.hovered() { Color32::from_gray(70) } else { Color32::from_gray(50) });
+                                    paint_frame(ui, tex, assets, &st.sheet, f, img.shrink(3.0));
+                                    if users.contains_key(&f) {
+                                        ui.painter().circle_filled(img.right_top() + vec2(-6.0, 6.0), 3.0, Color32::from_rgb(120, 200, 255));
+                                    }
+                                    ui.painter().text(pos2(r.center().x, r.max.y - 5.0), egui::Align2::CENTER_CENTER, f.to_string(), egui::FontId::monospace(10.0), Color32::GRAY);
+                                    if on {
+                                        ui.painter().rect_stroke(img, 3.0, Stroke::new(2.0_f32, Color32::YELLOW), StrokeKind::Inside);
+                                    }
+                                    let who = users.get(&f).map(|v| format!("\nused by: {}", v.join(", "))).unwrap_or_default();
+                                    let resp = resp.on_hover_text(format!("frame {f}{who}"));
+                                    if resp.clicked() || resp.double_clicked() {
+                                        st.pick = SpriteRef::new(&st.sheet, f);
+                                    }
+                                    if resp.double_clicked() {
+                                        done = Some(true);
+                                    }
+                                }
+                            });
+                        });
+                        return;
+                    }
+                    let rows = s.count.div_ceil(s.columns.max(1));
+                    let z = st.zoom;
+                    let (cw, ch) = (s.frame_w * z, s.frame_h * z);
+                    let size = vec2(s.image.width as f32 * z, s.image.height as f32 * z);
+                    egui::ScrollArea::both().id_salt(key.with("grid")).max_height(420.0).max_width(ui.available_width()).show(ui, |ui| {
+                        let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+                        let p = ui.painter_at(rect);
+                        // Checkerboard-ish backdrop so transparent pixels read.
+                        p.rect_filled(rect, 0.0, Color32::from_gray(55));
+                        for r in 0..rows {
+                            for c in 0..s.columns {
+                                if (r + c) % 2 == 0 {
+                                    p.rect_filled(Rect::from_min_size(rect.min + vec2(c as f32 * cw, r as f32 * ch), vec2(cw, ch)), 0.0, Color32::from_gray(65));
+                                }
+                            }
+                        }
+                        p.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                        for c in 1..s.columns {
+                            let x = rect.min.x + c as f32 * cw;
+                            p.line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0_f32, Color32::from_white_alpha(30)));
+                        }
+                        for r in 1..rows {
+                            let y = rect.min.y + r as f32 * ch;
+                            p.line_segment([pos2(rect.min.x, y), pos2(rect.max.x, y)], Stroke::new(1.0_f32, Color32::from_white_alpha(30)));
+                        }
+                        // Frames already used by other definitions get a small marker.
+                        for f in users.keys() {
+                            let (c, r) = (f % s.columns.max(1), f / s.columns.max(1));
+                            let m = rect.min + vec2(c as f32 * cw + cw - 7.0, r as f32 * ch + 3.0);
+                            p.circle_filled(m + vec2(2.0, 2.0), 3.0, Color32::from_rgb(120, 200, 255));
+                        }
+                        let cell_at = |pos: egui::Pos2| {
+                            let rel = pos - rect.min;
+                            (((rel.x / cw).floor().max(0.0) as u32).min(s.columns - 1), ((rel.y / ch).floor().max(0.0) as u32).min(rows.max(1) - 1))
+                        };
+                        if let Some(h) = resp.hover_pos() {
+                            let (c, r) = cell_at(h);
+                            let f = r * s.columns + c;
+                            p.rect_stroke(Rect::from_min_size(rect.min + vec2(c as f32 * cw, r as f32 * ch), vec2(cw, ch)), 0.0, Stroke::new(1.0_f32, Color32::WHITE), StrokeKind::Inside);
+                            let who = users.get(&f).map(|v| format!("\nused by: {}", v.join(", "))).unwrap_or_default();
+                            resp.clone().on_hover_text(format!("frame {f}{who}"));
+                        }
+                        let drag_id = key.with("drag");
+                        if resp.drag_started() || resp.clicked() {
+                            if let Some(pos) = resp.interact_pointer_pos() {
+                                ui.memory_mut(|m| m.data.insert_temp(drag_id, cell_at(pos)));
+                            }
+                        }
+                        if resp.dragged() || resp.clicked() || resp.double_clicked() {
+                            if let (Some(pos), Some(start)) = (resp.interact_pointer_pos(), ui.memory(|m| m.data.get_temp::<(u32, u32)>(drag_id))) {
+                                let end = if multi { cell_at(pos) } else { start };
+                                let (x0, y0) = (start.0.min(end.0), start.1.min(end.1));
+                                st.pick = SpriteRef { sheet: st.sheet.clone(), frame: y0 * s.columns + x0, w: start.0.abs_diff(end.0) + 1, h: start.1.abs_diff(end.1) + 1 };
+                            }
+                        }
+                        if resp.double_clicked() {
+                            done = Some(true);
+                        }
+                        if st.pick.sheet == st.sheet {
+                            let (c, r) = (st.pick.frame % s.columns.max(1), st.pick.frame / s.columns.max(1));
+                            let (w, h) = st.pick.cells();
+                            let sel = Rect::from_min_size(rect.min + vec2(c as f32 * cw, r as f32 * ch), vec2(w as f32 * cw, h as f32 * ch));
+                            p.rect_stroke(sel, 0.0, Stroke::new(2.0_f32, Color32::YELLOW), StrokeKind::Inside);
+                        }
+                    });
+                });
+            });
+        });
+        if done == Some(true) && !st.pick.sheet.is_empty() {
+            if *sprite != st.pick {
+                *sprite = st.pick.clone();
+                changed = true;
+            }
+            st.open = false;
+        } else if done == Some(false) || !open {
+            st.open = false;
+        }
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(key, st));
+    changed
 }

@@ -46,6 +46,7 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
         match a.as_str() {
             "--map" => start.map = Some(value()?),
             "--no-title" => no_title = true,
+            "--engine-build" => {}
             "--spawn" => start.spawn = Some(value()?),
             "--pos" => {
                 let v = value()?;
@@ -66,6 +67,10 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
 }
 
 fn window_conf() -> Conf {
+    if std::env::args().any(|a| a == "--engine-build") {
+        println!("{}", rust2d_engine::ENGINE_BUILD);
+        std::process::exit(0);
+    }
     // The window is titled with the game's name.
     let root = root_arg().unwrap_or_else(|| default_root().0);
     let title = std::fs::read_to_string(root.join("project.ron"))

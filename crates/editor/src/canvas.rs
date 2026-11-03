@@ -55,6 +55,8 @@ pub enum Drag {
     MoveEntity { uid: u32, grab: Vec2, before: Box<Objects> },
     MoveZone { uid: u32, grab: (i32, i32), orig: (u32, u32), before: Box<Objects> },
     NewZone { start: (i32, i32) },
+    /// Transition tool: exit / arrival area.
+    LinkRect { start: (i32, i32) },
 }
 
 fn modifier_ctrl() -> bool {
@@ -297,6 +299,16 @@ impl Editor {
             if is_key_pressed(KeyCode::D) {
                 self.duplicate_selection();
             }
+            if is_key_pressed(KeyCode::M) {
+                self.quick.open = true;
+                self.quick.query.clear();
+            }
+            if is_key_pressed(KeyCode::PageUp) {
+                self.cycle_map(-1);
+            }
+            if is_key_pressed(KeyCode::PageDown) {
+                self.cycle_map(1);
+            }
             return;
         }
         let tools = [
@@ -309,6 +321,7 @@ impl Editor {
             (KeyCode::C, Tool::Collision),
             (KeyCode::N, Tool::Entity),
             (KeyCode::Z, Tool::Zone),
+            (KeyCode::T, Tool::Link),
         ];
         for (k, t) in tools {
             if is_key_pressed(k) {
@@ -329,6 +342,11 @@ impl Editor {
         }
         if is_key_pressed(KeyCode::Delete) {
             self.delete_selection();
+        }
+        if is_key_pressed(KeyCode::Escape) && self.link.is_some() {
+            self.link = None;
+            self.set_status("Transition cancelled");
+            return;
         }
         if is_key_pressed(KeyCode::Escape) {
             // Esc: deselect, stop placing, and otherwise go back to the Select tool.
@@ -449,6 +467,21 @@ impl Editor {
                     self.sel = Selection::None;
                     return;
                 };
+                // Double-click on a portal: go to the other side.
+                if let Selection::Zone(uid) = first {
+                    let now = macroquad::time::get_time();
+                    let again = self.last_portal_click.is_some_and(|(u, t)| u == uid && now - t < 0.4);
+                    self.last_portal_click = Some((uid, now));
+                    let portal = self.doc.as_ref().and_then(|d| d.map.zones.iter().find(|z| z.uid == uid)).and_then(|z| match &z.kind {
+                        ZoneKind::Portal { target_map, target_spawn } => Some((target_map.clone(), target_spawn.clone())),
+                        _ => None,
+                    });
+                    if let (true, Some((m, s))) = (again, portal) {
+                        self.last_portal_click = None;
+                        self.goto_map(&m, Some(&s));
+                        return;
+                    }
+                }
                 let already = stack.contains(&self.sel);
                 if !already {
                     self.sel = first;
@@ -481,6 +514,7 @@ impl Editor {
                     self.place_entity(pos);
                 }
             }
+            Tool::Link => self.drag = Some(Drag::LinkRect { start: tile }),
             Tool::Zone => {
                 if let Some(uid) = self.zone_at(world) {
                     self.sel = Selection::Zone(uid);
@@ -578,6 +612,16 @@ impl Editor {
                     }
                 }
             }
+            Some(Drag::LinkRect { start }) => {
+                let Some(doc) = &self.doc else { return };
+                let (mw, mh) = (doc.map.width as i32, doc.map.height as i32);
+                let (x0, y0, w, h) = rect_of(start, tile);
+                let (x1, y1) = ((x0 + w).min(mw), (y0 + h).min(mh));
+                let (x0, y0) = (x0.max(0), y0.max(0));
+                if x1 > x0 && y1 > y0 {
+                    self.link_area((x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32));
+                }
+            }
             Some(Drag::NewZone { start }) => {
                 let Some(doc) = &mut self.doc else { return };
                 let (mw, mh) = (doc.map.width as i32, doc.map.height as i32);
@@ -597,6 +641,7 @@ impl Editor {
                     ),
                     ZoneTemplate::Trigger => (ZoneKind::Trigger, "zone"),
                     ZoneTemplate::Spawner => (crate::app::default_spawner(&self.refs), "spawner"),
+                    ZoneTemplate::Transition => (ZoneKind::Transition { target_map: String::new(), target_zone: String::new() }, "transition"),
                 };
                 doc.map.zones.push(Zone {
                     uid,
@@ -768,6 +813,14 @@ impl Editor {
                     let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
                     draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, SKYBLUE);
                 }
+                (Some(Drag::LinkRect { start }), _) => {
+                    let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
+                    draw_rectangle(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, Color::new(1.0, 0.6, 0.1, 0.25));
+                    draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, ORANGE);
+                }
+                (None, Tool::Link) => {
+                    draw_rectangle_lines(fx, fy, ts, ts, 2.0 * px, ORANGE);
+                }
                 (_, Tool::Brush | Tool::Rect | Tool::Fill) if self.drag.is_none() => {
                     if let Some(t) = self.assets.tilesets.get(&self.brush.tileset) {
                         let src = Rect::new(self.brush.x as f32 * ts, self.brush.y as f32 * ts, self.brush.w as f32 * ts, self.brush.h as f32 * ts);
@@ -824,6 +877,8 @@ impl Editor {
                 let p = cam.world_to_screen(vec2(r.x, r.y));
                 let label = match &z.kind {
                     ZoneKind::Portal { target_map, target_spawn } => format!("{} -> {target_map}:{target_spawn}", z.name),
+                    ZoneKind::Transition { target_map, target_zone } if target_map.is_empty() => format!("{} <-> (not linked)", z.name),
+                    ZoneKind::Transition { target_map, target_zone } => format!("{} <-> {target_map}:{target_zone}", z.name),
                     ZoneKind::Spawner { character, count, respawn } => {
                         let r = match respawn {
                             rust2d_engine::map::Respawn::Never => "no respawn".to_string(),
@@ -834,8 +889,15 @@ impl Editor {
                     }
                     _ => z.name.clone(),
                 };
-                if r.w * self.cam.zoom > 20.0 || self.sel == Selection::Zone(z.uid) {
-                    draw_text(&label, p.x + 3.0, p.y + 14.0, 16.0, WHITE);
+                // Transitions whose other end is missing or leads elsewhere are flagged.
+                let broken = match &z.kind {
+                    ZoneKind::Transition { target_map, target_zone } => !self.refs.transitions.get(target_map).is_some_and(|v| {
+                        v.iter().any(|(n, m, b)| n == target_zone && *m == map.name && *b == z.name)
+                    }),
+                    _ => false,
+                };
+                if r.w * self.cam.zoom > 20.0 || self.sel == Selection::Zone(z.uid) || broken {
+                    draw_text(&label, p.x + 3.0, p.y + 14.0, 16.0, if broken { Color::new(1.0, 0.5, 0.5, 1.0) } else { WHITE });
                 }
             }
             for e in Edge::ALL {
@@ -885,6 +947,7 @@ fn zone_color(k: &ZoneKind) -> Color {
     match k {
         ZoneKind::Spawn => Color::new(0.3, 0.8, 1.0, 1.0),
         ZoneKind::Portal { .. } => Color::new(0.8, 0.4, 1.0, 1.0),
+        ZoneKind::Transition { .. } => Color::new(1.0, 0.6, 0.1, 1.0),
         ZoneKind::Trigger => Color::new(1.0, 0.65, 0.2, 1.0),
         ZoneKind::Spawner { .. } => Color::new(1.0, 0.25, 0.3, 1.0),
     }

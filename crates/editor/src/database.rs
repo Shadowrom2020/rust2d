@@ -4,6 +4,7 @@ use egui_macroquad::egui::{self, pos2, vec2, Color32, Sense, Stroke, StrokeKind}
 use rust2d_engine::audio::Audio;
 use rust2d_engine::defs::*;
 use rust2d_engine::events::TriggerOn;
+use rust2d_engine::imageio::Rgba;
 use rust2d_engine::refactor::RefKind;
 use rust2d_engine::render::Assets;
 
@@ -46,6 +47,10 @@ pub struct DbState {
     /// Prop editor: selected state (its sprite is edited below the list) and an open rename.
     pub state_sel: usize,
     pub state_rename: Option<(usize, String)>,
+    /// Items / props / characters: the pixel editor is shown under the form.
+    pub art_open: bool,
+    /// What the embedded editor last focused (to select its frame once).
+    pub art_focus: Option<(String, u32)>,
 }
 
 /// Everything the definition forms need besides the definition itself.
@@ -66,6 +71,9 @@ struct Cx<'a> {
     state_rename: &'a mut Option<(usize, String)>,
     /// A renamed prop state: (prop id, old name, new name), applied to the maps afterwards.
     state_renamed: &'a mut Option<(String, String, String)>,
+    art_open: &'a mut bool,
+    /// Art actions handled after the form (they need the whole editor).
+    art: &'a mut Option<ArtAction>,
 }
 
 /// An id not yet used in `ids`, based on `prefix`.
@@ -174,6 +182,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let before = (ed.project.db.clone(), ed.project.config.clone());
     let mut paint: Option<(String, (u32, u32), bool, u32)> = None;
     let mut state_renamed: Option<(String, String, String)> = None;
+    let mut art: Option<ArtAction> = None;
+    let mut art_target: Option<(String, (u32, u32), bool, u32)> = None;
     let mut list_changed = false;
     let tab = ed.db.tab;
     let sel_before = ed.db.sel;
@@ -278,8 +288,18 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             ed.db.anim_target = None;
         }
         let db_snapshot = ed.project.db.clone();
+        let mut embed: Option<(String, (u32, u32), bool)> = None;
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            egui::ScrollArea::vertical().id_salt("db_form").show(ui, |ui| {
+            // Sprite sheets: a compact form on top, the pixel editor below it.
+            let art_tab = matches!(tab, Tab::Items | Tab::Props | Tab::Characters) && ed.db.art_open;
+            let form_height = if tab == Tab::Sheets {
+                210.0
+            } else if art_tab {
+                (ui.available_height() * 0.45).max(220.0)
+            } else {
+                f32::INFINITY
+            };
+            egui::ScrollArea::vertical().id_salt("db_form").max_height(form_height).show(ui, |ui| {
                 let mut cx = Cx {
                     tex: &ed.tex,
                     assets: &mut ed.assets,
@@ -293,6 +313,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     state_sel: &mut ed.db.state_sel,
                     state_rename: &mut ed.db.state_rename,
                     state_renamed: &mut state_renamed,
+                    art_open: &mut ed.db.art_open,
+                    art: &mut art,
                 };
                 let i = ed.db.sel;
                 let db = &mut ed.project.db;
@@ -300,16 +322,20 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Items => {
                         if let Some(d) = db.items.get_mut(i) {
                             item_form(ui, d, &mut cx);
+                            art_target = art_of(&db_snapshot, &d.icon, false);
                         }
                     }
                     Tab::Props => {
                         if let Some(d) = db.props.get_mut(i) {
                             prop_form(ui, d, &mut cx);
+                            let k = (*cx.state_sel).min(d.states.len());
+                            art_target = art_of(&db_snapshot, d.state_look(k).0, false);
                         }
                     }
                     Tab::Characters => {
                         if let Some(d) = db.characters.get_mut(i) {
                             character_form(ui, d, &mut cx);
+                            art_target = art_of(&db_snapshot, &SpriteRef::new(&d.sheet, 0), true);
                         }
                     }
                     Tab::Tilesets => {
@@ -320,6 +346,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Sheets => {
                         if let Some(d) = db.sheets.get_mut(i) {
                             sheet_form(ui, d, &mut cx);
+                            let character = db_snapshot.characters.iter().any(|c| c.sheet == d.id);
+                            embed = Some((d.image.clone(), (d.frame_w, d.frame_h), character));
                         }
                     }
                     Tab::Sounds => {
@@ -330,6 +358,32 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     _ => {}
                 }
             });
+            if let Some((rel, frame, character)) = embed.take() {
+                ui.separator();
+                let h = ui.available_height().max(260.0);
+                let layout = if character { crate::pixel::Layout::Character } else { crate::pixel::Layout::Plain };
+                ed.pixel_embedded(ui, &rel, frame, layout, h);
+            }
+            // Items / props / characters: their art under the form.
+            if art_tab {
+                ui.separator();
+                match art_target.clone() {
+                    Some((rel, frame, character, sel)) => {
+                        let h = ui.available_height().max(260.0);
+                        let layout = if character { crate::pixel::Layout::Character } else { crate::pixel::Layout::Plain };
+                        ed.pixel_embedded(ui, &rel, frame, layout, h);
+                        // Select the definition's frame when the focus changes.
+                        let focus = Some((rel.clone(), sel));
+                        if ed.db.art_focus != focus && ed.px.doc.as_ref().is_some_and(|d| d.rel == rel) {
+                            ed.px.sel_frame = sel;
+                            ed.db.art_focus = focus;
+                        }
+                    }
+                    None => {
+                        ui.weak("No sprite sheet chosen yet: choose a sprite, or create a blank one with the buttons above.");
+                    }
+                }
+            }
         });
     }
     if let Some((rel, frame, character, sel)) = paint.take() {
@@ -340,6 +394,9 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     }
     if let Some((prop, old, new)) = state_renamed.take() {
         ed.rename_prop_state(&prop, &old, &new);
+    }
+    if let Some(a) = art.take() {
+        ed.art_action(a, tab);
     }
     if list_changed || before.0 != ed.project.db || before.1 != ed.project.config {
         ed.defs_dirty = true;
@@ -535,7 +592,8 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     }
     ui.separator();
     ui.heading("Icon");
-    widgets::sprite_picker(ui, "item_icon", &mut d.icon, cx.tex, cx.assets);
+    widgets::sprite_field(ui, "item_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
+    art_buttons(ui, cx, "icon", (1, 1));
     ui.separator();
     ui.heading("On use");
     ui.weak("Runs when the item is used from the inventory and the entity in front of the player didn't react to it.");
@@ -708,12 +766,8 @@ fn prop_states_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     let sel = (*cx.state_sel).min(all.len() - 1);
     ui.add_space(4.0);
     ui.label(egui::RichText::new(format!("Sprite of '{}'", all[sel].name)).strong());
-    widgets::sprite_picker(ui, &format!("prop_state_{sel}"), &mut all[sel].sprite, cx.tex, cx.assets);
-    if let Some(sheet) = cx.db.sheet(&all[sel].sprite.sheet) {
-        if ui.button("✏ Edit pixels").on_hover_text("Open the sheet in the pixel editor at this frame").clicked() {
-            *cx.paint = Some((sheet.image.clone(), (sheet.frame_w, sheet.frame_h), false, all[sel].sprite.frame));
-        }
-    }
+    widgets::sprite_field(ui, &format!("prop_state_{sel}"), &mut all[sel].sprite, cx.tex, cx.assets, cx.db, true);
+    art_buttons(ui, cx, "frame for this state", all[sel].sprite.cells());
     // Write back.
     let first = all.remove(0);
     d.default_state = first.name;
@@ -782,10 +836,32 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     sheets.sort();
     egui::Grid::new("chr").num_columns(2).show(ui, |ui| {
         ui.label("Sprite sheet");
-        egui::ComboBox::from_id_salt("chr_sheet").selected_text(d.sheet.as_str()).show_ui(ui, |ui| {
-            for s in sheets {
-                ui.selectable_value(&mut d.sheet, s.clone(), s.as_str());
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("chr_sheet").selected_text(d.sheet.as_str()).show_ui(ui, |ui| {
+                for s in &sheets {
+                    ui.selectable_value(&mut d.sheet, s.to_string(), s.as_str());
+                }
+            });
+            let mut on = *cx.art_open;
+            if ui.toggle_value(&mut on, "🎨 Edit art").on_hover_text("Show the pixel editor for this character's sheet").changed() {
+                *cx.art_open = on;
             }
+            ui.menu_button("+ New sheet", |ui| {
+                ui.label("A sheet for this character: 4 walk frames per row, rows Down / Left / Right / Up.");
+                if ui.button("Blank (32×48 frames)").clicked() {
+                    *cx.art = Some(ArtAction::CharacterSheet { template: None });
+                    ui.close_menu();
+                }
+                ui.separator();
+                ui.label("Start from a copy of:");
+                for s in &sheets {
+                    let used = cx.db.characters.iter().any(|c| &c.sheet == *s);
+                    if used && ui.button(s.as_str()).clicked() {
+                        *cx.art = Some(ArtAction::CharacterSheet { template: Some(s.to_string()) });
+                        ui.close_menu();
+                    }
+                }
+            });
         });
         ui.end_row();
         ui.label("Walk frames");
@@ -1010,10 +1086,21 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
         });
         ui.end_row();
     });
-    ui.weak("After changing the image or frame size, use ⟳ Reload assets.");
-    ui.separator();
-    let mut f = u32::MAX;
-    widgets::frame_grid(ui, "sheet_prev", &d.id, &mut f, cx.tex, cx.assets);
+    // Who uses this sheet.
+    let db = cx.db;
+    let mut users: Vec<String> = Vec::new();
+    users.extend(db.items.iter().filter(|i| i.icon.sheet == d.id || i.armor.as_ref().is_some_and(|a| a.overlay == d.id)).map(|i| format!("item {}", i.name)));
+    users.extend(db.props.iter().filter(|p| p.sprite.sheet == d.id || p.states.iter().any(|s| s.sprite.sheet == d.id)).map(|p| format!("prop {}", p.name)));
+    users.extend(db.characters.iter().filter(|c| c.sheet == d.id).map(|c| format!("character {}", c.name)));
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Used by:");
+        if users.is_empty() {
+            ui.weak("nothing yet");
+        } else {
+            ui.weak(users.join(", "));
+        }
+    });
+    ui.weak("Edit the image below: draw, add frames (Canvas … Resize), copy / mirror frames. Ctrl+S saves it and updates it everywhere.");
 }
 
 fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {
@@ -1174,5 +1261,167 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 Err(e) => ed.set_status(format!("Saving script failed: {e}")),
             }
         }
+    }
+}
+
+/// Art actions of the item / prop / character forms.
+pub enum ArtAction {
+    /// Give the current item icon / prop state a blank frame (`cells` big) to draw in.
+    NewFrame { cells: (u32, u32) },
+    /// Give the current character its own sheet (blank or a copy of `template`).
+    CharacterSheet { template: Option<String> },
+}
+
+/// The image the embedded editor should show for a sprite: (path, frame size, character
+/// layout, frame to select).
+fn art_of(db: &Database, sprite: &SpriteRef, character: bool) -> Option<(String, (u32, u32), bool, u32)> {
+    let s = db.sheet(&sprite.sheet)?;
+    Some((s.image.clone(), (s.frame_w, s.frame_h), character, sprite.frame))
+}
+
+/// "Edit art" toggle and "New blank …" for item icons and prop states.
+fn art_buttons(ui: &mut egui::Ui, cx: &mut Cx, what: &str, cells: (u32, u32)) {
+    ui.horizontal(|ui| {
+        let mut on = *cx.art_open;
+        if ui.toggle_value(&mut on, "🎨 Edit art").on_hover_text("Show the pixel editor under this form, at this sprite").changed() {
+            *cx.art_open = on;
+        }
+        if ui.button(format!("+ New blank {what}")).on_hover_text("Uses an empty frame of the sheet (or adds a row of frames) and opens it for drawing").clicked() {
+            *cx.art = Some(ArtAction::NewFrame { cells });
+        }
+    });
+}
+
+impl Editor {
+    /// Carries out an art action of the item / prop / character forms.
+    pub fn art_action(&mut self, a: ArtAction, tab: Tab) {
+        let i = self.db.sel;
+        let res: anyhow::Result<String> = (|| match a {
+            ArtAction::NewFrame { cells } => {
+                let cur = match tab {
+                    Tab::Items => self.project.db.items.get(i).map(|d| d.icon.clone()),
+                    Tab::Props => self.project.db.props.get(i).map(|d| d.state_look(self.db.state_sel.min(d.states.len())).0.clone()),
+                    _ => None,
+                };
+                let Some(cur) = cur else { anyhow::bail!("nothing selected") };
+                let sheet = if self.project.db.sheet(&cur.sheet).is_some() { cur.sheet.clone() } else { self.default_sheet(tab)? };
+                let frame = self.blank_frame(&sheet, cells)?;
+                let sprite = if cells == (1, 1) { SpriteRef::new(&sheet, frame) } else { SpriteRef::block(&sheet, frame, cells.0, cells.1) };
+                match tab {
+                    Tab::Items => self.project.db.items[i].icon = sprite,
+                    _ => {
+                        let d = &mut self.project.db.props[i];
+                        let k = self.db.state_sel.min(d.states.len());
+                        if k == 0 {
+                            d.sprite = sprite;
+                        } else {
+                            d.states[k - 1].sprite = sprite;
+                        }
+                    }
+                }
+                self.defs_dirty = true;
+                self.db.art_open = true;
+                self.db.art_focus = None;
+                Ok(format!("Blank frame {frame} of sheet '{sheet}' is ready: draw it below, Ctrl+S saves the image"))
+            }
+            ArtAction::CharacterSheet { template } => {
+                let Some(d) = self.project.db.characters.get(i).cloned() else { anyhow::bail!("nothing selected") };
+                let mut id = d.id.clone();
+                let mut n = 2;
+                while self.project.db.sheet(&id).is_some() {
+                    id = format!("{}_{n}", d.id);
+                    n += 1;
+                }
+                let mut rel = format!("sprites/{id}.png");
+                let mut n = 2;
+                while self.project.root.join(&rel).exists() {
+                    rel = format!("sprites/{id}_{n}.png");
+                    n += 1;
+                }
+                let (bytes, fw, fh) = match &template {
+                    Some(t) => {
+                        let s = self.project.db.sheet(t).cloned().ok_or_else(|| anyhow::anyhow!("unknown sheet {t}"))?;
+                        (std::fs::read(self.project.root.join(&s.image))?, s.frame_w, s.frame_h)
+                    }
+                    None => {
+                        let ts = rust2d_engine::project::TILE_SIZE;
+                        (Rgba::new(ts * 4, ts * 3 / 2 * 4).encode()?, ts, ts * 3 / 2)
+                    }
+                };
+                let path = self.project.root.join(&rel);
+                std::fs::create_dir_all(path.parent().unwrap())?;
+                std::fs::write(&path, bytes)?;
+                self.project.db.sheets.push(SheetDef { id: id.clone(), image: rel.clone(), frame_w: fw, frame_h: fh });
+                self.project.db.characters[i].sheet = id.clone();
+                self.defs_dirty = true;
+                self.reload_assets();
+                self.db.art_open = true;
+                self.db.art_focus = None;
+                Ok(format!("New sheet '{id}' ({rel}) for {}: draw it below, Ctrl+S saves the image", d.name))
+            }
+        })();
+        match res {
+            Ok(m) => self.set_status(m),
+            Err(e) => self.set_status(format!("Could not create the art: {e:#}")),
+        }
+    }
+
+    /// A sheet for new item icons / prop frames when the definition has none yet: an existing
+    /// "items" / "props" sheet, else a new blank one.
+    fn default_sheet(&mut self, tab: Tab) -> anyhow::Result<String> {
+        let want = if tab == Tab::Items { "items" } else { "props" };
+        if self.project.db.sheet(want).is_some() {
+            return Ok(want.to_string());
+        }
+        let id = if tab == Tab::Items { "icons" } else { "prop_art" };
+        if self.project.db.sheet(id).is_none() {
+            let ts = rust2d_engine::project::TILE_SIZE;
+            let rel = format!("sprites/{id}.png");
+            let path = self.project.root.join(&rel);
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            if !path.exists() {
+                std::fs::write(&path, Rgba::new(ts * 8, ts).encode()?)?;
+            }
+            self.project.db.sheets.push(SheetDef { id: id.into(), image: rel, frame_w: ts, frame_h: ts });
+            self.defs_dirty = true;
+            self.reload_assets();
+        }
+        Ok(id.to_string())
+    }
+
+    /// First fully transparent `cells`-sized frame block of a sheet; if there is none, a row
+    /// of frames is added to the image. Returns the block's top-left frame.
+    fn blank_frame(&mut self, sheet: &str, cells: (u32, u32)) -> anyhow::Result<u32> {
+        let def = self.project.db.sheet(sheet).cloned().ok_or_else(|| anyhow::anyhow!("unknown sheet {sheet}"))?;
+        if self.px.doc.as_ref().is_some_and(|d| d.rel == def.image && d.dirty) {
+            anyhow::bail!("save or revert the open image {} first", def.image);
+        }
+        let path = self.project.root.join(&def.image);
+        let mut img = Rgba::decode(&std::fs::read(&path)?)?;
+        let (fw, fh) = (def.frame_w.max(1), def.frame_h.max(1));
+        let (cols, rows) = ((img.w / fw).max(1), img.h / fh);
+        let (cw, ch) = (cells.0.max(1), cells.1.max(1));
+        if cw > cols {
+            anyhow::bail!("the sheet is only {cols} frames wide");
+        }
+        let empty = |img: &Rgba, c: u32, r: u32| {
+            (0..ch * fh).all(|y| (0..cw * fw).all(|x| img.get((c * fw + x) as i32, (r * fh + y) as i32)[3] == 0))
+        };
+        for r in 0..rows.saturating_sub(ch - 1) {
+            for c in 0..=cols - cw {
+                if empty(&img, c, r) {
+                    return Ok(r * cols + c);
+                }
+            }
+        }
+        // Full: add rows at the bottom.
+        img = img.with_canvas(img.w, (rows + ch) * fh);
+        std::fs::write(&path, img.encode()?)?;
+        self.reload_assets();
+        if let Some(d) = self.px.doc.as_ref().filter(|d| d.rel == def.image) {
+            let (rel, frame, layout) = (d.rel.clone(), d.frame, d.layout);
+            self.load_pixel(&rel, frame, layout);
+        }
+        Ok(rows * cols)
     }
 }

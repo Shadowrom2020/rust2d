@@ -9,6 +9,7 @@ mod doc;
 mod export;
 mod files;
 mod library_ui;
+mod maps;
 mod pixel;
 mod wizard;
 mod widgets;
@@ -164,6 +165,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "portal" => app::ZoneTemplate::Portal,
                 "trigger" => app::ZoneTemplate::Trigger,
                 "spawner" => app::ZoneTemplate::Spawner,
+                "transition" => app::ZoneTemplate::Transition,
                 _ => app::ZoneTemplate::Spawn,
             }
         }
@@ -190,6 +192,46 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "newproject" => ed.handle_file(files::Purpose::NewProject, arg(1).into()),
         "openproject" => ed.handle_file(files::Purpose::OpenProject, arg(1).into()),
         "closeproject" => ed.request(Pending::CloseProject),
+        // Maps: linkarea X Y W H · linknext TARGET · goto MAP [ZONE] · mapnext · zones
+        "linkarea" => ed.link_area((num(1) as u32, num(2) as u32, num(3) as u32, num(4) as u32)),
+        "linknext" => ed.link_next(arg(1)),
+        "goto" => ed.goto_map(arg(1), (!arg(2).is_empty()).then_some(arg(2))),
+        "mapnext" => ed.cycle_map(1),
+        // trdraw ZONE MAP · trlink ZONE MAP OTHER · trunlink ZONE (transition inspector actions)
+        "trdraw" | "trlink" | "trunlink" => {
+            let r = match arg(0) {
+                "trdraw" => maps::TransitionReq::DrawOther { zone: arg(1).into(), map: arg(2).into() },
+                "trlink" => maps::TransitionReq::LinkBack { zone: arg(1).into(), map: arg(2).into(), other: arg(3).into() },
+                _ => maps::TransitionReq::Unlink { zone: arg(1).into() },
+            };
+            maps::request_transition(r);
+            ed.handle_transition_request();
+            println!("[script] {}", ed.status.0);
+        }
+        "quickswitch" => ed.quick.open = true,
+        "zones" => {
+            if let Some(d) = &ed.doc {
+                for z in &d.map.zones {
+                    println!("[zones] {}: {} {:?} at {},{} {}x{}", d.map.name, z.name, z.kind, z.x, z.y, z.w, z.h);
+                }
+            }
+        }
+        // chooser FIELD_ID: opens a sprite chooser (e.g. item_icon)
+        "chooser" => widgets::request_chooser(arg(1)),
+        // art on|off · newframe [W H] · newcharsheet [TEMPLATE_SHEET]  (Database item / prop / character)
+        "art" => ed.db.art_open = arg(1) != "off",
+        "newframe" => {
+            let cells = if num(1) > 0.0 { (num(1) as u32, num(2) as u32) } else { (1, 1) };
+            let tab = ed.db.tab;
+            ed.art_action(database::ArtAction::NewFrame { cells }, tab);
+            println!("[script] {}", ed.status.0);
+        }
+        "newcharsheet" => {
+            let tab = ed.db.tab;
+            let template = (!arg(1).is_empty()).then(|| arg(1).to_string());
+            ed.art_action(database::ArtAction::CharacterSheet { template }, tab);
+            println!("[script] {}", ed.status.0);
+        }
         // exportgame OUT_DIR [NAME]  /  exportdialog
         "exportgame" => {
             let name = if arg(2).is_empty() { ed.project.config.name.clone() } else { cmd[2..].join(" ") };

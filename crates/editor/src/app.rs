@@ -44,10 +44,12 @@ pub enum Tool {
     Collision,
     Entity,
     Zone,
+    /// Drag an exit area, pick the target map, drag the arrival area there.
+    Link,
 }
 
 impl Tool {
-    pub const ALL: [(Tool, &'static str, &'static str); 9] = [
+    pub const ALL: [(Tool, &'static str, &'static str); 10] = [
         (Tool::Select, "Select", "V"),
         (Tool::Brush, "Brush", "B"),
         (Tool::Rect, "Rect", "R"),
@@ -57,6 +59,7 @@ impl Tool {
         (Tool::Collision, "Collision", "C"),
         (Tool::Entity, "Entities", "N"),
         (Tool::Zone, "Zones", "Z"),
+        (Tool::Link, "Transition", "T"),
     ];
     pub fn paints_tiles(self) -> bool {
         matches!(self, Tool::Brush | Tool::Rect | Tool::Fill | Tool::Erase | Tool::Pick)
@@ -86,6 +89,7 @@ pub enum ZoneTemplate {
     Portal,
     Trigger,
     Spawner,
+    Transition,
 }
 
 pub struct ViewOpts {
@@ -110,12 +114,19 @@ pub struct NewMapDialog {
 
 pub enum Pending {
     Open(String),
+    /// Open a map and focus a zone (by name; "" = none).
+    OpenAt(String, String),
     New,
     Quit,
     OpenProject(PathBuf),
     NewProject(PathBuf),
     /// Back to the welcome screen without a project.
     CloseProject,
+}
+
+thread_local! {
+    /// "Go to" requests from inspector widgets (map, zone name), handled after the panel.
+    static GOTO: std::cell::RefCell<Option<(String, String)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Answer to the "Unsaved changes" question.
@@ -128,6 +139,13 @@ pub enum Choice {
 }
 
 pub struct Editor {
+    /// Transition tool draft.
+    pub link: Option<crate::maps::LinkDraft>,
+    pub quick: crate::maps::QuickSwitch,
+    /// Camera (center, zoom) per map, restored when switching back.
+    pub map_cams: HashMap<String, (Vec2, f32)>,
+    /// Last click on a portal (uid, time) to detect double-clicks.
+    pub last_portal_click: Option<(u32, f64)>,
     /// False on the welcome screen: `project` is then an empty placeholder.
     pub project_open: bool,
     pub lib: crate::library_ui::LibState,
@@ -232,6 +250,10 @@ impl Editor {
         let maps = project.list_maps();
         let brush_ts = project.db.tilesets.first().map(|t| t.id.clone()).unwrap_or_default();
         Editor {
+            link: None,
+            quick: Default::default(),
+            map_cams: HashMap::new(),
+            last_portal_click: None,
             project_open,
             assets,
             audio,
@@ -303,9 +325,17 @@ impl Editor {
     // ------------------------------------------------------------ files
 
     pub fn open_map(&mut self, name: &str) {
+        // Remember where we looked on the map we leave.
+        if let Some(d) = &self.doc {
+            self.map_cams.insert(d.map.name.clone(), (self.cam.center, self.cam.zoom));
+        }
         match self.project.load_map(name) {
             Ok(map) => {
                 self.load_doc(map);
+                if let Some(&(center, zoom)) = self.map_cams.get(name) {
+                    self.cam.center = center;
+                    self.cam.zoom = zoom;
+                }
                 self.set_status(format!("Opened {name}"));
             }
             Err(e) => self.set_status(format!("Failed to open {name}: {e:#}")),
@@ -399,6 +429,7 @@ impl Editor {
     /// Rebuilds dropdown suggestions (items, maps, spawns, script functions, ...).
     pub fn refresh_refs(&mut self) {
         let mut spawns: HashMap<String, Vec<String>> = HashMap::new();
+        let mut transitions: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
         for m in &self.maps {
             let zones = if self.doc.as_ref().is_some_and(|d| &d.map.name == m) {
                 self.doc.as_ref().unwrap().map.zones.clone()
@@ -406,6 +437,16 @@ impl Editor {
                 self.project.load_map(m).map(|m| m.zones).unwrap_or_default()
             };
             spawns.insert(m.clone(), zones.iter().filter(|z| z.kind == ZoneKind::Spawn).map(|z| z.name.clone()).collect());
+            transitions.insert(
+                m.clone(),
+                zones
+                    .iter()
+                    .filter_map(|z| match &z.kind {
+                        ZoneKind::Transition { target_map, target_zone } => Some((z.name.clone(), target_map.clone(), target_zone.clone())),
+                        _ => None,
+                    })
+                    .collect(),
+            );
         }
         let mut scripts = ScriptHost::new();
         scripts.load_dir(&self.project.scripts_dir());
@@ -423,6 +464,8 @@ impl Editor {
             targets,
             functions: scripts.function_names(),
             spawns,
+            transitions,
+            current_map: self.doc.as_ref().map(|d| d.map.name.clone()).unwrap_or_default(),
             flags,
             sounds: self.project.db.sounds.iter().map(|s| s.id.clone()).collect(),
             characters: self.project.db.characters.iter().map(|c| c.id.clone()).collect(),
@@ -611,7 +654,18 @@ impl Editor {
                 };
             }
         }
+        // A game built from a different engine may not understand this editor's map data
+        // (e.g. `cargo run -p rust2d-editor` does not rebuild rust2d-game).
+        let game_build = std::process::Command::new(cmd.get_program())
+            .arg("--engine-build")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let stale = game_build.as_deref() != Some(rust2d_engine::ENGINE_BUILD);
         match cmd.spawn() {
+            Ok(_) if stale => self.set_status(
+                "Play-test started, but rust2d-game was built from a different engine version; if it fails, run `cargo build -p rust2d-game` (or `cargo build --workspace`)",
+            ),
             Ok(_) => self.set_status("Play-test started"),
             Err(e) => self.set_status(format!("Failed to start game: {e}")),
         }
@@ -912,6 +966,11 @@ impl Editor {
             Mode::Pixel => self.pixel_ui(ctx),
         }
         self.wizard_window(ctx);
+        self.map_windows(ctx);
+        self.handle_transition_request();
+        if let Some((m, zone)) = GOTO.with(|g| g.borrow_mut().take()) {
+            self.goto_map(&m, Some(&zone));
+        }
         self.export_window(ctx);
         self.canvas_rect = ctx.available_rect();
         self.dialogs(ctx);
@@ -1089,11 +1148,7 @@ impl Editor {
                 let px_label = if self.px.is_dirty() { "✏ Pixel editor •" } else { "✏ Pixel editor" };
                 ui.selectable_value(&mut self.mode, Mode::Pixel, px_label);
                 ui.separator();
-                let title = match &self.doc {
-                    Some(d) => format!("{}{}", d.map.name, if d.dirty { " •" } else { "" }),
-                    None => "(no map)".into(),
-                };
-                ui.label(egui::RichText::new(title).strong());
+                self.map_dropdown(ui);
                 if self.defs_dirty {
                     ui.colored_label(Color32::YELLOW, "defs •");
                 }
@@ -1187,6 +1242,12 @@ impl Editor {
                 Err(e) => self.set_status(format!("Could not create project: {e:#}")),
             },
             Pending::Open(m) => self.open_map(&m),
+            Pending::OpenAt(m, zone) => {
+                self.open_map(&m);
+                if !zone.is_empty() {
+                    self.focus_zone(&zone);
+                }
+            }
             Pending::New => {
                 self.new_map = Some(NewMapDialog { name: "new_map".into(), width: 64, height: 64, fill: true });
             }
@@ -1406,6 +1467,14 @@ impl Editor {
                 ui.weak("Red = blocked, green = walkable override. Tileset tiles flagged solid block automatically (edit flags in Database → Tilesets).");
             }
             Tool::Entity => self.entity_palette(ui),
+            Tool::Link => {
+                ui.heading("Transition");
+                ui.label("Link two maps with a pair of transition zones, e.g. where a road leaves one map and enters the other:");
+                ui.label("1. Drag over the exit (the road end).");
+                ui.label("2. Choose the target map.");
+                ui.label("3. On the target map, drag the other end.");
+                ui.weak("Each end leads to the other; players arrive one tile inside the other end (so they don't bounce back). Transition zones can also be drawn with the Zones tool and linked in the inspector (Leads to map / Other end, ✏ Draw the other end, ↗ Go to, Unlink). Portals and spawn points still work as before.");
+            }
             Tool::Zone => {
                 ui.heading("Zones");
                 ui.label("Drag on the map to create:");
@@ -1413,6 +1482,7 @@ impl Editor {
                 ui.radio_value(&mut self.zone_template, ZoneTemplate::Portal, "Portal (teleport on enter)");
                 ui.radio_value(&mut self.zone_template, ZoneTemplate::Trigger, "Trigger area (events)");
                 ui.radio_value(&mut self.zone_template, ZoneTemplate::Spawner, "Enemy spawner (invisible)");
+                ui.radio_value(&mut self.zone_template, ZoneTemplate::Transition, "Map transition (link it to another map in the inspector)");
                 ui.weak("Click a zone to select it, drag to move. Map-edge transitions are set in the map properties (right panel, nothing selected).");
             }
             _ => {}
@@ -1855,6 +1925,9 @@ impl Editor {
                             }
                             if let Some(l) = link {
                                 widgets::suggest(ui, "edge_map", &mut l.target_map, &refs.maps, 90.0);
+                                if ui.small_button("↗").on_hover_text(format!("Go to {}", l.target_map)).clicked() {
+                                    GOTO.with(|g| *g.borrow_mut() = Some((l.target_map.clone(), String::new())));
+                                }
                             }
                         });
                         if let Some(l) = link {
@@ -1925,12 +1998,14 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             ZoneKind::Portal { .. } => 1,
             ZoneKind::Trigger => 2,
             ZoneKind::Spawner { .. } => 3,
+            ZoneKind::Transition { .. } => 4,
         };
         let old = k;
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.radio_value(&mut k, 0, "Spawn");
                 ui.radio_value(&mut k, 1, "Portal");
+                ui.radio_value(&mut k, 4, "Map transition");
             });
             ui.horizontal(|ui| {
                 ui.radio_value(&mut k, 2, "Trigger");
@@ -1942,6 +2017,7 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
                 0 => ZoneKind::Spawn,
                 1 => ZoneKind::Portal { target_map: refs.maps.first().cloned().unwrap_or_default(), target_spawn: String::new() },
                 2 => ZoneKind::Trigger,
+                4 => ZoneKind::Transition { target_map: String::new(), target_zone: String::new() },
                 _ => default_spawner(refs),
             };
         }
@@ -1958,6 +2034,69 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             ui.add(egui::DragValue::new(&mut z.h).range(1..=mh));
         });
         ui.end_row();
+        let zone_name = z.name.clone();
+        if let ZoneKind::Transition { target_map, target_zone } = &mut z.kind {
+            ui.label("Leads to map");
+            egui::ComboBox::from_id_salt("tr_map").selected_text(if target_map.is_empty() { "(not linked)" } else { target_map.as_str() }).show_ui(ui, |ui| {
+                for m in &refs.maps {
+                    if ui.selectable_label(target_map == m, m).clicked() {
+                        *target_map = m.clone();
+                        target_zone.clear();
+                    }
+                }
+            });
+            ui.end_row();
+            if !target_map.is_empty() {
+                ui.label("Other end");
+                let others: Vec<(String, String, String)> = refs.transitions.get(target_map.as_str()).cloned().unwrap_or_default();
+                egui::ComboBox::from_id_salt("tr_zone").selected_text(if target_zone.is_empty() { "(choose)" } else { target_zone.as_str() }).show_ui(ui, |ui| {
+                    for (name, _, _) in &others {
+                        ui.selectable_value(target_zone, name.clone(), name);
+                    }
+                });
+                ui.end_row();
+                // Status: does the other end exist and lead back here?
+                let me = refs.current_map.clone();
+                let other = others.iter().find(|(n, _, _)| n == target_zone);
+                ui.label("");
+                match other {
+                    Some((_, m, z)) if *m == me && *z == zone_name => {
+                        ui.colored_label(Color32::LIGHT_GREEN, "✔ linked both ways");
+                    }
+                    Some(_) => {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(Color32::YELLOW, "the other end leads elsewhere");
+                            if ui.button("Link back").on_hover_text("Make the other end lead here").clicked() {
+                                crate::maps::request_transition(crate::maps::TransitionReq::LinkBack { zone: zone_name.clone(), map: target_map.clone(), other: target_zone.clone() });
+                            }
+                        });
+                    }
+                    None if target_zone.is_empty() => {
+                        ui.colored_label(Color32::YELLOW, "choose the other end, or draw it");
+                    }
+                    None => {
+                        ui.colored_label(Color32::LIGHT_RED, format!("'{target_map}' has no transition '{target_zone}'"));
+                    }
+                }
+                ui.end_row();
+            }
+            ui.label("");
+            ui.horizontal_wrapped(|ui| {
+                let map_for_draw = if target_map.is_empty() { refs.maps.iter().find(|m| **m != refs.current_map).cloned().unwrap_or_default() } else { target_map.clone() };
+                if !map_for_draw.is_empty() && ui.button(format!("✏ Draw the other end on {map_for_draw}")).on_hover_text("Opens that map: drag the other end there; both ends get linked").clicked() {
+                    crate::maps::request_transition(crate::maps::TransitionReq::DrawOther { zone: zone_name.clone(), map: map_for_draw });
+                }
+                if !target_map.is_empty() {
+                    if ui.button(format!("↗ Go to {target_map}")).clicked() {
+                        GOTO.with(|g| *g.borrow_mut() = Some((target_map.clone(), target_zone.clone())));
+                    }
+                    if ui.button("Unlink").on_hover_text("Also unlinks the other end if it leads here").clicked() {
+                        crate::maps::request_transition(crate::maps::TransitionReq::Unlink { zone: zone_name.clone() });
+                    }
+                }
+            });
+            ui.end_row();
+        }
         if let ZoneKind::Portal { target_map, target_spawn } = &mut z.kind {
             ui.label("Target map");
             widgets::suggest(ui, "pmap", target_map, &refs.maps, 120.0);
@@ -1965,6 +2104,11 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             ui.label("Target spawn");
             let spawns = refs.spawns.get(target_map.as_str()).cloned().unwrap_or_default();
             widgets::suggest(ui, "pspawn", target_spawn, &spawns, 120.0);
+            ui.end_row();
+            ui.label("");
+            if ui.button(format!("↗ Go to {target_map}")).on_hover_text("Open the target map at the target spawn (or double-click the portal)").clicked() {
+                GOTO.with(|g| *g.borrow_mut() = Some((target_map.clone(), target_spawn.clone())));
+            }
             ui.end_row();
         }
         if let ZoneKind::Spawner { character, count, respawn } = &mut z.kind {

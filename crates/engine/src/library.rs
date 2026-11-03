@@ -320,6 +320,21 @@ impl Bundle {
         }
     }
 
+    /// Adds only the assets whose ids `db` doesn't have yet (existing assets, possibly edited
+    /// by the user, are left alone; new assets referring to them use the existing ones).
+    pub fn add_missing(mut self, db: &mut Database, root: &Path) -> Result<MergeReport> {
+        let new = |k: RefKind, id: &str| !exists(db, &(k, id.to_string()));
+        self.db.tilesets.retain(|d| new(RefKind::Tileset, &d.id));
+        self.db.sheets.retain(|d| new(RefKind::Sheet, &d.id));
+        self.db.sounds.retain(|d| new(RefKind::Sound, &d.id));
+        self.db.items.retain(|d| new(RefKind::Item, &d.id));
+        self.db.props.retain(|d| new(RefKind::Prop, &d.id));
+        self.db.characters.retain(|d| new(RefKind::Character, &d.id));
+        let used = files_of(&self.db);
+        self.files.retain(|rel, _| used.contains(rel));
+        self.merge_into(db, root)
+    }
+
     /// Adds the bundle to a project (or the library) at `root`. Files are written right away;
     /// the caller saves the definitions.
     pub fn merge_into(mut self, db: &mut Database, root: &Path) -> Result<MergeReport> {
@@ -459,6 +474,8 @@ pub fn library_dir() -> PathBuf {
 
 /// Opens the library at `dir`, creating it (filled with `starter`, a `.r2dpack`) if needed.
 pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
+    let stamp_file = dir.join(STARTER_STAMP);
+    let stamp = starter.map(|b| format!("{:016x}", fnv1a(b)));
     if !dir.join("project.ron").exists() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         let bundle = starter.map(Bundle::from_pack).transpose().context("reading the starter assets")?;
@@ -469,10 +486,34 @@ pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
         }
         lib.save_config()?;
         lib.save_defs()?;
+        if let Some(s) = &stamp {
+            std::fs::write(&stamp_file, s)?;
+        }
     }
     // Libraries from before tiles were fixed at 32 px.
     crate::migrate::upgrade(dir, None)?;
-    Project::load(dir)
+    let mut lib = Project::load(dir)?;
+    // A newer starter set (new editor version): add the assets the library doesn't have yet.
+    if let (Some(bytes), Some(s)) = (starter, &stamp) {
+        if std::fs::read_to_string(&stamp_file).ok().as_deref() != Some(s.as_str()) {
+            let mut b = Bundle::from_pack(bytes).context("reading the starter assets")?;
+            b.rescale(TILE_SIZE)?;
+            let report = b.add_missing(&mut lib.db, dir)?;
+            if !report.added.is_empty() {
+                lib.save_defs()?;
+            }
+            std::fs::write(&stamp_file, s)?;
+        }
+    }
+    Ok(lib)
+}
+
+/// File in the library recording which starter set was last applied.
+const STARTER_STAMP: &str = "starter.stamp";
+
+/// 64-bit FNV-1a hash (a cheap fingerprint of the starter pack).
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3))
 }
 
 /// Adds a bundle to the library (rescaled to the library's tile size) and saves it.
@@ -604,6 +645,16 @@ mod tests {
         assert_eq!(lib.db.items.len(), 2);
         // The sheet is still used by the items.
         assert!(remove_assets(&mut lib, &[(RefKind::Sheet, "items".into())]).is_err());
+        // A newer starter set: only assets with new ids are added, existing ones stay as they are.
+        let mut db2 = db.clone();
+        db2.items[0].name = "Changed arrows".into();
+        db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16 });
+        std::fs::write(root.join("sprites/extra.png"), png(16, 16, [1, 2, 3, 255])).unwrap();
+        let pack2 = Bundle::collect(&db2, &root, 16, "starter", &all_assets(&db2)).unwrap().to_pack().unwrap();
+        let mut lib = open_library(&dir, Some(&pack2)).unwrap();
+        assert!(lib.db.sheet("extra").is_some(), "new sheet added");
+        assert_eq!(lib.db.item("arrows").unwrap().name, "arrows", "existing item untouched");
+        assert_eq!(lib.db.items.len(), 2);
         let everything = all_assets(&lib.db);
         remove_assets(&mut lib, &everything).unwrap();
         assert!(!dir.join("sprites/items.png").exists());

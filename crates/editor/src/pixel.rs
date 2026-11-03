@@ -275,12 +275,19 @@ impl Editor {
             self.mode = crate::app::Mode::Pixel;
             return;
         }
+        if self.load_pixel(rel, frame, layout) {
+            self.mode = crate::app::Mode::Pixel;
+        }
+    }
+
+    /// Loads an image into the pixel editor (without switching to its tab). False on errors.
+    pub fn load_pixel(&mut self, rel: &str, frame: (u32, u32), layout: Layout) -> bool {
         let path = self.project.root.join(rel);
         let img = match std::fs::read(&path).map_err(anyhow::Error::from).and_then(|b| Rgba::decode(&b)) {
             Ok(i) => i,
             Err(e) => {
                 self.set_status(format!("Cannot open {rel} in the pixel editor: {e:#}"));
-                return;
+                return false;
             }
         };
         let frame = (frame.0.clamp(1, img.w), frame.1.clamp(1, img.h));
@@ -290,7 +297,80 @@ impl Editor {
         self.px.pan = egui::Vec2::ZERO;
         self.px.sel_frame = 0;
         self.px.doc = Some(PixelDoc { rel: rel.to_string(), img, frame, layout, undo: vec![], redo: vec![], dirty: false, tex: None, tex_dirty: true });
-        self.mode = crate::app::Mode::Pixel;
+        true
+    }
+
+    /// The pixel editor inside another page (Database → Sprite sheets): tools on the left, the
+    /// canvas on the right, `height` pixels tall. Loads `rel` if it isn't open yet.
+    pub fn pixel_embedded(&mut self, ui: &mut egui::Ui, rel: &str, frame: (u32, u32), layout: Layout, height: f32) {
+        let open = self.px.doc.as_ref().map(|d| d.rel.clone());
+        if open.as_deref() != Some(rel) {
+            if self.px.is_dirty() {
+                let other = open.unwrap_or_default();
+                ui.colored_label(Color32::YELLOW, format!("The pixel editor has unsaved changes in {other}."));
+                ui.horizontal(|ui| {
+                    if ui.button("Save them").clicked() {
+                        self.save_pixel();
+                    }
+                    if ui.button("Discard them").clicked() {
+                        self.px.doc = None;
+                    }
+                    if ui.button("Show them").clicked() {
+                        self.mode = crate::app::Mode::Pixel;
+                    }
+                });
+                return;
+            }
+            let path = self.project.root.join(rel);
+            if !path.exists() {
+                ui.label(format!("The image {rel} doesn't exist yet."));
+                if ui.button(format!("Create a blank image ({}×{} px frames, 4×4 frames)", frame.0.max(1), frame.1.max(1))).clicked() {
+                    let img = Rgba::new(frame.0.max(1) * 4, frame.1.max(1) * 4);
+                    let res = img.encode().and_then(|b| {
+                        if let Some(dir) = path.parent() {
+                            std::fs::create_dir_all(dir)?;
+                        }
+                        Ok(std::fs::write(&path, b)?)
+                    });
+                    match res {
+                        Ok(()) => self.reload_assets(),
+                        Err(e) => self.set_status(format!("Could not create {rel}: {e:#}")),
+                    }
+                }
+                return;
+            }
+            if !self.load_pixel(rel, frame, layout) {
+                ui.colored_label(Color32::LIGHT_RED, format!("{rel} can't be opened (only PNG images can be edited)."));
+                return;
+            }
+            // Fit the embedded canvas.
+            if let Some(d) = &self.px.doc {
+                let w = (ui.available_width() - 280.0).max(200.0);
+                self.px.zoom = (w / d.img.w as f32).min((height - 40.0) / d.img.h as f32).floor().clamp(1.0, 16.0);
+            }
+        }
+        if let Some(d) = &mut self.px.doc {
+            // The grid follows the sheet's frame size as it is edited.
+            if d.frame != frame && frame.0 > 0 && frame.1 > 0 {
+                d.frame = frame;
+            }
+        }
+        let down = egui::Layout::top_down(egui::Align::LEFT);
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(egui::vec2(262.0, height), down, |ui| {
+                egui::ScrollArea::vertical().id_salt("px_embedded_side").max_height(height).show(ui, |ui| {
+                    ui.set_width(250.0);
+                    self.pixel_side(ui, true);
+                });
+            });
+            ui.separator();
+            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), height), down, |ui| {
+                ui.set_min_size(egui::vec2(ui.available_width(), height));
+                self.pixel_canvas(ui);
+            });
+        });
+        let ctx = ui.ctx().clone();
+        self.pixel_keys(&ctx);
     }
 
     pub fn save_pixel(&mut self) {
@@ -325,7 +405,7 @@ impl Editor {
 
     pub fn pixel_ui(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("px_left").resizable(true).default_width(270.0).show(ctx, |ui| {
-            egui::ScrollArea::vertical().id_salt("px_left_scroll").show(ui, |ui| self.pixel_side(ui));
+            egui::ScrollArea::vertical().id_salt("px_left_scroll").show(ui, |ui| self.pixel_side(ui, false));
         });
         egui::CentralPanel::default().show(ctx, |ui| self.pixel_canvas(ui));
         self.pixel_keys(ctx);
@@ -363,13 +443,18 @@ impl Editor {
         }
     }
 
-    fn pixel_side(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Pixel editor");
+    fn pixel_side(&mut self, ui: &mut egui::Ui, embedded: bool) {
         let targets = self.pixel_targets();
         let current = self.px.doc.as_ref().map_or("(nothing open)".to_string(), |d| d.rel.clone());
         let dirty = self.px.is_dirty();
         let mut open = None;
-        ui.add_enabled_ui(!dirty, |ui| {
+        if !embedded {
+            ui.heading("Pixel editor");
+        }
+        ui.add_enabled_ui(!dirty && !embedded, |ui| {
+            if embedded {
+                return;
+            }
             egui::ComboBox::from_id_salt("px_open").selected_text(&current).width(240.0).show_ui(ui, |ui| {
                 for (label, rel, frame, layout) in &targets {
                     if ui.selectable_label(*rel == current, label).on_hover_text(rel).clicked() {
@@ -391,9 +476,9 @@ impl Editor {
             }
             if ui.add_enabled(dirty, egui::Button::new("Revert")).clicked() {
                 let d = self.px.doc.take().unwrap();
-                self.open_pixel(&d.rel, d.frame, d.layout);
+                self.load_pixel(&d.rel, d.frame, d.layout);
             }
-            if ui.add_enabled(!dirty, egui::Button::new("Close")).clicked() {
+            if !embedded && ui.add_enabled(!dirty, egui::Button::new("Close")).clicked() {
                 self.px.doc = None;
             }
         });

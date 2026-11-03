@@ -952,10 +952,10 @@ fn main() {
     let out = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "example_project".into()));
     std::fs::create_dir_all(&out).unwrap();
     terrain(&out);
-    character(&out, "hero", &Look { skin: 0xf2c49b, hair: 0x5d3a1a, shirt: 0x2e6fdb, pants: 0x3b3b4f, beard: false, ears: false });
-    character(&out, "elder", &Look { skin: 0xe8b88a, hair: 0xdedede, shirt: 0x7b4fa0, pants: 0x4a3a5a, beard: true, ears: false });
-    character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false });
-    character(&out, "goblin", &Look { skin: 0x7cb342, hair: 0x33691e, shirt: 0x5d4037, pants: 0x3e2723, beard: false, ears: true });
+    character(&out, "hero", &Look { skin: 0xf2c49b, hair: 0x5d3a1a, shirt: 0x2e6fdb, pants: 0x3b3b4f, beard: false, ears: false, ..Default::default() });
+    character(&out, "elder", &Look { skin: 0xe8b88a, hair: 0xdedede, shirt: 0x7b4fa0, pants: 0x4a3a5a, beard: true, ears: false, ..Default::default() });
+    character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false, ..Default::default() });
+    character(&out, "goblin", &Look { skin: 0x7cb342, hair: 0x33691e, shirt: 0x5d4037, pants: 0x3e2723, beard: false, ears: true, ..Default::default() });
     overlay(&out, "ov_cap", Gear::Cap);
     overlay(&out, "ov_helmet", Gear::Helmet);
     overlay(&out, "ov_leather", Gear::Leather);
@@ -1009,6 +1009,13 @@ fn main() {
 fn write_starter_pack(project: &Project) {
     use rust2d_engine::library::{all_assets, Bundle};
     let mut b = Bundle::collect(&project.db, &project.root, TS, "rust2d starter assets", &all_assets(&project.db)).unwrap();
+    // Library-only extras: more tilesets, props and characters.
+    let extra = art::extra::library_extras();
+    b.db.tilesets.extend(extra.db.tilesets);
+    b.db.sheets.extend(extra.db.sheets);
+    b.db.props.extend(extra.db.props);
+    b.db.characters.extend(extra.db.characters);
+    b.files.extend(extra.files);
     let scripted = |t: &Trigger| t.actions.iter().any(|a| matches!(a, Action::RunScript { .. }));
     for d in &mut b.db.items {
         d.on_use.retain(|t| !scripted(t));

@@ -15,6 +15,9 @@ pub enum ZoneKind {
     Trigger,
     /// Invisible area where up to `count` characters spawn (typically enemies).
     Spawner { character: String, count: u32, respawn: Respawn },
+    /// One end of a two-way map transition: entering it moves the player next to the zone
+    /// `target_zone` on `target_map` (its counterpart, which leads back here).
+    Transition { target_map: String, target_zone: String },
 }
 
 /// When defeated spawner characters come back.
@@ -45,8 +48,34 @@ impl ZoneKind {
             ZoneKind::Portal { .. } => "Portal",
             ZoneKind::Trigger => "Trigger",
             ZoneKind::Spawner { .. } => "Spawner",
+            ZoneKind::Transition { .. } => "Map transition",
         }
     }
+}
+
+/// The tile next to an area (x, y, w, h) where arriving players stand: on the side away from
+/// the map edge the area touches, or else facing the map's center.
+pub fn beside_tile(map_w: u32, map_h: u32, (x, y, w, h): (u32, u32, u32, u32)) -> (u32, u32) {
+    let (mx, my) = (x + w / 2, y + h / 2);
+    let side = if x == 0 {
+        (1, 0)
+    } else if x + w >= map_w {
+        (-1, 0)
+    } else if y == 0 {
+        (0, 1)
+    } else if y + h >= map_h {
+        (0, -1)
+    } else {
+        let (dx, dy) = (map_w as i32 / 2 - mx as i32, map_h as i32 / 2 - my as i32);
+        if dx.abs() > dy.abs() { (dx.signum(), 0) } else { (0, if dy == 0 { 1 } else { dy.signum() }) }
+    };
+    let (tx, ty) = match side {
+        (1, _) => (x as i32 + w as i32, my as i32),
+        (-1, _) => (x as i32 - 1, my as i32),
+        (_, 1) => (mx as i32, y as i32 + h as i32),
+        _ => (mx as i32, y as i32 - 1),
+    };
+    (tx.clamp(0, map_w as i32 - 1) as u32, ty.clamp(0, map_h as i32 - 1) as u32)
 }
 
 /// Rectangular area in tile coordinates.
@@ -71,6 +100,14 @@ impl Zone {
             self.w as f32 * tile_size,
             self.h as f32 * tile_size,
         )
+    }
+
+    /// Where players arriving through a map transition are placed: the tile next to the zone
+    /// on the side away from the map edge it touches (else facing the map's center), so they
+    /// don't walk straight back through it. Bottom-center of that tile, in pixels.
+    pub fn beside_point(&self, map_w: u32, map_h: u32, tile_size: f32) -> Vec2 {
+        let (tx, ty) = beside_tile(map_w, map_h, (self.x, self.y, self.w, self.h));
+        vec2((tx as f32 + 0.5) * tile_size, (ty as f32 + 1.0) * tile_size - 1.0)
     }
 
     /// Where actors arriving at this zone are placed (bottom-center of the zone's center tile).
@@ -208,6 +245,18 @@ pub fn edge_destination(
         Edge::South => vec2(clamp_x(pos.x + off), clamp_y(inset + ts * 0.5)),
         Edge::West => vec2(w - inset, clamp_y(pos.y + off)),
         Edge::East => vec2(inset, clamp_y(pos.y + off)),
+    }
+}
+
+#[cfg(test)]
+mod beside_tests {
+    use super::*;
+
+    #[test]
+    fn arrival_is_next_to_the_zone_inside_the_map() {
+        assert_eq!(beside_tile(40, 30, (39, 14, 1, 3)), (38, 15));
+        assert_eq!(beside_tile(40, 30, (18, 0, 3, 1)), (19, 1));
+        assert_eq!(beside_tile(40, 30, (5, 14, 2, 2)), (7, 15));
     }
 }
 

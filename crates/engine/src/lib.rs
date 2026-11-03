@@ -19,3 +19,7 @@ pub mod script;
 pub mod state;
 
 pub use macroquad;
+
+/// Fingerprint of the engine sources this binary was built from. The editor compares it
+/// with `rust2d-game --engine-build` before a play-test to catch a stale game binary.
+pub const ENGINE_BUILD: &str = env!("RUST2D_ENGINE_BUILD");
