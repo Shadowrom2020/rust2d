@@ -1,0 +1,387 @@
+[
+    (
+        id: "key",
+        name: "Gate Key",
+        description: "An old iron key. Opens the east gate.",
+        icon: (
+            sheet: "items",
+            frame: 0,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 1,
+    ),
+    (
+        id: "bronze_key",
+        name: "Bronze Key",
+        description: "Opens a chest somewhere in Whisperwood.",
+        icon: (
+            sheet: "items",
+            frame: 18,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 5,
+    ),
+    (
+        id: "potion",
+        name: "Red Potion",
+        description: "Restores 3 hearts.",
+        icon: (
+            sheet: "items",
+            frame: 1,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    If(
+                        conditions: [
+                            (
+                                cond: PlayerHp(
+                                    op: Ge,
+                                    value: 12,
+                                ),
+                                negate: false,
+                            ),
+                        ],
+                        then: [
+                            Dialog(
+                                speaker: "",
+                                text: "You\'re already at full health. You drink it anyway.",
+                            ),
+                        ],
+                        otherwise: [],
+                    ),
+                    Heal(
+                        amount: 6,
+                    ),
+                    SetVar(
+                        name: "potions_drunk",
+                        op: Add,
+                        value: 1,
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+    ),
+    (
+        id: "coin",
+        name: "Coin",
+        description: "Shiny gold coins.",
+        icon: (
+            sheet: "items",
+            frame: 2,
+        ),
+        consumable: false,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    RunScript(
+                        function: "count_coins",
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 99,
+    ),
+    (
+        id: "apple",
+        name: "Apple",
+        description: "Crunchy and sweet. Restores 1 heart.",
+        icon: (
+            sheet: "items",
+            frame: 3,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 2,
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 20,
+    ),
+    (
+        id: "bow",
+        name: "Hunting Bow",
+        description: "Fast shots, uses arrows. Use it from the inventory to equip (or press Q).",
+        icon: (
+            sheet: "items",
+            frame: 5,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: Some((
+            damage: 1,
+            cooldown: 0.45,
+            ranged: Some((
+                projectile: (
+                    sheet: "items",
+                    frame: 9,
+                ),
+                speed: 480.0,
+                range: 8.0,
+                ammo: "arrows",
+            )),
+            reach: 1.0,
+            arc: 60.0,
+            knockback: 1.0,
+        )),
+        armor: None,
+        max_stack: 1,
+    ),
+    (
+        id: "crossbow",
+        name: "Crossbow",
+        description: "Slow but powerful, uses bolts.",
+        icon: (
+            sheet: "items",
+            frame: 6,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: Some((
+            damage: 3,
+            cooldown: 1.1,
+            ranged: Some((
+                projectile: (
+                    sheet: "items",
+                    frame: 10,
+                ),
+                speed: 640.0,
+                range: 10.0,
+                ammo: "bolts",
+            )),
+            reach: 1.0,
+            arc: 60.0,
+            knockback: 1.0,
+        )),
+        armor: None,
+        max_stack: 1,
+    ),
+    (
+        id: "arrows",
+        name: "Arrows",
+        description: "Ammunition for the bow.",
+        icon: (
+            sheet: "items",
+            frame: 7,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 50,
+    ),
+    (
+        id: "bolts",
+        name: "Bolts",
+        description: "Ammunition for the crossbow.",
+        icon: (
+            sheet: "items",
+            frame: 8,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 30,
+    ),
+    (
+        id: "sword",
+        name: "Short Sword",
+        description: "A reliable blade.",
+        icon: (
+            sheet: "items",
+            frame: 11,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: Some((
+            damage: 2,
+            cooldown: 0.35,
+            ranged: None,
+            reach: 1.1,
+            arc: 65.0,
+            knockback: 1.0,
+        )),
+        armor: None,
+        max_stack: 1,
+    ),
+    (
+        id: "spear",
+        name: "Spear",
+        description: "Hits from two tiles away, but only straight ahead.",
+        icon: (
+            sheet: "items",
+            frame: 12,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: Some((
+            damage: 2,
+            cooldown: 0.55,
+            ranged: None,
+            reach: 1.9,
+            arc: 22.0,
+            knockback: 0.7,
+        )),
+        armor: None,
+        max_stack: 1,
+    ),
+    (
+        id: "axe",
+        name: "Battle Axe",
+        description: "Slow, wide swings that send enemies flying.",
+        icon: (
+            sheet: "items",
+            frame: 13,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: Some((
+            damage: 4,
+            cooldown: 0.85,
+            ranged: None,
+            reach: 1.0,
+            arc: 85.0,
+            knockback: 1.8,
+        )),
+        armor: None,
+        max_stack: 1,
+    ),
+    (
+        id: "leather_cap",
+        name: "Leather Cap",
+        description: "Light head protection.",
+        icon: (
+            sheet: "items",
+            frame: 14,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: Some((
+            slot: Head,
+            defense: 1,
+            speed: 0.0,
+            overlay: "ov_cap",
+        )),
+        max_stack: 1,
+    ),
+    (
+        id: "iron_helmet",
+        name: "Iron Helmet",
+        description: "Sturdy, a little heavy.",
+        icon: (
+            sheet: "items",
+            frame: 15,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: Some((
+            slot: Head,
+            defense: 2,
+            speed: -0.05,
+            overlay: "ov_helmet",
+        )),
+        max_stack: 1,
+    ),
+    (
+        id: "leather_armor",
+        name: "Leather Armor",
+        description: "Light body armor.",
+        icon: (
+            sheet: "items",
+            frame: 16,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: Some((
+            slot: Body,
+            defense: 1,
+            speed: 0.0,
+            overlay: "ov_leather",
+        )),
+        max_stack: 1,
+    ),
+    (
+        id: "chainmail",
+        name: "Chainmail",
+        description: "Strong protection, but you move slower.",
+        icon: (
+            sheet: "items",
+            frame: 17,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: Some((
+            slot: Body,
+            defense: 3,
+            speed: -0.15,
+            overlay: "ov_chain",
+        )),
+        max_stack: 1,
+    ),
+    (
+        id: "letter",
+        name: "Old Letter",
+        description: "A letter addressed to the elder.",
+        icon: (
+            sheet: "items",
+            frame: 4,
+        ),
+        consumable: false,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Dialog(
+                        speaker: "Letter",
+                        text: "\"Rowan, the shrine\'s flame must never go out. - M.\"",
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 1,
+    ),
+]

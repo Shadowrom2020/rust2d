@@ -1,0 +1,205 @@
+//! Native file dialogs (non-blocking) and project/asset file helpers.
+
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
+
+use anyhow::{bail, Context, Result};
+use rust2d_engine::defs::Database;
+use rust2d_engine::map::{Map, Zone, ZoneKind};
+use rust2d_engine::project::{Project, ProjectConfig};
+
+/// What a file dialog was opened for.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Purpose {
+    OpenProject,
+    NewProject,
+    /// Image for the tileset with this id.
+    TilesetImage(String),
+    SheetImage(String),
+    SoundFile(String),
+    /// A `.r2dpack` to import into the library or the project.
+    ImportPackage { into_library: bool },
+    /// Where to write a `.r2dpack` with these assets.
+    ExportPackage { from_library: bool, assets: Vec<rust2d_engine::library::AssetRef> },
+    /// Output folder of File → Export game.
+    ExportGameFolder,
+}
+
+/// A file dialog running on a background thread, so the editor keeps drawing.
+pub struct PendingDialog {
+    pub purpose: Purpose,
+    rx: Receiver<Option<PathBuf>>,
+}
+
+impl PendingDialog {
+    pub fn open(purpose: Purpose, start_dir: Option<PathBuf>) -> Self {
+        let (tx, rx) = channel();
+        let p = purpose.clone();
+        std::thread::spawn(move || {
+            let mut d = rfd::FileDialog::new();
+            if let Some(dir) = start_dir {
+                d = d.set_directory(dir);
+            }
+            let images = ["png", "jpg", "jpeg", "bmp", "gif", "tga"];
+            let result = match p {
+                Purpose::OpenProject => d.set_title("Open rust2d project (folder containing project.ron)").pick_folder(),
+                Purpose::NewProject => d.set_title("Choose an empty folder for the new project").pick_folder(),
+                Purpose::TilesetImage(_) => d.set_title("Choose tileset image").add_filter("Images", &images).pick_file(),
+                Purpose::SheetImage(_) => d.set_title("Choose sprite sheet image").add_filter("Images", &images).pick_file(),
+                Purpose::SoundFile(_) => d.set_title("Choose sound").add_filter("Audio (WAV, OGG)", &["wav", "ogg"]).pick_file(),
+                Purpose::ExportGameFolder => d.set_title("Folder for the exported game").pick_folder(),
+                Purpose::ImportPackage { .. } => d.set_title("Import asset package").add_filter("rust2d asset package", &["r2dpack"]).pick_file(),
+                Purpose::ExportPackage { .. } => d.set_title("Export asset package").add_filter("rust2d asset package", &["r2dpack"]).set_file_name("assets.r2dpack").save_file(),
+            };
+            let _ = tx.send(result);
+        });
+        PendingDialog { purpose, rx }
+    }
+
+    /// `Some(result)` once the dialog has closed (`Some(None)` = cancelled).
+    pub fn poll(&self) -> Option<Option<PathBuf>> {
+        match self.rx.try_recv() {
+            Ok(v) => Some(v),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(None),
+        }
+    }
+}
+
+fn to_slash(p: &Path) -> String {
+    p.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+}
+
+/// Returns `file`'s path relative to the project root. Files outside the project are
+/// copied into `<root>/<subdir>/` first (never overwriting a different file).
+pub fn import_asset(root: &Path, file: &Path, subdir: &str) -> Result<String> {
+    let root_c = root.canonicalize().context("project folder")?;
+    let file_c = file.canonicalize().with_context(|| format!("reading {}", file.display()))?;
+    if let Ok(rel) = file_c.strip_prefix(&root_c) {
+        return Ok(to_slash(rel));
+    }
+    let dir = root_c.join(subdir);
+    std::fs::create_dir_all(&dir)?;
+    let name = file_c.file_name().context("file has no name")?;
+    let stem = Path::new(name).file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let ext = Path::new(name).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let data = std::fs::read(&file_c)?;
+    let mut dest = dir.join(name);
+    let mut n = 2;
+    while dest.exists() && std::fs::read(&dest)? != data {
+        dest = dir.join(format!("{stem}_{n}{ext}"));
+        n += 1;
+    }
+    if !dest.exists() {
+        std::fs::write(&dest, &data)?;
+    }
+    Ok(to_slash(dest.strip_prefix(&root_c)?))
+}
+
+/// Creates an empty project (config, empty definitions, one map with a spawn point, a script file).
+pub fn create_project(dir: &Path) -> Result<()> {
+    if dir.join("project.ron").exists() {
+        bail!("{} already contains a project", dir.display());
+    }
+    let has_files = std::fs::read_dir(dir).map(|mut it| it.any(|e| e.is_ok_and(|e| !e.file_name().to_string_lossy().starts_with('.')))).unwrap_or(false);
+    if has_files {
+        bail!("{} is not empty; choose (or create) an empty folder for the new project", dir.display());
+    }
+    std::fs::create_dir_all(dir)?;
+    let name = dir.file_name().map_or("New project".into(), |n| n.to_string_lossy().into_owned());
+    let project = Project {
+        root: dir.to_path_buf(),
+        config: ProjectConfig { inventory_size: 24, ..ProjectConfig::new(&name) },
+        db: Database::default(),
+    };
+    project.save_config()?;
+    project.save_defs()?;
+    let mut map = Map::new("start", 40, 30);
+    let uid = map.alloc_uid();
+    map.zones.push(Zone { uid, name: "start".into(), x: 20, y: 15, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![] });
+    project.save_map(&map)?;
+    std::fs::create_dir_all(project.scripts_dir())?;
+    std::fs::write(
+        project.scripts_dir().join("main.rhai"),
+        "// Functions here can be called with the 'Run script' action.\n\nfn hello() {\n    say(\"Hello!\");\n}\n",
+    )?;
+    for d in ["tilesets", "sprites", "sounds"] {
+        std::fs::create_dir_all(dir.join(d))?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- recent projects
+
+const RECENT_MAX: usize = 8;
+
+/// `$RUST2D_EDITOR_CONFIG`, else `$XDG_CONFIG_HOME/rust2d`, else `~/.config/rust2d`.
+fn config_dir() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("RUST2D_EDITOR_CONFIG") {
+        return Some(PathBuf::from(p));
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join("rust2d"))
+}
+
+/// Recently opened projects that still exist, newest first.
+pub fn recent_projects() -> Vec<PathBuf> {
+    let Some(file) = config_dir().map(|d| d.join("recent.ron")) else { return Vec::new() };
+    let list: Vec<PathBuf> = std::fs::read_to_string(file).ok().and_then(|s| ron::from_str(&s).ok()).unwrap_or_default();
+    list.into_iter().filter(|p| p.join("project.ron").exists()).collect()
+}
+
+/// Puts a project at the top of the recent list.
+pub fn remember_recent(root: &Path) {
+    let Some(dir) = config_dir() else { return };
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut list = recent_projects();
+    list.retain(|p| *p != root);
+    list.insert(0, root);
+    list.truncate(RECENT_MAX);
+    if std::fs::create_dir_all(&dir).is_ok() {
+        if let Ok(s) = ron::ser::to_string_pretty(&list, ron::ser::PrettyConfig::default()) {
+            let _ = std::fs::write(dir.join("recent.ron"), s);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("rust2d-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn import_copies_outside_files_without_clobbering() {
+        let root = temp_dir("import-root");
+        let outside = temp_dir("import-src");
+        std::fs::write(outside.join("grass.png"), b"one").unwrap();
+        assert_eq!(import_asset(&root, &outside.join("grass.png"), "tilesets").unwrap(), "tilesets/grass.png");
+        // Same content again: reused.
+        assert_eq!(import_asset(&root, &outside.join("grass.png"), "tilesets").unwrap(), "tilesets/grass.png");
+        // Different file, same name: copied under a new name.
+        std::fs::write(outside.join("grass.png"), b"two").unwrap();
+        assert_eq!(import_asset(&root, &outside.join("grass.png"), "tilesets").unwrap(), "tilesets/grass_2.png");
+        // Files already inside the project are referenced in place.
+        std::fs::create_dir_all(root.join("art/x")).unwrap();
+        std::fs::write(root.join("art/x/hero.png"), b"h").unwrap();
+        assert_eq!(import_asset(&root, &root.join("art/x/hero.png"), "sprites").unwrap(), "art/x/hero.png");
+        assert_eq!(std::fs::read(root.join("tilesets/grass.png")).unwrap(), b"one");
+    }
+
+    #[test]
+    fn new_project_loads() {
+        let dir = temp_dir("newproj");
+        create_project(&dir).unwrap();
+        let p = Project::load(&dir).unwrap();
+        assert_eq!(p.list_maps(), vec!["start".to_string()]);
+        assert!(p.load_map("start").unwrap().spawn_point("start").is_some());
+        assert!(create_project(&dir).is_err(), "must not overwrite an existing project");
+    }
+}

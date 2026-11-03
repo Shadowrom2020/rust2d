@@ -1,0 +1,16 @@
+[package]
+name = "rust2d-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+macroquad.workspace = true
+serde.workspace = true
+ron.workspace = true
+postcard.workspace = true
+lz4_flex.workspace = true
+rhai.workspace = true
+anyhow.workspace = true
+png = "0.17"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }

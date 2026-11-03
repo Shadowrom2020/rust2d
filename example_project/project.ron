@@ -1,0 +1,20 @@
+(
+    name: "rust2d example",
+    tile_size: 32,
+    start_map: "village",
+    start_spawn: "start",
+    scale: 1.5,
+    player: "hero",
+    sfx: (
+        pickup: "pickup",
+        attack: "swing",
+        hit: "hit",
+        hurt: "hurt",
+        defeat: "defeat",
+        dialog: "blip",
+        portal: "door",
+        open_container: "creak",
+        unlock: "unlock",
+    ),
+    inventory_size: 24,
+)

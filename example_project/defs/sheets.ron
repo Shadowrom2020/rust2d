@@ -1,0 +1,68 @@
+[
+    (
+        id: "hero",
+        image: "sprites/hero.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "elder",
+        image: "sprites/elder.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "villager",
+        image: "sprites/villager.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "slime",
+        image: "sprites/slime.png",
+        frame_w: 32,
+        frame_h: 32,
+    ),
+    (
+        id: "goblin",
+        image: "sprites/goblin.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "ov_cap",
+        image: "sprites/ov_cap.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "ov_helmet",
+        image: "sprites/ov_helmet.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "ov_leather",
+        image: "sprites/ov_leather.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "ov_chain",
+        image: "sprites/ov_chain.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
+        id: "props",
+        image: "sprites/props.png",
+        frame_w: 32,
+        frame_h: 32,
+    ),
+    (
+        id: "items",
+        image: "sprites/items.png",
+        frame_w: 32,
+        frame_h: 32,
+    ),
+]

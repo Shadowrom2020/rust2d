@@ -1,0 +1,368 @@
+//! Tile maps: chunked, sparse layers so maps up to 1024x1024 tiles stay cheap.
+
+pub mod io;
+pub mod transition;
+
+use serde::{Deserialize, Serialize};
+
+use crate::entity::EntityInstance;
+use crate::events::Trigger;
+pub use transition::{Edge, EdgeLink, EdgeLinks, Respawn, Zone, ZoneKind};
+
+pub const MAX_MAP_SIZE: u32 = 1024;
+pub const CHUNK_SIZE: u32 = 32;
+const CHUNK_AREA: usize = (CHUNK_SIZE * CHUNK_SIZE) as usize;
+
+/// A tile reference. `0` is the empty tile; otherwise it encodes
+/// a tileset slot (index into `Map::tilesets`) and a tile index inside that tileset.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Tile(pub u32);
+
+impl Tile {
+    pub const EMPTY: Tile = Tile(0);
+    const INDEX_BITS: u32 = 20;
+    const INDEX_MASK: u32 = (1 << Self::INDEX_BITS) - 1;
+
+    pub fn new(tileset_slot: u16, index: u32) -> Tile {
+        debug_assert!(tileset_slot < 4095 && index <= Self::INDEX_MASK);
+        Tile(((tileset_slot as u32 + 1) << Self::INDEX_BITS) | (index & Self::INDEX_MASK))
+    }
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+    /// `(tileset_slot, tile_index)`, or `None` for the empty tile.
+    pub fn parts(self) -> Option<(usize, u32)> {
+        if self.0 == 0 {
+            None
+        } else {
+            Some((((self.0 >> Self::INDEX_BITS) - 1) as usize, self.0 & Self::INDEX_MASK))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Chunk {
+    pub tiles: Vec<Tile>,
+}
+
+impl Chunk {
+    fn new() -> Self {
+        Chunk { tiles: vec![Tile::EMPTY; CHUNK_AREA] }
+    }
+    fn is_empty(&self) -> bool {
+        self.tiles.iter().all(|t| t.is_empty())
+    }
+}
+
+/// One drawable layer of tiles, stored as a grid of optional chunks.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TileLayer {
+    pub name: String,
+    #[serde(default = "yes")]
+    pub visible: bool,
+    /// Drawn after entities (tree tops, roofs, ...).
+    #[serde(default)]
+    pub above_entities: bool,
+    chunks_w: u32,
+    chunks_h: u32,
+    chunks: Vec<Option<Box<Chunk>>>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl TileLayer {
+    pub fn new(name: &str, width: u32, height: u32, above_entities: bool) -> Self {
+        let chunks_w = width.div_ceil(CHUNK_SIZE);
+        let chunks_h = height.div_ceil(CHUNK_SIZE);
+        TileLayer {
+            name: name.to_string(),
+            visible: true,
+            above_entities,
+            chunks_w,
+            chunks_h,
+            chunks: vec![None; (chunks_w * chunks_h) as usize],
+        }
+    }
+
+    #[inline]
+    fn locate(&self, x: u32, y: u32) -> (usize, usize) {
+        let ci = (y / CHUNK_SIZE * self.chunks_w + x / CHUNK_SIZE) as usize;
+        let ti = ((y % CHUNK_SIZE) * CHUNK_SIZE + x % CHUNK_SIZE) as usize;
+        (ci, ti)
+    }
+
+    /// Caller must ensure `x,y` are inside the map.
+    #[inline]
+    pub fn get(&self, x: u32, y: u32) -> Tile {
+        let (ci, ti) = self.locate(x, y);
+        match &self.chunks[ci] {
+            Some(c) => c.tiles[ti],
+            None => Tile::EMPTY,
+        }
+    }
+
+    /// Sets a tile and returns the previous value.
+    pub fn set(&mut self, x: u32, y: u32, tile: Tile) -> Tile {
+        let (ci, ti) = self.locate(x, y);
+        let slot = &mut self.chunks[ci];
+        if slot.is_none() {
+            if tile.is_empty() {
+                return Tile::EMPTY;
+            }
+            *slot = Some(Box::new(Chunk::new()));
+        }
+        let chunk = slot.as_mut().unwrap();
+        std::mem::replace(&mut chunk.tiles[ti], tile)
+    }
+
+    /// Frees chunks that became completely empty (called before saving).
+    pub fn compact(&mut self) {
+        for slot in &mut self.chunks {
+            if slot.as_ref().is_some_and(|c| c.is_empty()) {
+                *slot = None;
+            }
+        }
+    }
+
+    pub fn allocated_chunks(&self) -> usize {
+        self.chunks.iter().filter(|c| c.is_some()).count()
+    }
+
+    /// Whether the chunk containing tile `(x, y)` holds any data.
+    pub fn chunk_allocated(&self, x: u32, y: u32) -> bool {
+        self.chunks[self.locate(x, y).0].is_some()
+    }
+}
+
+/// Per-tile collision override painted in the editor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum CollisionOverride {
+    /// Use the tileset's solidity flags.
+    #[default]
+    Auto = 0,
+    Solid = 1,
+    Walkable = 2,
+}
+
+#[derive(Clone, Debug)]
+pub struct Map {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    /// Tileset ids used by this map; `Tile` slots index into this list.
+    pub tilesets: Vec<String>,
+    pub layers: Vec<TileLayer>,
+    /// One byte per tile (`CollisionOverride`).
+    pub collision: Vec<u8>,
+    pub entities: Vec<EntityInstance>,
+    pub zones: Vec<Zone>,
+    pub edges: EdgeLinks,
+    /// Map-level triggers (MapEnter, Custom events).
+    pub triggers: Vec<Trigger>,
+    pub next_uid: u32,
+    /// Background color (RGB) shown outside the map / under empty tiles.
+    pub background: [u8; 3],
+    /// Looping music sound id ("" = keep whatever is playing).
+    pub music: String,
+}
+
+impl Map {
+    pub fn new(name: &str, width: u32, height: u32) -> Self {
+        let width = width.clamp(1, MAX_MAP_SIZE);
+        let height = height.clamp(1, MAX_MAP_SIZE);
+        Map {
+            name: name.to_string(),
+            width,
+            height,
+            tilesets: Vec::new(),
+            layers: vec![
+                TileLayer::new("Ground", width, height, false),
+                TileLayer::new("Detail", width, height, false),
+                TileLayer::new("Overhead", width, height, true),
+            ],
+            collision: vec![0; (width * height) as usize],
+            entities: Vec::new(),
+            zones: Vec::new(),
+            edges: EdgeLinks::default(),
+            triggers: Vec::new(),
+            next_uid: 1,
+            background: [20, 20, 28],
+            music: String::new(),
+        }
+    }
+
+    pub fn in_bounds(&self, x: i32, y: i32) -> bool {
+        x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height
+    }
+
+    pub fn add_layer(&mut self, name: &str, above_entities: bool) {
+        self.layers.push(TileLayer::new(name, self.width, self.height, above_entities));
+    }
+
+    /// Returns the slot for a tileset id, registering it if needed.
+    pub fn tileset_slot(&mut self, tileset_id: &str) -> u16 {
+        if let Some(i) = self.tilesets.iter().position(|t| t == tileset_id) {
+            return i as u16;
+        }
+        self.tilesets.push(tileset_id.to_string());
+        (self.tilesets.len() - 1) as u16
+    }
+
+    pub fn collision_at(&self, x: u32, y: u32) -> CollisionOverride {
+        match self.collision[(y * self.width + x) as usize] {
+            1 => CollisionOverride::Solid,
+            2 => CollisionOverride::Walkable,
+            _ => CollisionOverride::Auto,
+        }
+    }
+
+    pub fn set_collision(&mut self, x: u32, y: u32, c: CollisionOverride) -> CollisionOverride {
+        let i = (y * self.width + x) as usize;
+        let old = self.collision_at(x, y);
+        self.collision[i] = c as u8;
+        old
+    }
+
+    /// Allocates a map-unique id for entities and zones.
+    pub fn alloc_uid(&mut self) -> u32 {
+        let uid = self.next_uid.max(1);
+        self.next_uid = uid + 1;
+        uid
+    }
+
+    pub fn entity(&self, uid: u32) -> Option<&EntityInstance> {
+        self.entities.iter().find(|e| e.uid == uid)
+    }
+
+    pub fn spawn_point(&self, name: &str) -> Option<&Zone> {
+        self.zones
+            .iter()
+            .find(|z| matches!(z.kind, ZoneKind::Spawn) && z.name == name)
+    }
+
+    /// Whether a tile blocks movement, given a tile-solidity lookup
+    /// `(tileset_slot, tile_index) -> solid`. Overhead layers never collide.
+    pub fn tile_solid(&self, x: u32, y: u32, is_solid: &impl Fn(usize, u32) -> bool) -> bool {
+        match self.collision_at(x, y) {
+            CollisionOverride::Solid => true,
+            CollisionOverride::Walkable => false,
+            CollisionOverride::Auto => self.layers.iter().any(|l| {
+                !l.above_entities && l.get(x, y).parts().is_some_and(|(s, i)| is_solid(s, i))
+            }),
+        }
+    }
+
+    /// Computes the walkability grid for the whole map.
+    pub fn compute_solid(&self, is_solid: impl Fn(usize, u32) -> bool) -> Vec<bool> {
+        let mut out = vec![false; (self.width * self.height) as usize];
+        for y in 0..self.height {
+            for x in 0..self.width {
+                out[(y * self.width + x) as usize] = self.tile_solid(x, y, &is_solid);
+            }
+        }
+        out
+    }
+
+    /// Resizes the map, keeping the top-left area. Entities and zones are kept as-is.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let width = width.clamp(1, MAX_MAP_SIZE);
+        let height = height.clamp(1, MAX_MAP_SIZE);
+        let (cw, ch) = (self.width.min(width), self.height.min(height));
+        for layer in &mut self.layers {
+            let mut nl = TileLayer::new(&layer.name, width, height, layer.above_entities);
+            nl.visible = layer.visible;
+            for y in 0..ch {
+                for x in 0..cw {
+                    if layer.chunk_allocated(x, y) {
+                        nl.set(x, y, layer.get(x, y));
+                    }
+                }
+            }
+            *layer = nl;
+        }
+        let mut col = vec![0u8; (width * height) as usize];
+        for y in 0..ch {
+            for x in 0..cw {
+                col[(y * width + x) as usize] = self.collision[(y * self.width + x) as usize];
+            }
+        }
+        self.collision = col;
+        self.width = width;
+        self.height = height;
+    }
+
+    pub fn compact(&mut self) {
+        for l in &mut self.layers {
+            l.compact();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tile_encoding_roundtrip() {
+        let t = Tile::new(3, 12345);
+        assert_eq!(t.parts(), Some((3, 12345)));
+        assert_eq!(Tile::EMPTY.parts(), None);
+        assert_eq!(Tile::new(0, 0).parts(), Some((0, 0)));
+    }
+
+    #[test]
+    fn get_set_across_chunk_boundaries() {
+        let mut l = TileLayer::new("t", 100, 70, false);
+        let pts = [(0, 0), (31, 31), (32, 31), (31, 32), (99, 69), (64, 0)];
+        for (i, &(x, y)) in pts.iter().enumerate() {
+            l.set(x, y, Tile::new(0, i as u32 + 1));
+        }
+        for (i, &(x, y)) in pts.iter().enumerate() {
+            assert_eq!(l.get(x, y), Tile::new(0, i as u32 + 1));
+        }
+        assert_eq!(l.get(33, 33), Tile::EMPTY);
+        // Setting empty in an unallocated chunk must not allocate.
+        let before = l.allocated_chunks();
+        l.set(50, 50, Tile::EMPTY);
+        assert_eq!(l.allocated_chunks(), before);
+        l.set(99, 69, Tile::EMPTY);
+        l.compact();
+        assert_eq!(l.allocated_chunks(), before - 1);
+    }
+
+    #[test]
+    fn resize_keeps_overlap() {
+        let mut m = Map::new("m", 40, 40);
+        m.layers[0].set(39, 39, Tile::new(0, 1));
+        m.layers[0].set(5, 5, Tile::new(0, 2));
+        m.set_collision(5, 5, CollisionOverride::Solid);
+        m.resize(70, 20);
+        assert_eq!((m.width, m.height), (70, 20));
+        assert_eq!(m.layers[0].get(5, 5), Tile::new(0, 2));
+        assert_eq!(m.collision_at(5, 5), CollisionOverride::Solid);
+        assert_eq!(m.layers[0].get(69, 19), Tile::EMPTY);
+    }
+
+    #[test]
+    fn map_size_is_clamped() {
+        let m = Map::new("big", 5000, 0);
+        assert_eq!((m.width, m.height), (1024, 1));
+    }
+
+    #[test]
+    fn solidity_respects_overrides() {
+        let mut m = Map::new("m", 4, 4);
+        m.layers[0].set(1, 1, Tile::new(0, 7));
+        m.layers[0].set(2, 2, Tile::new(0, 7));
+        m.set_collision(2, 2, CollisionOverride::Walkable);
+        m.set_collision(3, 3, CollisionOverride::Solid);
+        let solid = m.compute_solid(|_, i| i == 7);
+        assert!(solid[4 + 1]);
+        assert!(!solid[2 * 4 + 2]);
+        assert!(solid[3 * 4 + 3]);
+        assert!(!solid[0]);
+    }
+}

@@ -1,0 +1,1027 @@
+//! Generates `example_project/`: procedural pixel art, definitions, maps and scripts.
+//!
+//! Run: `cargo run -p rust2d-engine --example gen_example [OUT_DIR]`
+
+use std::path::{Path, PathBuf};
+
+use rust2d_engine::defs::*;
+use rust2d_engine::entity::{EntityInstance, EntityKind};
+use rust2d_engine::events::*;
+use rust2d_engine::map::{EdgeLink, Map, Respawn, Tile, Zone, ZoneKind};
+use rust2d_engine::audio::wav_bytes;
+use rust2d_engine::inventory::ItemStack;
+use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
+
+mod art;
+use art::*;
+
+// ------------------------------------------------------------------ sounds
+
+const RATE: u32 = 22050;
+
+#[derive(Clone, Copy)]
+enum Wave {
+    Square,
+    Triangle,
+    Noise,
+}
+
+/// A note sweeping from `f0` to `f1` Hz with a short attack and exponential decay.
+fn tone(f0: f32, f1: f32, dur: f32, wave: Wave, vol: f32, decay: f32) -> Vec<f32> {
+    let n = (dur * RATE as f32) as usize;
+    let mut phase = 0.0f32;
+    let mut noise = Rng(5);
+    let mut held = 0.0f32;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let f = f0 + (f1 - f0) * (t / dur);
+            phase = (phase + f / RATE as f32).fract();
+            let v = match wave {
+                Wave::Square => if phase < 0.5 { 1.0 } else { -1.0 },
+                Wave::Triangle => 4.0 * (phase - 0.5).abs() - 1.0,
+                Wave::Noise => {
+                    // Sample-and-hold noise; pitch controls the hold rate.
+                    if phase < f / RATE as f32 {
+                        held = noise.range(2000) as f32 / 1000.0 - 1.0;
+                    }
+                    held
+                }
+            };
+            let env = (t / 0.005).min(1.0) * (-t * decay).exp() * (1.0 - t / dur).clamp(0.0, 1.0).powf(0.3);
+            v * env * vol
+        })
+        .collect()
+}
+
+fn concat(parts: &[Vec<f32>]) -> Vec<f32> {
+    parts.concat()
+}
+
+fn mix(a: &mut [f32], b: &[f32], at: usize) {
+    for (i, v) in b.iter().enumerate() {
+        if let Some(s) = a.get_mut(at + i) {
+            *s += v;
+        }
+    }
+}
+
+fn midi(n: i32) -> f32 {
+    440.0 * 2f32.powf((n - 69) as f32 / 12.0)
+}
+
+/// A looping tune: melody (square) over a bass line (triangle).
+fn song(melody: &[i32], bass: &[i32], step: f32) -> Vec<f32> {
+    let len = (melody.len() as f32 * step * RATE as f32) as usize;
+    let mut out = vec![0.0; len];
+    let at = |i: usize| (i as f32 * step * RATE as f32) as usize;
+    for (i, &n) in melody.iter().enumerate() {
+        if n > 0 {
+            mix(&mut out, &tone(midi(n), midi(n), step * 0.95, Wave::Square, 0.18, 3.0), at(i));
+        }
+    }
+    let per = melody.len() / bass.len().max(1);
+    for (i, &n) in bass.iter().enumerate() {
+        mix(&mut out, &tone(midi(n), midi(n), step * per as f32 * 0.98, Wave::Triangle, 0.35, 0.8), at(i * per));
+    }
+    out
+}
+
+type SoundFn = fn() -> Vec<f32>;
+
+const SOUNDS: [(&str, SoundFn); 11] = [
+    ("unlock", || concat(&[tone(1800.0, 1800.0, 0.03, Wave::Square, 0.25, 40.0), tone(900.0, 700.0, 0.06, Wave::Square, 0.25, 25.0), tone(2400.0, 2400.0, 0.04, Wave::Square, 0.2, 40.0)])),
+    ("creak", || concat(&[tone(90.0, 160.0, 0.18, Wave::Square, 0.18, 4.0), tone(160.0, 120.0, 0.12, Wave::Triangle, 0.4, 6.0)])),
+    ("pickup", || concat(&[tone(880.0, 880.0, 0.06, Wave::Square, 0.3, 10.0), tone(1320.0, 1320.0, 0.12, Wave::Square, 0.3, 12.0)])),
+    ("swing", || tone(2400.0, 600.0, 0.12, Wave::Noise, 0.35, 15.0)),
+    ("hit", || concat(&[tone(220.0, 90.0, 0.08, Wave::Square, 0.45, 20.0), tone(3000.0, 800.0, 0.05, Wave::Noise, 0.25, 30.0)])),
+    ("hurt", || tone(500.0, 120.0, 0.3, Wave::Square, 0.4, 6.0)),
+    ("defeat", || concat(&[tone(400.0, 800.0, 0.08, Wave::Square, 0.3, 5.0), tone(4000.0, 300.0, 0.3, Wave::Noise, 0.35, 8.0)])),
+    ("blip", || tone(1200.0, 1200.0, 0.03, Wave::Square, 0.15, 30.0)),
+    ("door", || concat(&[tone(150.0, 110.0, 0.12, Wave::Triangle, 0.6, 8.0), tone(200.0, 140.0, 0.15, Wave::Triangle, 0.5, 8.0)])),
+    ("music_village", || {
+        let m = [72, 76, 79, 76, 77, 76, 74, 0, 71, 74, 77, 74, 76, 74, 72, 0, 72, 76, 79, 84, 81, 79, 77, 76, 74, 77, 76, 74, 72, 0, 0, 0];
+        song(&m, &[48, 43, 41, 43, 48, 45, 43, 48], 0.25)
+    }),
+    ("music_forest", || {
+        let m = [69, 0, 72, 74, 76, 0, 74, 72, 71, 0, 67, 0, 69, 0, 0, 0, 69, 72, 76, 79, 77, 76, 74, 72, 71, 72, 74, 71, 69, 0, 0, 0];
+        song(&m, &[45, 41, 43, 40, 45, 41, 43, 45], 0.3)
+    }),
+];
+
+// ------------------------------------------------------------------ maps
+
+struct B {
+    m: Map,
+}
+
+impl B {
+    fn new(name: &str, w: u32, h: u32) -> Self {
+        let mut m = Map::new(name, w, h);
+        m.tileset_slot("terrain");
+        B { m }
+    }
+    fn set(&mut self, layer: usize, x: i32, y: i32, tile: u32) {
+        if self.m.in_bounds(x, y) {
+            self.m.layers[layer].set(x as u32, y as u32, Tile::new(0, tile));
+        }
+    }
+    fn fill(&mut self, layer: usize, x: i32, y: i32, w: i32, h: i32, tile: u32) {
+        for yy in y..y + h {
+            for xx in x..x + w {
+                self.set(layer, xx, yy, tile);
+            }
+        }
+    }
+    fn get(&self, layer: usize, x: i32, y: i32) -> Option<u32> {
+        if !self.m.in_bounds(x, y) {
+            return None;
+        }
+        self.m.layers[layer].get(x as u32, y as u32).parts().map(|p| p.1)
+    }
+    fn tree(&mut self, x: i32, y: i32) {
+        self.set(1, x, y, t::TRUNK);
+        self.set(2, x, y - 1, t::CANOPY);
+    }
+    fn pine(&mut self, x: i32, y: i32) {
+        self.set(1, x, y, t::PINE_TRUNK);
+        self.set(2, x, y - 1, t::PINE_TOP);
+    }
+    fn free(&self, x: i32, y: i32) -> bool {
+        self.get(1, x, y).is_none() && self.get(1, x, y + 1).is_none()
+    }
+    /// House with roof; returns the door tile.
+    fn house(&mut self, x: i32, y: i32, w: i32) -> (i32, i32) {
+        self.fill(1, x, y, w, 3, t::ROOF);
+        self.fill(1, x, y + 2, w, 1, t::ROOF_EDGE);
+        self.fill(1, x, y + 3, w, 2, t::HOUSE_WALL);
+        self.set(1, x + 1, y + 3, t::WINDOW);
+        self.set(1, x + w - 2, y + 3, t::WINDOW);
+        let door = (x + w / 2, y + 4);
+        self.set(1, door.0, door.1, t::DOOR);
+        self.set(1, door.0, door.1 - 1, t::HOUSE_WALL);
+        // The door tile is walkable so the player can step into the portal.
+        self.m.set_collision(door.0 as u32, door.1 as u32, rust2d_engine::map::CollisionOverride::Walkable);
+        door
+    }
+    fn zone(&mut self, name: &str, x: u32, y: u32, w: u32, h: u32, kind: ZoneKind) -> u32 {
+        let uid = self.m.alloc_uid();
+        self.m.zones.push(Zone { uid, name: name.into(), x, y, w, h, kind, triggers: vec![] });
+        uid
+    }
+    fn spawn(&mut self, name: &str, x: u32, y: u32) {
+        self.zone(name, x, y, 1, 1, ZoneKind::Spawn);
+    }
+    fn portal(&mut self, x: u32, y: u32, map: &str, spawn: &str) {
+        self.zone(&format!("to_{map}"), x, y, 1, 1, ZoneKind::Portal { target_map: map.into(), target_spawn: spawn.into() });
+    }
+    /// Places a multi-tile prop whose bottom row is `ty`, horizontally centered on tile `tx`
+    /// (odd widths) or on the left edge of tile `tx` (even widths); clears tiles under it.
+    fn big(&mut self, def: &str, tx: i32, ty: i32, w: i32, h: i32) -> &mut EntityInstance {
+        let x0 = tx - w / 2;
+        for y in ty - h + 1..=ty {
+            for x in x0..x0 + w {
+                if self.m.in_bounds(x, y) {
+                    self.m.layers[1].set(x as u32, y as u32, Tile::EMPTY);
+                    self.m.layers[2].set(x as u32, y as u32, Tile::EMPTY);
+                }
+            }
+        }
+        // Trees above the footprint may have a crown hanging into it.
+        if self.m.in_bounds(tx, ty - h) && self.get(1, tx, ty - h + 1).is_none() {
+            self.m.layers[2].set(tx as u32, (ty - h) as u32, Tile::EMPTY);
+        }
+        let uid = self.m.alloc_uid();
+        let x = if w.rem_euclid(2) == 0 { tx as f32 * TS as f32 } else { (tx as f32 + 0.5) * TS as f32 };
+        let y = (ty as f32 + 1.0) * TS as f32 - 1.0;
+        self.m.entities.push(EntityInstance::new(uid, EntityKind::Prop, def, x, y));
+        self.m.entities.last_mut().unwrap()
+    }
+
+    fn entity(&mut self, kind: EntityKind, def: &str, tx: i32, ty: i32) -> &mut EntityInstance {
+        let uid = self.m.alloc_uid();
+        let (x, y) = ((tx as f32 + 0.5) * TS as f32, (ty as f32 + 1.0) * TS as f32 - 1.0);
+        self.m.entities.push(EntityInstance::new(uid, kind, def, x, y));
+        self.m.entities.last_mut().unwrap()
+    }
+}
+
+fn dialog(speaker: &str, text: &str) -> Action {
+    Action::Dialog { speaker: speaker.into(), text: text.into() }
+}
+fn cond(c: Cond) -> Condition {
+    Condition::new(c)
+}
+fn not(c: Cond) -> Condition {
+    Condition { cond: c, negate: true }
+}
+fn flag(n: &str) -> Cond {
+    Cond::Flag { name: n.into() }
+}
+fn trig(on: TriggerOn, conditions: Vec<Condition>, actions: Vec<Action>) -> Trigger {
+    Trigger { on, conditions, actions, once: false }
+}
+
+fn village() -> Map {
+    let (w, h) = (48, 36);
+    let mut b = B::new("village", w, h);
+    let mut rng = Rng(42);
+    b.fill(0, 0, 0, w as i32, h as i32, t::GRASS);
+    for _ in 0..160 {
+        let (x, y) = (rng.range(w) as i32, rng.range(h) as i32);
+        b.set(0, x, y, if rng.chance(0.5) { t::FLOWERS } else { t::TALL_GRASS });
+    }
+    // Main road west -> east edge (y = 18), and north-south street.
+    b.fill(0, 4, 17, w as i32 - 4, 3, t::PATH);
+    b.fill(0, 21, 8, 3, 12, t::PATH);
+    // Pond with sand rim and bridge-less shore.
+    b.fill(0, 5, 24, 11, 7, t::SAND);
+    b.fill(0, 6, 25, 9, 5, t::WATER);
+    // Houses.
+    let door = b.house(17, 3, 7);
+    b.fill(0, door.0, door.1 + 1, 1, 4, t::PATH);
+    let door2 = b.house(30, 6, 6);
+    b.fill(0, door2.0, door2.1 + 1, 1, 6, t::PATH);
+    b.set(1, door2.0, door2.1, t::HOUSE_WALL); // second house is decorative
+    b.m.set_collision(door2.0 as u32, door2.1 as u32, rust2d_engine::map::CollisionOverride::Auto);
+    // Fences around a garden.
+    b.fill(1, 30, 24, 10, 1, t::FENCE);
+    // Gap in the top fence for a double gate (placed after the random trees below).
+    b.m.layers[1].set(34, 24, Tile::EMPTY);
+    b.m.layers[1].set(35, 24, Tile::EMPTY);
+    b.fill(1, 30, 31, 10, 1, t::FENCE);
+    b.fill(1, 30, 24, 1, 8, t::FENCE);
+    b.fill(1, 39, 24, 1, 5, t::FENCE);
+    for y in 26..30 {
+        for x in (32..38).step_by(2) {
+            b.set(1, x, y, t::BUSH);
+        }
+    }
+    // Tree border, leaving the road gap open to the east.
+    for x in 0..w as i32 {
+        b.tree(x, 1);
+        b.tree(x, h as i32 - 1);
+    }
+    for y in 2..h as i32 - 1 {
+        b.tree(0, y);
+        if !(16..=20).contains(&y) {
+            b.tree(w as i32 - 1, y);
+        }
+    }
+    for _ in 0..40 {
+        let (x, y) = (rng.range(w - 4) as i32 + 2, rng.range(h - 6) as i32 + 3);
+        let on_grass = matches!(b.get(0, x, y), Some(t::GRASS | t::FLOWERS | t::TALL_GRASS));
+        if on_grass && b.free(x, y) && b.free(x, y - 1) && !(15..=21).contains(&y) {
+            b.tree(x, y);
+        }
+    }
+    b.set(1, 12, 10, t::ROCK);
+    b.set(1, 27, 12, t::ROCK);
+    // Multi-tile props: garden double gate (2x2), big oaks (3x4), a statue (1x2).
+    b.big("double_gate", 35, 24, 2, 2);
+    b.big("big_oak", 6, 9, 3, 4);
+    b.big("big_oak", 41, 14, 3, 4);
+    b.big("big_pine", 9, 31, 2, 4);
+    b.big("statue", 15, 13, 1, 2);
+
+    b.spawn("start", 22, 14);
+    b.spawn("house_door", door.0 as u32, door.1 as u32 + 1);
+    b.portal(door.0 as u32, door.1 as u32, "house", "entrance");
+
+    // Gate blocking the road east, opened with the key.
+    // East exit: the gap in the border trees (rows 16-20) is closed by a wall with a
+    // vertical double gate across the three road tiles (rows 17-19).
+    let gate = b.big("vgate", 46, 19, 1, 4);
+    gate.name = "east_gate".into();
+    // The lock (Gate Key, kept, gate opens, relockable) comes from the gate definition;
+    // these triggers only react to it being opened / locked again.
+    gate.triggers = vec![
+        trig(
+            TriggerOn::Unlock,
+            vec![],
+            vec![Action::SetFlag { name: "gate_open".into(), value: true }, dialog("", "The gate creaks open. The forest lies beyond.")],
+        ),
+        trig(TriggerOn::Lock, vec![], vec![Action::SetFlag { name: "gate_open".into(), value: false }]),
+    ];
+    for y in [14, 15, 16, 20, 21, 22] {
+        b.set(1, 46, y, t::STONE_WALL);
+        b.m.layers[2].set(46, (y - 1) as u32, Tile::EMPTY); // no tree crown floating over the wall
+    }
+    let sign = b.entity(EntityKind::Prop, "sign", 19, 16);
+    sign.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Sign", "Emberbrook. East: Whisperwood. Please keep the gate locked!")])];
+    b.entity(EntityKind::Prop, "well", 25, 13);
+    let barrel = b.entity(EntityKind::Prop, "barrel", 16, 7);
+    barrel.container = Some(ContainerSpec { size: 4, items: vec![ItemStack::new("apple", 3), ItemStack::new("arrows", 10), ItemStack::new("leather_cap", 1)], ..Default::default() });
+    let barrel = b.entity(EntityKind::Prop, "barrel", 24, 7);
+    barrel.container = Some(ContainerSpec { size: 4, items: vec![ItemStack::new("apple", 2), ItemStack::new("bronze_key", 1)], ..Default::default() });
+
+    let elder = b.entity(EntityKind::Character, "elder", 26, 15);
+    elder.name = "elder".into();
+    elder.triggers = vec![
+        trig(
+            TriggerOn::Interact,
+            vec![not(flag("quest_accepted"))],
+            vec![
+                dialog("Elder Rowan", "Ah, a traveller! Strange lights have been seen in Whisperwood, east of here."),
+                Action::Choice {
+                    speaker: "Elder Rowan".into(),
+                    text: "Would you investigate the old shrine for us?".into(),
+                    options: vec!["Of course!".into(), "Not right now.".into()],
+                    var: "elder_answer".into(),
+                },
+                Action::If {
+                    conditions: vec![cond(Cond::Var { name: "elder_answer".into(), op: CmpOp::Eq, value: 0 })],
+                    then: vec![
+                        Action::SetFlag { name: "quest_accepted".into(), value: true },
+                        dialog("Elder Rowan", "Wonderful! The gate key is in the chest in my house, just north of here."),
+                    ],
+                    otherwise: vec![dialog("Elder Rowan", "I understand. Come back if you change your mind.")],
+                },
+            ],
+        ),
+        trig(
+            TriggerOn::Interact,
+            vec![cond(flag("quest_accepted")), not(flag("shrine_lit"))],
+            vec![dialog("Elder Rowan", "The shrine lies deep in Whisperwood. Take the key from my chest and open the east gate.")],
+        ),
+        trig(
+            TriggerOn::Interact,
+            vec![cond(flag("shrine_lit"))],
+            vec![
+                dialog("Elder Rowan", "The lights have calmed! You have my thanks, hero."),
+                Action::If {
+                    conditions: vec![not(flag("rewarded"))],
+                    then: vec![
+                        Action::SetFlag { name: "rewarded".into(), value: true },
+                        Action::GiveItem { item: "coin".into(), count: 25 },
+                        dialog("", "Received 25 coins!"),
+                    ],
+                    otherwise: vec![],
+                },
+            ],
+        ),
+    ];
+    let v = b.entity(EntityKind::Character, "villager", 12, 19);
+    v.name = "mira".into();
+    v.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "mira_talk".into() }])];
+    let v2 = b.entity(EntityKind::Character, "villager", 34, 14);
+    v2.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Villager", "Lovely weather today, isn't it?")])];
+    b.entity(EntityKind::Item, "apple", 8, 12);
+    b.entity(EntityKind::Item, "apple", 37, 21);
+
+    b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
+    b.m.triggers = vec![Trigger {
+        on: TriggerOn::MapEnter,
+        conditions: vec![],
+        actions: vec![dialog(
+            "",
+            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: J/X or left-click an enemy. Switch weapon: Q. Inventory & character: I or C. Save/Load: F5/F9. Debug: F3.",
+        )],
+        once: true,
+    }];
+    b.m.background = [20, 40, 20];
+    b.m.music = "music_village".into();
+    b.m
+}
+
+fn house() -> Map {
+    let (w, h) = (12, 10);
+    let mut b = B::new("house", w, h);
+    b.fill(0, 0, 0, w as i32, h as i32, t::VOID);
+    b.fill(0, 1, 2, 10, 7, t::WOOD_FLOOR);
+    b.fill(1, 1, 0, 10, 2, t::HOUSE_WALL);
+    b.set(1, 3, 1, t::WINDOW);
+    b.set(1, 8, 1, t::WINDOW);
+    b.fill(1, 0, 0, 1, h as i32, t::VOID);
+    b.fill(1, 11, 0, 1, h as i32, t::VOID);
+    b.fill(1, 0, 9, w as i32, 1, t::VOID);
+    b.fill(0, 4, 4, 4, 3, t::RUG);
+    b.set(1, 2, 2, t::BED);
+    b.set(1, 2, 3, t::BED_FOOT);
+    b.fill(1, 6, 2, 2, 1, t::SHELF);
+    b.set(1, 9, 5, t::TABLE);
+    b.set(0, 6, 9, t::WOOD_FLOOR);
+    b.set(1, 6, 9, t::DOOR);
+    b.m.set_collision(6, 9, rust2d_engine::map::CollisionOverride::Walkable);
+    b.spawn("entrance", 6, 8);
+    b.portal(6, 9, "village", "house_door");
+    // The elder's chest: a container that only opens once the quest was accepted.
+    let chest = b.entity(EntityKind::Prop, "chest", 9, 3);
+    chest.container = Some(ContainerSpec {
+        size: 8,
+        items: vec![ItemStack::new("key", 1), ItemStack::new("sword", 1), ItemStack::new("coin", 10), ItemStack::new("potion", 2), ItemStack::new("letter", 1)],
+        conditions: vec![cond(flag("quest_accepted"))],
+        locked_text: "It's the elder's chest. Better not open it without asking.".into(),
+        open_state: "open".into(),
+        ..Default::default()
+    });
+    b.entity(EntityKind::Item, "potion", 3, 6);
+    b.entity(EntityKind::Item, "bow", 1, 7);
+    let arrows = b.entity(EntityKind::Item, "arrows", 2, 8);
+    arrows.count = 20;
+    b.m.background = [13, 13, 20];
+    b.m.music = "music_village".into();
+    b.m
+}
+
+fn forest() -> Map {
+    let (w, h) = (64, 48);
+    let mut b = B::new("forest", w, h);
+    let mut rng = Rng(1234);
+    b.fill(0, 0, 0, w as i32, h as i32, t::FOREST_FLOOR);
+    for _ in 0..300 {
+        let (x, y) = (rng.range(w) as i32, rng.range(h) as i32);
+        b.set(0, x, y, if rng.chance(0.6) { t::GRASS } else { t::TALL_GRASS });
+    }
+    // Winding path from the west edge (y = 24) to the shrine clearing.
+    let mut y = 23;
+    for x in 0..44 {
+        b.fill(0, x, y, 1, 3, t::PATH);
+        if x % 7 == 3 {
+            y += if rng.chance(0.5) { 1 } else { -1 };
+            y = y.clamp(18, 28);
+            b.fill(0, x, y, 1, 3, t::PATH);
+        }
+    }
+    // Clearing with the shrine.
+    b.fill(0, 40, 16, 14, 14, t::GRASS);
+    b.fill(0, 44, 20, 6, 6, t::STONE_FLOOR);
+    // Stream; where it crosses the path it becomes a bridge.
+    for yy in 0..h as i32 {
+        let x = 28 + ((yy as f32 / 6.0).sin() * 2.0) as i32;
+        for xx in x..x + 2 {
+            let tile = if b.get(0, xx, yy) == Some(t::PATH) { t::BRIDGE } else { t::WATER };
+            b.set(0, xx, yy, tile);
+        }
+    }
+    // Cave entrance to the wilds in the north-east.
+    b.fill(1, 52, 3, 9, 4, t::CLIFF);
+    b.set(1, 56, 6, t::CAVE);
+    b.m.set_collision(56, 6, rust2d_engine::map::CollisionOverride::Walkable);
+    b.fill(0, 56, 7, 1, 10, t::PATH);
+    b.portal(56, 6, "wilds", "start");
+    b.spawn("cave", 56, 7);
+
+    // Dense trees, keeping paths, water and clearing free.
+    for yy in 1..h as i32 {
+        for xx in 0..w as i32 {
+            let border = xx == 0 || yy == 1 || xx == w as i32 - 1 || yy == h as i32 - 1;
+            let ground = b.get(0, xx, yy);
+            let open = matches!(ground, Some(t::PATH | t::WATER | t::BRIDGE | t::STONE_FLOOR))
+                || (40..54).contains(&xx) && (16..30).contains(&yy)
+                || (xx <= 1 && (22..=27).contains(&yy));
+            let density = if border { 1.0 } else { 0.22 };
+            if !open && b.free(xx, yy) && rng.chance(density) && b.get(1, xx, yy - 1).is_none() {
+                if rng.chance(0.4) { b.pine(xx, yy) } else { b.tree(xx, yy) }
+            } else if !open && rng.chance(0.03) && b.get(1, xx, yy).is_none() {
+                b.set(1, xx, yy, t::MUSHROOM);
+            }
+        }
+    }
+
+    b.spawn("west", 2, 24);
+    b.big("statue", 44, 21, 1, 2);
+    b.big("statue", 50, 21, 1, 2);
+    b.big("big_oak", 39, 15, 3, 4);
+    b.big("big_pine", 54, 28, 2, 4);
+    b.big("big_oak", 24, 12, 3, 4);
+    let shrine = b.entity(EntityKind::Prop, "shrine", 47, 21);
+    shrine.name = "shrine".into();
+    shrine.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "shrine_touch".into() }])];
+    let clearing = b.zone("clearing", 40, 16, 14, 14, ZoneKind::Trigger);
+    if let Some(z) = b.m.zones.iter_mut().find(|z| z.uid == clearing) {
+        z.triggers = vec![Trigger {
+            on: TriggerOn::Enter,
+            conditions: vec![],
+            actions: vec![dialog("", "The air hums with a strange energy. An old shrine stands in the clearing.")],
+            once: true,
+        }];
+    }
+    let chest = b.entity(EntityKind::Prop, "chest", 42, 18);
+    chest.container = Some(ContainerSpec {
+        size: 6,
+        items: vec![ItemStack::new("crossbow", 1), ItemStack::new("bolts", 12), ItemStack::new("leather_armor", 1), ItemStack::new("potion", 1), ItemStack::new("coin", 7)],
+        open_frame: 1,
+        ..Default::default()
+    });
+    // A locked chest: needs the Bronze Key from the village.
+    chest.lock = Some(LockSpec {
+        key: "bronze_key".into(),
+        locked_text: "A sturdy padlock. You need a Bronze Key.".into(),
+        ..Default::default()
+    });
+    // Spawners (invisible in game): slimes come back whenever you re-enter the forest,
+    // goblin archers return 20 s after being defeated.
+    b.zone("slime_den", 8, 28, 14, 10, ZoneKind::Spawner { character: "slime".into(), count: 4, respawn: Respawn::OnEnter });
+    b.zone("goblin_camp", 32, 30, 8, 8, ZoneKind::Spawner { character: "goblin".into(), count: 2, respawn: Respawn::After { seconds: 20.0 } });
+    // Placed slimes stay dead once defeated.
+    for (x, y) in [(36, 30), (15, 12), (50, 40)] {
+        // Move off trees / mushrooms if needed.
+        let (x, y) = (0..6).flat_map(|d| [(x + d, y), (x - d, y), (x, y + d), (x, y - d)]).find(|&(x, y)| b.get(1, x, y).is_none()).unwrap();
+        b.entity(EntityKind::Character, "slime", x, y);
+    }
+    b.entity(EntityKind::Item, "potion", 20, 20);
+    let coins = b.entity(EntityKind::Item, "coin", 46, 27);
+    coins.count = 5;
+    // Custom event raised by the shrine script.
+    b.m.triggers = vec![trig(
+        TriggerOn::Custom { name: "shrine_lit".into() },
+        vec![],
+        vec![Action::Wait { seconds: 0.4 }, dialog("", "A warm light spreads through the forest.")],
+    )];
+    b.m.edges.west = Some(EdgeLink { target_map: "village".into(), offset: -6, depth: 1 });
+    b.m.background = [10, 25, 10];
+    b.m.music = "music_forest".into();
+    b.m
+}
+
+/// A 1024x1024 procedurally generated map showing the engine's maximum size.
+fn wilds() -> Map {
+    let n = 1024u32;
+    let mut b = B::new("wilds", n, n);
+    // Value noise.
+    let grid = 32usize;
+    let cells = n as usize / grid + 2;
+    let mut rng = Rng(99);
+    let lattice: Vec<f32> = (0..cells * cells).map(|_| rng.range(1000) as f32 / 1000.0).collect();
+    let lat = |x: usize, y: usize| lattice[y * cells + x];
+    let smooth = |t: f32| t * t * (3.0 - 2.0 * t);
+    let noise = |x: u32, y: u32| {
+        let (gx, gy) = (x as usize / grid, y as usize / grid);
+        let (fx, fy) = (smooth((x as usize % grid) as f32 / grid as f32), smooth((y as usize % grid) as f32 / grid as f32));
+        let a = lat(gx, gy) * (1.0 - fx) + lat(gx + 1, gy) * fx;
+        let c = lat(gx, gy + 1) * (1.0 - fx) + lat(gx + 1, gy + 1) * fx;
+        a * (1.0 - fy) + c * fy
+    };
+    for y in 0..n {
+        for x in 0..n {
+            let mut v = noise(x, y) * 0.75 + noise((x * 3) % n, (y * 3) % n) * 0.25;
+            // Keep the arrival area dry.
+            let d = ((x as f32 - 512.0).powi(2) + (y as f32 - 512.0).powi(2)).sqrt();
+            if d < 12.0 {
+                v = 0.5;
+            }
+            let tile = match v {
+                v if v < 0.3 => t::WATER,
+                v if v < 0.36 => t::SAND,
+                v if v < 0.62 => if rng.chance(0.05) { t::FLOWERS } else { t::GRASS },
+                v if v < 0.78 => t::FOREST_FLOOR,
+                _ => t::SNOW,
+            };
+            b.set(0, x as i32, y as i32, tile);
+            if (tile == t::FOREST_FLOOR && rng.chance(0.25)) || (tile == t::GRASS && rng.chance(0.02)) {
+                if y > 1 && b.free(x as i32, y as i32) && b.get(1, x as i32, y as i32 - 1).is_none() && d > 4.0 {
+                    if v > 0.7 { b.pine(x as i32, y as i32) } else { b.tree(x as i32, y as i32) }
+                }
+            } else if tile == t::SNOW && rng.chance(0.03) && d > 4.0 {
+                b.set(1, x as i32, y as i32, t::ROCK);
+            }
+        }
+    }
+    // Border walls of cliffs.
+    for i in 0..n as i32 {
+        for (x, y) in [(i, 0), (i, n as i32 - 1), (0, i), (n as i32 - 1, i)] {
+            b.set(1, x, y, t::CLIFF);
+        }
+    }
+    b.fill(1, 510, 506, 5, 3, t::CLIFF);
+    b.set(1, 512, 508, t::CAVE);
+    b.m.set_collision(512, 508, rust2d_engine::map::CollisionOverride::Walkable);
+    b.portal(512, 508, "forest", "cave");
+    b.spawn("start", 512, 510);
+    // Scatter coins across the land.
+    for _ in 0..200 {
+        let (x, y) = (rng.range(n - 4) as i32 + 2, rng.range(n - 4) as i32 + 2);
+        if matches!(b.get(0, x, y), Some(t::GRASS | t::SAND)) && b.get(1, x, y).is_none() {
+            b.entity(EntityKind::Item, "coin", x, y);
+        }
+    }
+    let sign = b.entity(EntityKind::Prop, "sign", 514, 510);
+    sign.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Sign", "The Wilds: 1024 x 1024 tiles of procedurally generated land. Coins are scattered everywhere!")])];
+    // Enemy spawners scattered over the wilds (not too close to the arrival point).
+    let mut placed = 0;
+    while placed < 40 {
+        let (x, y) = (rng.range(n - 40) + 20, rng.range(n - 40) + 20);
+        let far = ((x as i32 - 512).pow(2) + (y as i32 - 510).pow(2)) > 30 * 30;
+        if !far {
+            continue;
+        }
+        let (character, count, respawn) = match placed % 4 {
+            0 => ("goblin", 2, Respawn::After { seconds: 45.0 }),
+            1 => ("slime", 5, Respawn::Never),
+            _ => ("slime", 4, Respawn::After { seconds: 30.0 }),
+        };
+        b.zone(&format!("spawner_{placed}"), x, y, 12, 12, ZoneKind::Spawner { character: character.into(), count, respawn });
+        placed += 1;
+    }
+    // A camp right next to the arrival point, to try ranged combat.
+    b.zone("practice", 520, 500, 10, 8, ZoneKind::Spawner { character: "slime".into(), count: 3, respawn: Respawn::After { seconds: 8.0 } });
+    let bolts = b.entity(EntityKind::Item, "bolts", 510, 511);
+    bolts.count = 10;
+    b.big("boulder", 506, 515, 2, 2);
+    b.big("boulder", 521, 513, 2, 2);
+    let mut trees = 0;
+    while trees < 300 {
+        let (x, y) = (rng.range(n - 20) as i32 + 10, rng.range(n - 20) as i32 + 10);
+        if ((x - 512).pow(2) + (y - 510).pow(2)) < 15 * 15 {
+            continue;
+        }
+        match b.get(0, x, y) {
+            Some(t::GRASS) => {
+                b.big("big_oak", x, y, 3, 4);
+            }
+            Some(t::FOREST_FLOOR) | Some(t::SNOW) => {
+                b.big("big_pine", x, y, 2, 4);
+            }
+            _ => continue,
+        }
+        trees += 1;
+    }
+    // The armory: heavier gear for the wilds.
+    let chest = b.entity(EntityKind::Prop, "chest", 508, 511);
+    chest.container = Some(ContainerSpec {
+        size: 8,
+        items: vec![
+            ItemStack::new("spear", 1),
+            ItemStack::new("axe", 1),
+            ItemStack::new("iron_helmet", 1),
+            ItemStack::new("chainmail", 1),
+            ItemStack::new("potion", 3),
+        ],
+        open_frame: 1,
+        ..Default::default()
+    });
+    b.m.background = [30, 60, 120];
+    b.m.music = "music_forest".into();
+    b.m
+}
+
+// ------------------------------------------------------------------ definitions
+
+fn database() -> Database {
+    let sprite = |sheet: &str, frame: u32| SpriteRef::new(sheet, frame);
+    let prop = |id: &str, name: &str, frame: u32, solid: bool, hitbox: [f32; 2]| PropDef {
+        id: id.into(),
+        name: name.into(),
+        sprite: sprite("props", frame),
+        solid,
+        hitbox: [hitbox[0] * R, hitbox[1] * R],
+        triggers: vec![],
+        container: None,
+        lock: None,
+        default_state: default_state_name(),
+        states: vec![],
+    };
+    let state = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid };
+    let ch = |id: &str, name: &str, sheet: &str, speed: f32, behavior: Behavior| CharacterDef {
+        id: id.into(),
+        name: name.into(),
+        sheet: sheet.into(),
+        walk_frames: 4,
+        speed: speed * R,
+        hitbox: [10.0 * R, 6.0 * R],
+        behavior,
+        max_hp: 0,
+        damage: 0,
+        hostile: false,
+        weapon: None,
+        defense: 0,
+        triggers: vec![],
+    };
+    let item = |id: &str, name: &str, desc: &str, frame: u32, consumable: bool, on_use: Vec<Trigger>| ItemDef {
+        id: id.into(),
+        name: name.into(),
+        description: desc.into(),
+        icon: sprite("items", frame),
+        consumable,
+        on_use,
+        weapon: None,
+        armor: None,
+        max_stack: 99,
+    };
+    let stack = |mut i: ItemDef, n: u32| {
+        i.max_stack = n;
+        i
+    };
+    let weapon = |mut i: ItemDef, w: Weapon| {
+        i.weapon = Some(w);
+        i
+    };
+    let armor = |mut i: ItemDef, a: Armor| {
+        i.armor = Some(a);
+        i
+    };
+    let use_trig = |actions: Vec<Action>| vec![trig(TriggerOn::UseItem { item: String::new() }, vec![], actions)];
+    let mut slime = ch("slime", "Slime", "slime", 32.0, Behavior::Chase { sight: 4.0 });
+    slime.hitbox = [12.0 * R, 6.0 * R];
+    slime.max_hp = 3;
+    slime.damage = 2;
+    slime.hostile = true;
+    slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
+    let mut goblin = ch("goblin", "Goblin Archer", "goblin", 38.0, Behavior::Chase { sight: 7.0 });
+    goblin.max_hp = 2;
+    goblin.damage = 1;
+    goblin.hostile = true;
+    goblin.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 150.0 * R, range: 6.0, ammo: String::new() }));
+    goblin.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "goblin_defeated".into() }])];
+    let mut hero = ch("hero", "Hero", "hero", 70.0, Behavior::Static);
+    hero.max_hp = 12; // 6 hearts
+    hero.damage = 1;
+    Database {
+        tilesets: vec![TilesetDef {
+            id: "terrain".into(),
+            image: "tilesets/terrain.png".into(),
+            solid: SOLID.to_vec(),
+            animations: vec![TileAnim { tile: t::WATER, frames: vec![t::WATER, t::WATER_2, t::WATER_3, t::WATER_2], fps: 3.0 }],
+        }],
+        sounds: SOUNDS.iter().map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.wav"), volume: if id.starts_with("music") { 0.35 } else { 0.6 } }).collect(),
+        sheets: vec![
+            SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "elder".into(), image: "sprites/elder.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "villager".into(), image: "sprites/villager.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "slime".into(), image: "sprites/slime.png".into(), frame_w: 32, frame_h: 32 },
+            SheetDef { id: "goblin".into(), image: "sprites/goblin.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "ov_cap".into(), image: "sprites/ov_cap.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "ov_helmet".into(), image: "sprites/ov_helmet.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "ov_leather".into(), image: "sprites/ov_leather.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "ov_chain".into(), image: "sprites/ov_chain.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "props".into(), image: "sprites/props.png".into(), frame_w: 32, frame_h: 32 },
+            SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 32, frame_h: 32 },
+        ],
+        items: vec![
+            stack(item("key", "Gate Key", "An old iron key. Opens the east gate.", it::KEY, false, vec![]), 1),
+            stack(item("bronze_key", "Bronze Key", "Opens a chest somewhere in Whisperwood.", it::BRONZE_KEY, false, vec![]), 5),
+            stack(item(
+                "potion",
+                "Red Potion",
+                "Restores 3 hearts.",
+                it::POTION,
+                true,
+                use_trig(vec![
+                    Action::If {
+                        conditions: vec![cond(Cond::PlayerHp { op: CmpOp::Ge, value: 12 })],
+                        then: vec![dialog("", "You're already at full health. You drink it anyway.")],
+                        otherwise: vec![],
+                    },
+                    Action::Heal { amount: 6 },
+                    Action::SetVar { name: "potions_drunk".into(), op: VarOp::Add, value: 1 },
+                ]),
+            ), 10),
+            item("coin", "Coin", "Shiny gold coins.", it::COIN, false, use_trig(vec![Action::RunScript { function: "count_coins".into() }])),
+            stack(item("apple", "Apple", "Crunchy and sweet. Restores 1 heart.", it::APPLE, true, use_trig(vec![Action::Heal { amount: 2 }])), 20),
+            weapon(
+                stack(item("bow", "Hunting Bow", "Fast shots, uses arrows. Use it from the inventory to equip (or press Q).", it::BOW, false, vec![]), 1),
+                Weapon::ranged(1, 0.45, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 240.0 * R, range: 8.0, ammo: "arrows".into() }),
+            ),
+            weapon(
+                stack(item("crossbow", "Crossbow", "Slow but powerful, uses bolts.", it::CROSSBOW, false, vec![]), 1),
+                Weapon::ranged(3, 1.1, Ranged { projectile: sprite("items", it::BOLT_SHOT), speed: 320.0 * R, range: 10.0, ammo: "bolts".into() }),
+            ),
+            stack(item("arrows", "Arrows", "Ammunition for the bow.", it::ARROWS, false, vec![]), 50),
+            stack(item("bolts", "Bolts", "Ammunition for the crossbow.", it::BOLTS, false, vec![]), 30),
+            // Melee weapons: balanced sword, long narrow spear, slow heavy axe.
+            stack(weapon(item("sword", "Short Sword", "A reliable blade.", it::SWORD, false, vec![]), Weapon { reach: 1.1, arc: 65.0, ..Weapon::melee(2, 0.35) }), 1),
+            stack(weapon(item("spear", "Spear", "Hits from two tiles away, but only straight ahead.", it::SPEAR, false, vec![]), Weapon { reach: 1.9, arc: 22.0, knockback: 0.7, ..Weapon::melee(2, 0.55) }), 1),
+            stack(weapon(item("axe", "Battle Axe", "Slow, wide swings that send enemies flying.", it::AXE, false, vec![]), Weapon { reach: 1.0, arc: 85.0, knockback: 1.8, ..Weapon::melee(4, 0.85) }), 1),
+            // Armor: helmets and body armor.
+            stack(armor(item("leather_cap", "Leather Cap", "Light head protection.", it::CAP, false, vec![]), Armor { slot: EquipSlot::Head, defense: 1, speed: 0.0, overlay: "ov_cap".into() }), 1),
+            stack(armor(item("iron_helmet", "Iron Helmet", "Sturdy, a little heavy.", it::HELMET, false, vec![]), Armor { slot: EquipSlot::Head, defense: 2, speed: -0.05, overlay: "ov_helmet".into() }), 1),
+            stack(armor(item("leather_armor", "Leather Armor", "Light body armor.", it::LEATHER, false, vec![]), Armor { slot: EquipSlot::Body, defense: 1, speed: 0.0, overlay: "ov_leather".into() }), 1),
+            stack(armor(item("chainmail", "Chainmail", "Strong protection, but you move slower.", it::CHAIN, false, vec![]), Armor { slot: EquipSlot::Body, defense: 3, speed: -0.15, overlay: "ov_chain".into() }), 1),
+            stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
+        ],
+        props: vec![
+            PropDef {
+                // Every chest is an (empty) container by default; instances set their contents.
+                // Opening it the first time switches it to its "open" state.
+                container: Some(ContainerSpec { size: 8, open_state: "open".into(), ..Default::default() }),
+                default_state: "closed".into(),
+                states: vec![state("open", sprite("props", p::CHEST + 1), true)],
+                ..prop("chest", "Chest", p::CHEST, true, [14.0, 8.0])
+            },
+            prop("sign", "Sign", p::SIGN, true, [12.0, 6.0]),
+            PropDef {
+                // Swings open (its open image is a separate cell of the sheet) and can be
+                // locked again with the key.
+                lock: Some(LockSpec {
+                    key: "key".into(),
+                    consume_key: false,
+                    on_unlock: OnUnlock::ToState { state: "open".into() },
+                    locked_text: "The gate is locked. Maybe someone in the village has the key.".into(),
+                    relock: true,
+                    ..Default::default()
+                }),
+                // Closed, open, or destroyed (e.g. by a "Set prop state" action / set_state()).
+                default_state: "closed".into(),
+                states: vec![state("open", sprite("props", p::GATE_OPEN), false), state("destroyed", sprite("props", p::GATE_BROKEN), false)],
+                ..prop("gate", "Iron Gate", p::GATE, true, [16.0, 16.0])
+            },
+            PropDef { container: Some(ContainerSpec { size: 4, ..Default::default() }), ..prop("barrel", "Barrel", p::BARREL, true, [10.0, 6.0]) },
+            PropDef {
+                default_state: "dormant".into(),
+                states: vec![state("glowing", sprite("props", p::SHRINE + 1), true)],
+                ..prop("shrine", "Shrine", p::SHRINE, true, [10.0, 6.0])
+            },
+            prop("well", "Well", p::WELL, true, [14.0, 8.0]),
+            // Multi-tile props.
+            PropDef {
+                sprite: SpriteRef::block("props", p::DOUBLE_GATE, 2, 2),
+                // No key: it simply swings open and stops blocking.
+                // Can be closed again ("relock" without a key).
+                default_state: "closed".into(),
+                states: vec![state("open", SpriteRef::block("props", p::DOUBLE_GATE + 2, 2, 2), false)],
+                lock: Some(LockSpec {
+                    key: String::new(),
+                    on_unlock: OnUnlock::ToState { state: "open".into() },
+                    unlock_text: "The gate swings open.".into(),
+                    relock: true,
+                    lock_text: "The gate swings shut.".into(),
+                    ..Default::default()
+                }),
+                ..prop("double_gate", "Double Gate", 0, true, [32.0, 10.0])
+            },
+            PropDef { sprite: SpriteRef::block("props", p::BIG_OAK, 3, 4), ..prop("big_oak", "Big Oak", 0, true, [14.0, 8.0]) },
+            PropDef { sprite: SpriteRef::block("props", p::BIG_PINE, 2, 4), ..prop("big_pine", "Big Pine", 0, true, [10.0, 8.0]) },
+            PropDef { sprite: SpriteRef::block("props", p::BOULDER, 2, 2), ..prop("boulder", "Boulder", 0, true, [28.0, 12.0]) },
+            PropDef { sprite: SpriteRef::block("props", p::STATUE, 1, 2), ..prop("statue", "Statue", 0, true, [12.0, 8.0]) },
+            PropDef {
+                // Stands in a north-south wall; its hitbox covers three tiles of road.
+                sprite: SpriteRef::block("props", p::VGATE, 1, 4),
+                // The key is kept, so the gate can be locked again behind you.
+                default_state: "closed".into(),
+                states: vec![state("open", SpriteRef::block("props", p::VGATE + 1, 1, 4), false)],
+                lock: Some(LockSpec {
+                    key: "key".into(),
+                    consume_key: false,
+                    on_unlock: OnUnlock::ToState { state: "open".into() },
+                    locked_text: "The gate is locked. Maybe someone in the village has the key.".into(),
+                    relock: true,
+                    ..Default::default()
+                }),
+                ..prop("vgate", "Vertical Double Gate", 0, true, [12.0, 48.0])
+            },
+        ],
+        characters: vec![
+            hero,
+            ch("elder", "Elder", "elder", 40.0, Behavior::Static),
+            ch("villager", "Villager", "villager", 35.0, Behavior::Wander { radius: 3.0 }),
+            slime,
+            goblin,
+        ],
+    }
+}
+
+const SCRIPT: &str = r#"// Rhai scripts for the example project.
+// Functions here can be called from triggers with the "Run script" action
+// or used as conditions ("Script" condition, must return a bool).
+//
+// World state:  flag(n) set_flag(n, b) get_var(n) set_var(n, v) add_var(n, v)
+//               item_count(id) has_item(id) give_item(id, n) take_item(id, n)
+// Queued:       say(text) say(speaker, text) choice(text, [options], var)
+//               teleport(map, spawn) set_active(target, b) set_frame(target, f)
+//               move_by(target, dx, dy) face(target, "up"|"down"|"left"|"right")
+//               wait(seconds) emit(event) then_call(fn)
+//               heal(n) play_sound(id) play_music(id) set_locked(target, b)
+// Other:        player_hp() random(n) current_map()
+// Targets: "self" (trigger owner), "player", or an entity name.
+
+fn mira_talk() {
+    add_var("mira_talks", 1);
+    let n = get_var("mira_talks");
+    if n == 1 {
+        say("Mira", "Hi! I'm Mira. Have you met Elder Rowan by the well?");
+    } else if flag("shrine_lit") {
+        say("Mira", "You lit the shrine? Amazing!");
+    } else if n < 4 {
+        say("Mira", "Talked to me " + n + " times now. You must be bored!");
+    } else {
+        say("Mira", "Want to see me walk?");
+        choice("Watch Mira walk?", ["Sure", "No thanks"], "mira_walk");
+        then_call("mira_walk");
+    }
+}
+
+fn mira_walk() {
+    if get_var("mira_walk") == 0 {
+        move_by("mira", 2, 0);
+        move_by("mira", 0, 1);
+        move_by("mira", -2, 0);
+        move_by("mira", 0, -1);
+        face("mira", "down");
+        say("Mira", "Ta-da!");
+    }
+}
+
+fn shrine_touch() {
+    if flag("shrine_lit") {
+        say("The shrine glows softly.");
+        return;
+    }
+    if !flag("quest_accepted") {
+        say("An old stone shrine. It seems dormant.");
+        return;
+    }
+    say("You touch the shrine. Ancient runes begin to glow!");
+    set_flag("shrine_lit", true);
+    set_state("self", "glowing");
+    emit("shrine_lit");
+}
+
+// Called by the slime's "Defeated" trigger.
+// Goblins drop a few arrows.
+fn goblin_defeated() {
+    give_item("arrows", 1 + random(3));
+}
+
+fn slime_defeated() {
+    add_var("slimes_defeated", 1);
+    if random(2) == 0 {
+        give_item("coin", 1 + random(3));
+    }
+    if get_var("slimes_defeated") == 5 {
+        say("You have defeated 5 slimes! You feel stronger... (not really)");
+    }
+}
+
+fn count_coins() {
+    say("You have " + item_count("coin") + " coins.");
+}
+"#;
+
+fn main() {
+    let out = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "example_project".into()));
+    std::fs::create_dir_all(&out).unwrap();
+    terrain(&out);
+    character(&out, "hero", &Look { skin: 0xf2c49b, hair: 0x5d3a1a, shirt: 0x2e6fdb, pants: 0x3b3b4f, beard: false, ears: false });
+    character(&out, "elder", &Look { skin: 0xe8b88a, hair: 0xdedede, shirt: 0x7b4fa0, pants: 0x4a3a5a, beard: true, ears: false });
+    character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false });
+    character(&out, "goblin", &Look { skin: 0x7cb342, hair: 0x33691e, shirt: 0x5d4037, pants: 0x3e2723, beard: false, ears: true });
+    overlay(&out, "ov_cap", Gear::Cap);
+    overlay(&out, "ov_helmet", Gear::Helmet);
+    overlay(&out, "ov_leather", Gear::Leather);
+    overlay(&out, "ov_chain", Gear::Chain);
+    slime(&out);
+    props(&out);
+    items(&out);
+    std::fs::create_dir_all(out.join("sounds")).unwrap();
+    for (id, make) in SOUNDS {
+        std::fs::write(out.join(format!("sounds/{id}.wav")), wav_bytes(&make(), RATE)).unwrap();
+    }
+
+    let project = Project {
+        root: out.clone(),
+        config: ProjectConfig {
+            name: "rust2d example".into(),
+            tile_size: TS,
+            start_map: "village".into(),
+            start_spawn: "start".into(),
+            scale: 1.5,
+            player: "hero".into(),
+            sfx: GameSfx {
+                pickup: "pickup".into(),
+                attack: "swing".into(),
+                hit: "hit".into(),
+                hurt: "hurt".into(),
+                defeat: "defeat".into(),
+                dialog: "blip".into(),
+                portal: "door".into(),
+                open_container: "creak".into(),
+                unlock: "unlock".into(),
+            },
+            inventory_size: 24,
+        },
+        db: database(),
+    };
+    project.save_config().unwrap();
+    project.save_defs().unwrap();
+    for map in [village(), house(), forest(), wilds()] {
+        project.save_map(&map).unwrap();
+        println!("map {:<8} {}x{}", map.name, map.width, map.height);
+    }
+    std::fs::create_dir_all(project.scripts_dir()).unwrap();
+    std::fs::write(project.scripts_dir().join("main.rhai"), SCRIPT).unwrap();
+    println!("example project written to {}", out.display());
+    write_starter_pack(&project);
+}
+
+/// The editor's starter asset library: every asset of the example project. Triggers that run
+/// Rhai functions are dropped (scripts are not part of asset packages).
+fn write_starter_pack(project: &Project) {
+    use rust2d_engine::library::{all_assets, Bundle};
+    let mut b = Bundle::collect(&project.db, &project.root, TS, "rust2d starter assets", &all_assets(&project.db)).unwrap();
+    let scripted = |t: &Trigger| t.actions.iter().any(|a| matches!(a, Action::RunScript { .. }));
+    for d in &mut b.db.items {
+        d.on_use.retain(|t| !scripted(t));
+    }
+    for d in &mut b.db.props {
+        d.triggers.retain(|t| !scripted(t));
+    }
+    for d in &mut b.db.characters {
+        d.triggers.retain(|t| !scripted(t));
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../editor/assets/starter.r2dpack");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let bytes = b.to_pack().unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    println!("starter asset pack: {} ({} KiB)", path.display(), bytes.len() / 1024);
+}

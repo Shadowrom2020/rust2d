@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/engine", "crates/game", "crates/editor"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+rust2d-engine = { path = "crates/engine" }
+macroquad = { version = "0.4.16", features = ["audio"] }
+egui-macroquad = "0.17.3"
+serde = { version = "1", features = ["derive"] }
+ron = "0.12"
+postcard = { version = "1", features = ["use-std"] }
+lz4_flex = "0.14"
+rhai = "1.27"
+anyhow = "1"
+
+# Keep debug builds playable: optimize dependencies, not our own crates.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1

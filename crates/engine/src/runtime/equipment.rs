@@ -1,0 +1,192 @@
+//! Equipment (head, body, weapon): equipping from the inventory, derived stats, armor overlays.
+
+use macroquad::prelude::*;
+
+use super::Game;
+use crate::defs::{EquipSlot, Weapon};
+use crate::inventory::ItemStack;
+
+/// Player stats shown on the character sheet.
+pub(super) struct Stats {
+    pub attack: i32,
+    pub defense: i32,
+    pub speed: f32,
+    pub cooldown: f32,
+    /// Melee reach or ranged range, in tiles.
+    pub reach: f32,
+    pub ranged: bool,
+}
+
+/// Reach of bare-handed attacks (tiles).
+const UNARMED_REACH: f32 = 0.8;
+const UNARMED_COOLDOWN: f32 = 0.35;
+
+impl Game {
+    /// The equipped weapon's definition.
+    pub(super) fn current_weapon(&self) -> Option<Weapon> {
+        let id = self.world.equipment.item(EquipSlot::Weapon)?;
+        self.project.db.item(id).and_then(|d| d.weapon.clone())
+    }
+
+    /// The weapon used for attacks: the equipped one, or bare hands (player damage).
+    pub(super) fn attack_weapon(&self) -> Weapon {
+        self.current_weapon().unwrap_or(Weapon {
+            reach: UNARMED_REACH,
+            ..Weapon::melee(self.combat.damage, UNARMED_COOLDOWN)
+        })
+    }
+
+    fn armor_pieces(&self) -> impl Iterator<Item = &crate::defs::Armor> {
+        [EquipSlot::Head, EquipSlot::Body]
+            .into_iter()
+            .filter_map(|s| self.world.equipment.item(s))
+            .filter_map(|id| self.project.db.item(id)?.armor.as_ref())
+    }
+
+    pub(super) fn player_defense(&self) -> i32 {
+        self.combat.defense + self.armor_pieces().map(|a| a.defense).sum::<i32>()
+    }
+
+    /// Movement speed factor from armor (heavy armor slows down).
+    pub(super) fn speed_factor(&self) -> f32 {
+        (1.0 + self.armor_pieces().map(|a| a.speed).sum::<f32>()).clamp(0.3, 2.0)
+    }
+
+    pub(super) fn stats(&self) -> Stats {
+        let w = self.attack_weapon();
+        Stats {
+            attack: w.damage,
+            defense: self.player_defense(),
+            speed: self.player.speed * self.speed_factor(),
+            cooldown: w.cooldown,
+            reach: w.ranged.as_ref().map_or(w.reach, |r| r.range),
+            ranged: w.ranged.is_some(),
+        }
+    }
+
+    /// Old saves referenced the equipped weapon by id; move it into the weapon slot.
+    pub(super) fn migrate_equipment(&mut self) {
+        let id = std::mem::take(&mut self.world.equipped);
+        if !id.is_empty() && self.world.equipment.weapon.is_none() && self.world.inventory.remove(&id, 1) == 1 {
+            self.world.equipment.weapon = Some(ItemStack::new(&id, 1));
+        }
+    }
+
+    /// Equips one item from inventory slot `i`; the previously worn item goes back to the
+    /// inventory (into the freed slot if possible). Returns false if impossible.
+    pub(super) fn equip_from_slot(&mut self, i: usize) -> bool {
+        let Some(stack) = self.world.inventory.slots.get(i).cloned().flatten() else { return false };
+        let Some(slot) = self.project.db.item(&stack.item).and_then(|d| d.equip_slot()) else { return false };
+        let one = self.world.inventory.take_from_slot(i, Some(1)).unwrap();
+        let old = self.world.equipment.slot_mut(slot).replace(one);
+        if let Some(old) = old {
+            let inv = &mut self.world.inventory;
+            if inv.slots[i].is_none() {
+                inv.slots[i] = Some(old);
+            } else if inv.add(&old.item, old.count) > 0 {
+                // No room for the old item: undo.
+                let new = self.world.equipment.slot_mut(slot).replace(old).unwrap();
+                self.world.inventory.add(&new.item, new.count);
+                self.ui.toast("Inventory full".into());
+                return false;
+            }
+        }
+        let name = self.project.db.item(&stack.item).map_or(stack.item.clone(), |d| d.name.clone());
+        self.ui.toast(format!("Equipped {name}"));
+        true
+    }
+
+    /// Equips the first inventory stack of `item`.
+    pub(super) fn equip_item(&mut self, item: &str) -> bool {
+        match self.world.inventory.slots.iter().position(|s| s.as_ref().is_some_and(|s| s.item == item)) {
+            Some(i) => self.equip_from_slot(i),
+            None => false,
+        }
+    }
+
+    /// Takes off an equipped item; `to` = preferred inventory slot.
+    pub(super) fn unequip(&mut self, slot: EquipSlot, to: Option<usize>) -> bool {
+        let Some(stack) = self.world.equipment.get(slot).cloned() else { return false };
+        let inv = &mut self.world.inventory;
+        let placed = match to {
+            Some(j) if inv.slots.get(j).is_some_and(|s| s.is_none()) => {
+                inv.slots[j] = Some(stack.clone());
+                true
+            }
+            _ => inv.space_for(&stack.item) >= stack.count && inv.add(&stack.item, stack.count) == 0,
+        };
+        if !placed {
+            self.ui.toast("Inventory full".into());
+            return false;
+        }
+        *self.world.equipment.slot_mut(slot) = None;
+        true
+    }
+
+    /// Q: cycles bare hands → owned weapons (sorted by name) → bare hands.
+    pub(super) fn cycle_weapon(&mut self) {
+        let mut ids: Vec<String> = self
+            .world
+            .inventory
+            .item_ids()
+            .into_iter()
+            .chain(self.world.equipment.item(EquipSlot::Weapon).map(str::to_string))
+            .filter(|id| self.project.db.item(id).is_some_and(|d| d.weapon.is_some()))
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids.insert(0, String::new());
+        let cur = self.world.equipment.item(EquipSlot::Weapon).unwrap_or("").to_string();
+        let pos = ids.iter().position(|w| *w == cur).unwrap_or(0);
+        let next = ids[(pos + 1) % ids.len()].clone();
+        if next.is_empty() {
+            if self.unequip(EquipSlot::Weapon, None) {
+                self.ui.toast("Weapon: bare hands".into());
+            }
+        } else {
+            self.equip_item(&next);
+        }
+    }
+
+    /// Draws worn armor over the player sprite (same frame layout as the player sheet).
+    pub(super) fn draw_armor_overlays(&self, frame: u32, feet: Vec2, tint: Color) {
+        for slot in [EquipSlot::Body, EquipSlot::Head] {
+            let overlay = self
+                .world
+                .equipment
+                .item(slot)
+                .and_then(|id| self.project.db.item(id))
+                .and_then(|d| d.armor.as_ref())
+                .map(|a| a.overlay.as_str())
+                .filter(|o| !o.is_empty());
+            if let Some(sheet) = overlay {
+                self.assets.draw_frame(sheet, frame, feet, tint);
+            }
+        }
+    }
+
+    /// Draws the player's idle front frame + armor scaled into `dest` (character sheet portrait).
+    pub(super) fn draw_portrait(&self, dest: Rect) {
+        let Some(sheet) = &self.player_sheet else { return };
+        let mut sheets = vec![sheet.clone()];
+        for slot in [EquipSlot::Body, EquipSlot::Head] {
+            if let Some(o) = self
+                .world
+                .equipment
+                .item(slot)
+                .and_then(|id| self.project.db.item(id))
+                .and_then(|d| d.armor.as_ref())
+                .filter(|a| !a.overlay.is_empty())
+            {
+                sheets.push(o.overlay.clone());
+            }
+        }
+        for s in sheets {
+            if let Some(t) = self.assets.sheets.get(&s) {
+                let scale = (dest.w / t.frame_w).min(dest.h / t.frame_h).floor().max(1.0);
+                let (w, h) = (t.frame_w * scale, t.frame_h * scale);
+                self.assets.draw_frame_in(&s, 0, Rect::new(dest.x + (dest.w - w) / 2.0, dest.y + dest.h - h, w, h), WHITE);
+            }
+        }
+    }
+}

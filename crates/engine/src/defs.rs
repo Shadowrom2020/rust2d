@@ -1,0 +1,708 @@
+//! Content definitions edited in the editor and stored as RON in `defs/`.
+
+use serde::{Deserialize, Serialize};
+
+use crate::entity::EntityKind;
+use crate::events::{Condition, Trigger};
+use crate::inventory::ItemStack;
+
+/// A tileset image cut into 32 px squares ([`crate::project::TILE_SIZE`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TilesetDef {
+    pub id: String,
+    /// Image path relative to the project root.
+    pub image: String,
+    /// Indices of tiles that block movement.
+    #[serde(default)]
+    pub solid: Vec<u32>,
+    /// Animated tiles: wherever `tile` is placed, it cycles through `frames`.
+    #[serde(default)]
+    pub animations: Vec<TileAnim>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TileAnim {
+    pub tile: u32,
+    pub frames: Vec<u32>,
+    pub fps: f32,
+}
+
+impl ItemDef {
+    /// The equipment slot this item goes into, if it can be equipped.
+    pub fn equip_slot(&self) -> Option<EquipSlot> {
+        if self.weapon.is_some() {
+            Some(EquipSlot::Weapon)
+        } else {
+            self.armor.as_ref().map(|a| a.slot)
+        }
+    }
+}
+
+impl TileAnim {
+    /// Tile index shown at time `t` (seconds).
+    pub fn frame_at(&self, t: f64) -> u32 {
+        if self.frames.is_empty() || self.fps <= 0.0 {
+            return self.tile;
+        }
+        let i = (t * self.fps as f64).floor() as usize % self.frames.len();
+        self.frames[i]
+    }
+}
+
+/// A sound effect or music track (WAV or OGG).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SoundDef {
+    pub id: String,
+    /// Path relative to the project root.
+    pub file: String,
+    #[serde(default = "full_volume")]
+    pub volume: f32,
+}
+
+fn full_volume() -> f32 {
+    1.0
+}
+
+/// A sprite sheet: an image cut into equally sized frames.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetDef {
+    pub id: String,
+    pub image: String,
+    pub frame_w: u32,
+    pub frame_h: u32,
+}
+
+/// A sprite: a block of `w × h` frames (cells) of a sheet, starting at `frame`
+/// (its top-left cell). Multi-cell sprites make props bigger than one frame.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpriteRef {
+    pub sheet: String,
+    pub frame: u32,
+    /// Width in cells (0 or 1 = single cell).
+    #[serde(default = "one_cell", skip_serializing_if = "is_one")]
+    pub w: u32,
+    /// Height in cells.
+    #[serde(default = "one_cell", skip_serializing_if = "is_one")]
+    pub h: u32,
+}
+
+fn one_cell() -> u32 {
+    1
+}
+fn is_one(v: &u32) -> bool {
+    *v <= 1
+}
+
+impl SpriteRef {
+    pub fn new(sheet: &str, frame: u32) -> Self {
+        SpriteRef { sheet: sheet.into(), frame, w: 1, h: 1 }
+    }
+    /// A `w × h` cell block.
+    pub fn block(sheet: &str, frame: u32, w: u32, h: u32) -> Self {
+        SpriteRef { sheet: sheet.into(), frame, w, h }
+    }
+    /// Size in cells, at least 1×1.
+    pub fn cells(&self) -> (u32, u32) {
+        (self.w.max(1), self.h.max(1))
+    }
+}
+
+/// Makes an item (or a character) a weapon.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Weapon {
+    pub damage: i32,
+    /// Seconds between attacks.
+    #[serde(default = "default_cooldown")]
+    pub cooldown: f32,
+    /// Shoots projectiles instead of swinging.
+    #[serde(default)]
+    pub ranged: Option<Ranged>,
+    /// Melee: how far the swing reaches, in tiles.
+    #[serde(default = "default_reach")]
+    pub reach: f32,
+    /// Melee: half-angle of the swing in degrees (90 = everything in front).
+    #[serde(default = "default_arc")]
+    pub arc: f32,
+    /// Knockback multiplier for hit targets.
+    #[serde(default = "default_knockback")]
+    pub knockback: f32,
+}
+
+fn default_reach() -> f32 {
+    1.0
+}
+fn default_arc() -> f32 {
+    60.0
+}
+fn default_knockback() -> f32 {
+    1.0
+}
+
+impl Weapon {
+    /// A melee weapon with default reach / arc / knockback.
+    pub fn melee(damage: i32, cooldown: f32) -> Self {
+        Weapon { damage, cooldown, ranged: None, reach: default_reach(), arc: default_arc(), knockback: default_knockback() }
+    }
+    pub fn ranged(damage: i32, cooldown: f32, ranged: Ranged) -> Self {
+        Weapon { ranged: Some(ranged), ..Weapon::melee(damage, cooldown) }
+    }
+}
+
+/// Equipment slots of the character sheet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EquipSlot {
+    Head,
+    Body,
+    Weapon,
+}
+
+impl EquipSlot {
+    pub const ALL: [EquipSlot; 3] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon];
+    pub fn label(self) -> &'static str {
+        match self {
+            EquipSlot::Head => "Head",
+            EquipSlot::Body => "Body",
+            EquipSlot::Weapon => "Weapon",
+        }
+    }
+}
+
+/// Helmets and body armor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Armor {
+    /// `Head` or `Body`.
+    pub slot: EquipSlot,
+    /// Subtracted from incoming damage (at least 1 damage always gets through).
+    #[serde(default)]
+    pub defense: i32,
+    /// Movement speed change, e.g. -0.1 = 10% slower.
+    #[serde(default)]
+    pub speed: f32,
+    /// Sprite sheet drawn over the player (same layout as the player sheet); "" = none.
+    #[serde(default)]
+    pub overlay: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Ranged {
+    /// Projectile sprite, drawn pointing right and rotated to the flight direction.
+    pub projectile: SpriteRef,
+    /// Pixels per second.
+    #[serde(default = "default_projectile_speed")]
+    pub speed: f32,
+    /// Maximum distance in tiles.
+    #[serde(default = "default_range")]
+    pub range: f32,
+    /// Item consumed per shot ("" = unlimited).
+    #[serde(default)]
+    pub ammo: String,
+}
+
+fn default_cooldown() -> f32 {
+    0.4
+}
+fn default_projectile_speed() -> f32 {
+    440.0
+}
+fn default_range() -> f32 {
+    8.0
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ItemDef {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub icon: SpriteRef,
+    /// Removed from the inventory when used (only if an `on_use` trigger ran).
+    #[serde(default)]
+    pub consumable: bool,
+    /// Triggers (event `UseItem`) run when the item is used without a target.
+    #[serde(default)]
+    pub on_use: Vec<Trigger>,
+    /// Using a weapon item from the inventory equips it.
+    #[serde(default)]
+    pub weapon: Option<Weapon>,
+    /// Helmet / body armor (equipped like weapons).
+    #[serde(default)]
+    pub armor: Option<Armor>,
+    /// How many fit in one inventory slot.
+    #[serde(default = "default_max_stack")]
+    pub max_stack: u32,
+}
+
+fn default_max_stack() -> u32 {
+    crate::inventory::DEFAULT_STACK
+}
+
+/// What happens to a prop when its lock is opened.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum OnUnlock {
+    /// Stays as it is (containers then simply open).
+    Nothing,
+    /// The prop disappears (gates, rubble, ...).
+    Disappear,
+    /// Legacy: switches to a frame offset and stops blocking movement. Converted to
+    /// [`OnUnlock::ToState`] when definitions and maps are loaded (if a matching state exists).
+    Open { frame: u32 },
+    /// Switches the prop to one of its states (sprite + whether it blocks movement).
+    ToState { state: String },
+}
+
+/// A lock that needs a key item.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LockSpec {
+    /// Item id of the key.
+    pub key: String,
+    /// The key is used up when unlocking.
+    #[serde(default = "yes")]
+    pub consume_key: bool,
+    #[serde(default = "on_unlock_default")]
+    pub on_unlock: OnUnlock,
+    /// Shown without the key ("" = "It's locked. You need <key name>.").
+    #[serde(default)]
+    pub locked_text: String,
+    /// Shown when unlocking ("" = "Unlocked with <key name>.").
+    #[serde(default)]
+    pub unlock_text: String,
+    /// Once open, the player can lock it again if they have the key (without a key item:
+    /// close it again). Not possible for props that disappear when unlocked.
+    #[serde(default)]
+    pub relock: bool,
+    /// Shown when locking it again ("" = "Locked with <key name>." / "Closed.").
+    #[serde(default)]
+    pub lock_text: String,
+}
+
+fn yes() -> bool {
+    true
+}
+impl LockSpec {
+    /// Whether an opened lock can be locked (closed) again.
+    pub fn can_relock(&self) -> bool {
+        self.relock && self.on_unlock != OnUnlock::Disappear
+    }
+}
+
+fn on_unlock_default() -> OnUnlock {
+    OnUnlock::Nothing
+}
+
+impl Default for LockSpec {
+    fn default() -> Self {
+        LockSpec {
+            key: String::new(),
+            consume_key: true,
+            on_unlock: OnUnlock::Nothing,
+            locked_text: String::new(),
+            unlock_text: String::new(),
+            relock: false,
+            lock_text: String::new(),
+        }
+    }
+}
+
+/// A lootable container (chest, barrel, ...): its size, starting contents and lock.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContainerSpec {
+    /// Number of slots.
+    pub size: u32,
+    /// Starting contents, placed into the slots in order.
+    #[serde(default)]
+    pub items: Vec<ItemStack>,
+    /// All must hold for the container to open.
+    #[serde(default)]
+    pub conditions: Vec<Condition>,
+    /// Message shown when the conditions don't hold.
+    #[serde(default)]
+    pub locked_text: String,
+    /// Legacy frame offset set the first time it is opened (converted to `open_state`).
+    #[serde(default)]
+    pub open_frame: u32,
+    /// State the prop switches to the first time it is opened ("" = no change).
+    #[serde(default)]
+    pub open_state: String,
+}
+
+impl Default for ContainerSpec {
+    fn default() -> Self {
+        ContainerSpec { size: 8, items: vec![], conditions: vec![], locked_text: String::new(), open_frame: 0, open_state: String::new() }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PropDef {
+    pub id: String,
+    pub name: String,
+    /// Sprite of the default state (named `default_state`).
+    pub sprite: SpriteRef,
+    /// Whether the default state blocks movement.
+    #[serde(default)]
+    pub solid: bool,
+    /// Name of the default state (the one placed props start in).
+    #[serde(default = "default_state_name")]
+    pub default_state: String,
+    /// Further states (e.g. "open", "destroyed"), each with its own sprite.
+    #[serde(default)]
+    pub states: Vec<PropState>,
+    /// Collision / interaction box (w, h) in pixels, anchored bottom-center.
+    #[serde(default = "default_box")]
+    pub hitbox: [f32; 2],
+    #[serde(default)]
+    pub triggers: Vec<Trigger>,
+    /// Default container for every placed instance (instances can override it).
+    #[serde(default)]
+    pub container: Option<ContainerSpec>,
+    /// Default lock for every placed instance (instances can override it).
+    #[serde(default)]
+    pub lock: Option<LockSpec>,
+}
+
+/// A named look of a prop: its sprite and whether it blocks movement.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PropState {
+    pub name: String,
+    pub sprite: SpriteRef,
+    #[serde(default)]
+    pub solid: bool,
+}
+
+pub fn default_state_name() -> String {
+    "default".into()
+}
+
+impl PropDef {
+    /// All state names, the default state first.
+    pub fn state_names(&self) -> Vec<String> {
+        std::iter::once(self.default_state.clone()).chain(self.states.iter().map(|s| s.name.clone())).collect()
+    }
+    /// Index of a state (0 = default; "" also means the default state).
+    pub fn state_index(&self, name: &str) -> Option<usize> {
+        if name.is_empty() || name == self.default_state {
+            return Some(0);
+        }
+        self.states.iter().position(|s| s.name == name).map(|i| i + 1)
+    }
+    pub fn state_name(&self, index: usize) -> &str {
+        if index == 0 { &self.default_state } else { self.states.get(index - 1).map_or("", |s| s.name.as_str()) }
+    }
+    /// Sprite and solidity of state `index` (out of range: the default state).
+    pub fn state_look(&self, index: usize) -> (&SpriteRef, bool) {
+        match index.checked_sub(1).and_then(|i| self.states.get(i)) {
+            Some(s) => (&s.sprite, s.solid),
+            None => (&self.sprite, self.solid),
+        }
+    }
+    /// The state whose sprite is the default sprite shifted by `offset` frames (old frame
+    /// offsets); created as `name` if there is none.
+    fn state_for_offset(&mut self, offset: u32, name: &str, solid: bool) -> String {
+        let sprite = SpriteRef { frame: self.sprite.frame + offset, ..self.sprite.clone() };
+        if offset == 0 {
+            return self.default_state.clone();
+        }
+        if let Some(s) = self.states.iter().find(|s| s.sprite == sprite) {
+            return s.name.clone();
+        }
+        let mut n = name.to_string();
+        let mut k = 2;
+        while self.state_index(&n).is_some() {
+            n = format!("{name}_{k}");
+            k += 1;
+        }
+        self.states.push(PropState { name: n.clone(), sprite, solid });
+        n
+    }
+    /// Converts the legacy frame offsets of the lock / container to named states.
+    pub fn upgrade_states(&mut self) {
+        let lock_offset = match self.lock.as_ref().map(|l| &l.on_unlock) {
+            Some(OnUnlock::Open { frame }) => Some(*frame),
+            _ => None,
+        };
+        if let Some(off) = lock_offset {
+            if self.states.is_empty() && self.default_state == default_state_name() {
+                self.default_state = "closed".into();
+            }
+            let st = self.state_for_offset(off, "open", false);
+            self.lock.as_mut().unwrap().on_unlock = OnUnlock::ToState { state: st };
+        }
+        let open_frame = self.container.as_ref().map_or(0, |c| c.open_frame);
+        if open_frame > 0 && self.container.as_ref().is_some_and(|c| c.open_state.is_empty()) {
+            if self.states.is_empty() && self.default_state == default_state_name() {
+                self.default_state = "closed".into();
+            }
+            let solid = self.solid;
+            let st = self.state_for_offset(open_frame, "open", solid);
+            let c = self.container.as_mut().unwrap();
+            c.open_state = st;
+            c.open_frame = 0;
+        }
+    }
+    /// The state a legacy frame offset of an instance refers to (if any).
+    pub fn state_of_offset(&self, offset: u32) -> Option<String> {
+        if offset == 0 {
+            return Some(self.default_state.clone());
+        }
+        let sprite = SpriteRef { frame: self.sprite.frame + offset, ..self.sprite.clone() };
+        self.states.iter().find(|s| s.sprite == sprite).map(|s| s.name.clone())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Behavior {
+    Static,
+    /// Walks randomly within `radius` tiles of its start position.
+    Wander { radius: f32 },
+    /// Runs at the player when closer than `sight` tiles, otherwise wanders near home.
+    Chase { sight: f32 },
+}
+
+/// A character sheet has 4 rows (Down, Left, Right, Up) of `walk_frames` frames.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CharacterDef {
+    pub id: String,
+    pub name: String,
+    pub sheet: String,
+    #[serde(default = "default_walk_frames")]
+    pub walk_frames: u32,
+    /// Movement speed in pixels per second.
+    #[serde(default = "default_speed")]
+    pub speed: f32,
+    #[serde(default = "default_box")]
+    pub hitbox: [f32; 2],
+    #[serde(default = "default_behavior")]
+    pub behavior: Behavior,
+    /// Hit points; 0 = can't be damaged. For the player character this is the max HP.
+    #[serde(default)]
+    pub max_hp: i32,
+    /// Contact damage (hostile characters) or attack damage (player character).
+    #[serde(default)]
+    pub damage: i32,
+    /// Hurts the player on contact.
+    #[serde(default)]
+    pub hostile: bool,
+    /// Hostile characters with a ranged weapon shoot at the player.
+    #[serde(default)]
+    pub weapon: Option<Weapon>,
+    /// Subtracted from incoming damage (player: base defense before armor).
+    #[serde(default)]
+    pub defense: i32,
+    #[serde(default)]
+    pub triggers: Vec<Trigger>,
+}
+
+fn default_box() -> [f32; 2] {
+    [24.0, 16.0]
+}
+fn default_walk_frames() -> u32 {
+    4
+}
+fn default_speed() -> f32 {
+    120.0
+}
+fn default_behavior() -> Behavior {
+    Behavior::Static
+}
+
+/// All definitions of a project.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Database {
+    pub tilesets: Vec<TilesetDef>,
+    pub sheets: Vec<SheetDef>,
+    pub items: Vec<ItemDef>,
+    pub props: Vec<PropDef>,
+    pub characters: Vec<CharacterDef>,
+    pub sounds: Vec<SoundDef>,
+}
+
+impl Database {
+    pub fn tileset(&self, id: &str) -> Option<&TilesetDef> {
+        self.tilesets.iter().find(|d| d.id == id)
+    }
+    pub fn sheet(&self, id: &str) -> Option<&SheetDef> {
+        self.sheets.iter().find(|d| d.id == id)
+    }
+    pub fn item(&self, id: &str) -> Option<&ItemDef> {
+        self.items.iter().find(|d| d.id == id)
+    }
+    pub fn prop(&self, id: &str) -> Option<&PropDef> {
+        self.props.iter().find(|d| d.id == id)
+    }
+    pub fn character(&self, id: &str) -> Option<&CharacterDef> {
+        self.characters.iter().find(|d| d.id == id)
+    }
+    pub fn sound(&self, id: &str) -> Option<&SoundDef> {
+        self.sounds.iter().find(|d| d.id == id)
+    }
+
+    /// Ids of all definitions of a kind (for editor dropdowns).
+    pub fn ids(&self, kind: EntityKind) -> Vec<String> {
+        match kind {
+            EntityKind::Prop => self.props.iter().map(|d| d.id.clone()).collect(),
+            EntityKind::Character => self.characters.iter().map(|d| d.id.clone()).collect(),
+            EntityKind::Item => self.items.iter().map(|d| d.id.clone()).collect(),
+        }
+    }
+
+    /// Triggers defined on the definition behind an entity.
+    /// Max stack sizes of all items (installed into inventories).
+    pub fn stack_limits(&self) -> std::sync::Arc<std::collections::HashMap<String, u32>> {
+        std::sync::Arc::new(self.items.iter().map(|d| (d.id.clone(), d.max_stack.max(1))).collect())
+    }
+
+    /// The container of a placed entity: its own override, else the prop definition's.
+    pub fn container_of<'a>(&'a self, e: &'a crate::entity::EntityInstance) -> Option<&'a ContainerSpec> {
+        if e.kind != EntityKind::Prop {
+            return None;
+        }
+        e.container.as_ref().or_else(|| self.prop(&e.def).and_then(|d| d.container.as_ref()))
+    }
+
+    /// Converts legacy frame offsets in all prop definitions to named states.
+    pub fn upgrade_prop_states(&mut self) {
+        for d in &mut self.props {
+            d.upgrade_states();
+        }
+    }
+
+    /// Converts a placed prop's legacy frame offsets (start frame, lock, container) to the
+    /// definition's named states, where one matches.
+    pub fn upgrade_instance(&self, e: &mut crate::entity::EntityInstance) {
+        let Some(d) = (e.kind == EntityKind::Prop).then(|| self.prop(&e.def)).flatten() else { return };
+        if e.frame > 0 && e.state.is_empty() {
+            if let Some(st) = d.state_of_offset(e.frame) {
+                e.state = st;
+                e.frame = 0;
+            }
+        }
+        if let Some(l) = &mut e.lock {
+            if let OnUnlock::Open { frame } = l.on_unlock {
+                if let Some(st) = d.state_of_offset(frame) {
+                    l.on_unlock = OnUnlock::ToState { state: st };
+                }
+            }
+        }
+        if let Some(c) = &mut e.container {
+            if c.open_frame > 0 && c.open_state.is_empty() {
+                if let Some(st) = d.state_of_offset(c.open_frame) {
+                    c.open_state = st;
+                    c.open_frame = 0;
+                }
+            }
+        }
+    }
+
+    /// The lock of a placed entity: its own override, else the prop definition's.
+    pub fn lock_of<'a>(&'a self, e: &'a crate::entity::EntityInstance) -> Option<&'a LockSpec> {
+        if e.kind != EntityKind::Prop {
+            return None;
+        }
+        e.lock.as_ref().or_else(|| self.prop(&e.def).and_then(|d| d.lock.as_ref()))
+    }
+
+    pub fn def_triggers(&self, kind: EntityKind, id: &str) -> &[Trigger] {
+        match kind {
+            EntityKind::Prop => self.prop(id).map(|d| &d.triggers[..]),
+            EntityKind::Character => self.character(id).map(|d| &d.triggers[..]),
+            EntityKind::Item => None,
+        }
+        .unwrap_or(&[])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multi_cell_sprites() {
+        // Older definitions have no size: single cell.
+        let old: SpriteRef = ron::from_str(r#"(sheet: "props", frame: 3)"#).unwrap();
+        assert_eq!(old.cells(), (1, 1));
+        let big = SpriteRef::block("props", 24, 3, 4);
+        let s = ron::to_string(&big).unwrap();
+        assert_eq!(ron::from_str::<SpriteRef>(&s).unwrap(), big);
+        // Single-cell sprites don't write the size fields.
+        assert!(!ron::to_string(&SpriteRef::new("items", 1)).unwrap().contains("w:"));
+        assert_eq!(SpriteRef::default().cells(), (1, 1));
+    }
+
+    #[test]
+    fn weapons_and_armor() {
+        // Weapons saved before melee fields existed get sensible defaults.
+        let w: Weapon = ron::from_str("(damage: 2, cooldown: 0.5)").unwrap();
+        assert_eq!((w.reach, w.arc, w.knockback), (1.0, 60.0, 1.0));
+        let mut item: ItemDef = ron::from_str(r#"(id: "cap", name: "Cap", icon: (sheet: "items", frame: 0))"#).unwrap();
+        assert_eq!(item.equip_slot(), None);
+        assert_eq!(item.max_stack, crate::inventory::DEFAULT_STACK);
+        item.armor = Some(Armor { slot: EquipSlot::Head, defense: 1, speed: 0.0, overlay: String::new() });
+        assert_eq!(item.equip_slot(), Some(EquipSlot::Head));
+        item.weapon = Some(Weapon::melee(1, 0.3));
+        assert_eq!(item.equip_slot(), Some(EquipSlot::Weapon));
+    }
+
+    #[test]
+    fn relockable_locks() {
+        // Locks saved before relocking existed can't be relocked.
+        let old: LockSpec = ron::from_str(r#"(key: "key", on_unlock: Open(frame: 1))"#).unwrap();
+        assert!(old.consume_key && !old.relock && !old.can_relock());
+        let gate = LockSpec { relock: true, ..old.clone() };
+        assert!(gate.can_relock());
+        // Props that disappear when unlocked can't come back.
+        assert!(!LockSpec { on_unlock: OnUnlock::Disappear, ..gate }.can_relock());
+    }
+
+    #[test]
+    fn prop_states_and_legacy_offsets() {
+        // A gate saved with the old frame-offset lock and a chest with an open frame.
+        let mut gate: PropDef = ron::from_str(
+            r#"(id: "gate", name: "Gate", sprite: (sheet: "props", frame: 3), solid: true,
+                lock: Some((key: "key", on_unlock: Open(frame: 12))))"#,
+        )
+        .unwrap();
+        assert_eq!(gate.state_names(), vec!["default"]);
+        gate.upgrade_states();
+        assert_eq!(gate.state_names(), vec!["closed", "open"]);
+        assert_eq!(gate.lock.as_ref().unwrap().on_unlock, OnUnlock::ToState { state: "open".into() });
+        let (sprite, solid) = gate.state_look(1);
+        assert_eq!((sprite.frame, solid), (15, false));
+        assert!(gate.state_look(0).1);
+        assert_eq!(gate.state_index(""), Some(0));
+        assert_eq!(gate.state_of_offset(12).as_deref(), Some("open"));
+        assert_eq!(gate.state_of_offset(5), None);
+        // Upgrading twice changes nothing.
+        let once = gate.clone();
+        gate.upgrade_states();
+        assert_eq!(gate, once);
+
+        let mut chest: PropDef = ron::from_str(
+            r#"(id: "chest", name: "Chest", sprite: (sheet: "props", frame: 0), solid: true,
+                container: Some((size: 8, open_frame: 1)))"#,
+        )
+        .unwrap();
+        chest.upgrade_states();
+        let c = chest.container.as_ref().unwrap();
+        assert_eq!((c.open_state.as_str(), c.open_frame), ("open", 0));
+        assert!(chest.state_look(1).1, "an open chest still blocks movement");
+
+        // Placed instances with old offsets follow the definition's states.
+        let db = Database { props: vec![gate], ..Default::default() };
+        let mut e = crate::entity::EntityInstance::new(1, EntityKind::Prop, "gate", 0.0, 0.0);
+        e.frame = 12;
+        e.lock = Some(LockSpec { key: "k".into(), on_unlock: OnUnlock::Open { frame: 12 }, ..Default::default() });
+        db.upgrade_instance(&mut e);
+        assert_eq!((e.state.as_str(), e.frame), ("open", 0));
+        assert_eq!(e.lock.unwrap().on_unlock, OnUnlock::ToState { state: "open".into() });
+    }
+
+    #[test]
+    fn tile_animation_frames() {
+        let a = TileAnim { tile: 3, frames: vec![3, 40, 41], fps: 2.0 };
+        assert_eq!(a.frame_at(0.0), 3);
+        assert_eq!(a.frame_at(0.6), 40);
+        assert_eq!(a.frame_at(1.2), 41);
+        assert_eq!(a.frame_at(1.5), 3);
+        let still = TileAnim { tile: 3, frames: vec![], fps: 2.0 };
+        assert_eq!(still.frame_at(9.0), 3);
+    }
+}

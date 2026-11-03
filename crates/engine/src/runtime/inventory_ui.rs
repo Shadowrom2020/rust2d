@@ -1,0 +1,865 @@
+//! Inventory window and container loot window (grid of slots, mouse + keyboard).
+//!
+//! Inventory: click selects, double-click / right-click / Enter uses or equips, drag rearranges.
+//! Loot: click a container stack to take it, right-click takes one, click your own stack to
+//! store it, drag between the grids, "Take all" (T). Esc / I closes.
+
+use macroquad::prelude::*;
+
+use super::{input, ui::panel, Game};
+use crate::defs::EquipSlot;
+use crate::inventory::{Inventory, ItemStack};
+use crate::render::wrap_text;
+
+const SLOT: f32 = 48.0;
+const GAP: f32 = 6.0;
+const PAD: f32 = 14.0;
+const TITLE_H: f32 = 40.0;
+const DETAIL_H: f32 = 84.0;
+const DOUBLE_CLICK: f64 = 0.35;
+const DRAG_START: f32 = 6.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Side {
+    Player,
+    Container,
+    /// Character sheet equipment slots (0 = head, 1 = body, 2 = weapon).
+    Equip,
+    /// Quick action bar (shortcuts to item types, not the items themselves).
+    Quick,
+}
+
+/// Number of quick bar slots (keys 1-8).
+pub const QUICK_SLOTS: usize = 8;
+const QUICK_KEYS: [KeyCode; QUICK_SLOTS] =
+    [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4, KeyCode::Key5, KeyCode::Key6, KeyCode::Key7, KeyCode::Key8];
+const QUICK_SLOT: f32 = 44.0;
+
+/// Screen rects of the quick bar slots (bottom center).
+fn quick_rects() -> Vec<Rect> {
+    let (sw, sh) = (screen_width(), screen_height());
+    let w = QUICK_SLOTS as f32 * (QUICK_SLOT + GAP) - GAP;
+    let x0 = ((sw - w) / 2.0).round();
+    (0..QUICK_SLOTS).map(|k| Rect::new(x0 + k as f32 * (QUICK_SLOT + GAP), sh - QUICK_SLOT - 12.0, QUICK_SLOT, QUICK_SLOT)).collect()
+}
+
+const EQUIP_SLOTS: [EquipSlot; 3] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon];
+const SHEET_W: f32 = 270.0;
+
+#[derive(Default)]
+pub(super) struct InvUi {
+    /// Player inventory window open.
+    open: bool,
+    /// Entity uid of the container being looted.
+    loot: Option<u32>,
+    /// Container to open once the current event sequence has finished.
+    pub pending_loot: Option<u32>,
+    sel: Option<(Side, usize)>,
+    press: Option<(Side, usize, Vec2)>,
+    dragging: bool,
+    last_click: Option<(Side, usize, f64)>,
+    /// Quick bar slot that was just used (for a short highlight).
+    quick_flash: Option<(usize, f64)>,
+}
+
+impl InvUi {
+    pub fn is_open(&self) -> bool {
+        self.open || self.loot.is_some()
+    }
+    pub fn close(&mut self) {
+        self.open = false;
+        self.loot = None;
+        self.press = None;
+        self.dragging = false;
+    }
+}
+
+struct Grid {
+    side: Side,
+    title: String,
+    panel: Rect,
+    slots: Vec<Rect>,
+    cols: usize,
+}
+
+struct Layout {
+    grids: Vec<Grid>,
+    take_all: Option<Rect>,
+    close: Rect,
+    detail: Rect,
+}
+
+impl Layout {
+    fn hit(&self, p: Vec2) -> Option<(Side, usize)> {
+        self.grids.iter().find_map(|g| g.slots.iter().position(|r| r.contains(p)).map(|i| (g.side, i)))
+    }
+    fn grid(&self, side: Side) -> Option<&Grid> {
+        self.grids.iter().find(|g| g.side == side)
+    }
+    fn contains(&self, p: Vec2) -> bool {
+        self.grids.iter().any(|g| g.panel.contains(p)) || self.detail.contains(p)
+    }
+}
+
+fn bag_rect() -> Rect {
+    Rect::new(screen_width() - 64.0, screen_height() - 64.0, 52.0, 52.0)
+}
+
+fn grid_size(n: usize, cols: usize) -> Vec2 {
+    let rows = n.div_ceil(cols).max(1);
+    vec2(cols as f32 * (SLOT + GAP) - GAP + 2.0 * PAD, rows as f32 * (SLOT + GAP) - GAP + 2.0 * PAD + TITLE_H)
+}
+
+/// Height of the character sheet panel.
+const SHEET_H: f32 = 400.0;
+
+/// Container panels are at least this wide (title + "Take all" button).
+const MIN_CONTAINER_W: f32 = 300.0;
+
+fn make_grid(side: Side, title: String, origin: Vec2, n: usize, cols: usize) -> Grid {
+    let mut size = grid_size(n, cols);
+    if side == Side::Container {
+        size.x = size.x.max(MIN_CONTAINER_W);
+    }
+    let slots = (0..n)
+        .map(|i| {
+            let (c, r) = (i % cols, i / cols);
+            Rect::new(origin.x + PAD + c as f32 * (SLOT + GAP), origin.y + TITLE_H + PAD + r as f32 * (SLOT + GAP), SLOT, SLOT)
+        })
+        .collect();
+    Grid { side, title, panel: Rect::new(origin.x, origin.y, size.x, size.y), slots, cols }
+}
+
+impl Game {
+    pub(super) fn inventory_open(&self) -> bool {
+        self.inv.is_open()
+    }
+
+    fn container_name(&self, uid: u32) -> String {
+        let def = self.loaded.map.entity(uid).map(|e| e.def.clone()).unwrap_or_default();
+        self.project.db.prop(&def).map_or("Container".into(), |d| d.name.clone())
+    }
+
+    /// The contents of a container entity on the current map (created from its spec on first use).
+    pub(super) fn container_inv(&mut self, uid: u32) -> Option<&mut Inventory> {
+        let map = self.loaded.map.name.clone();
+        let limits = self.world.inventory.limits();
+        if self.world.containers.get(&map).is_none_or(|m| !m.contains_key(&uid)) {
+            let e = self.loaded.map.entity(uid)?;
+            let spec = self.project.db.container_of(e)?;
+            let inv = Inventory::with_stacks(spec.size as usize, &spec.items, limits.clone());
+            self.world.containers.entry(map.clone()).or_default().insert(uid, inv);
+        }
+        let inv = self.world.containers.get_mut(&map)?.get_mut(&uid)?;
+        inv.set_limits(limits);
+        Some(inv)
+    }
+
+    /// Opens a container if its conditions hold (called after its Interact triggers were queued).
+    pub(super) fn try_open_container(&mut self, i: usize) {
+        let uid = self.loaded.entities[i].uid;
+        let Some(spec) = self.loaded.map.entity(uid).and_then(|e| self.project.db.container_of(e)).cloned() else {
+            return;
+        };
+        let ctx = crate::events::runner::ActionCtx { owner: Some(uid) };
+        if !crate::events::runner::conditions_met(self, &spec.conditions, &ctx) {
+            let msg = if spec.locked_text.is_empty() { "It's locked.".to_string() } else { spec.locked_text.clone() };
+            self.ui.toast(msg);
+            return;
+        }
+        if !spec.open_state.is_empty() {
+            let open = self.project.db.prop(&self.loaded.entities[i].def).and_then(|d| d.state_index(&spec.open_state));
+            if open.is_some_and(|s| s != self.loaded.entities[i].state) {
+                self.set_prop_state(i, &spec.open_state);
+            }
+        } else if spec.open_frame > 0 && self.loaded.entities[i].frame != spec.open_frame {
+            self.loaded.entities[i].frame = spec.open_frame;
+            self.persist(i);
+        }
+        self.container_inv(uid);
+        self.inv.pending_loot = Some(uid);
+    }
+
+    fn layout(&self) -> Layout {
+        let (sw, sh) = (screen_width(), screen_height());
+        let cap = self.world.inventory.capacity();
+        let player_title = format!("Inventory  {}/{}", self.world.inventory.used_slots(), cap);
+        let cols = 6;
+        let mut grids = Vec::new();
+        let mut take_all = None;
+        match self.inv.loot {
+            None => {
+                // Character sheet on the left, inventory grid on the right.
+                let size = grid_size(cap, cols);
+                let h = size.y.max(SHEET_H);
+                let total = SHEET_W + 24.0 + size.x;
+                let top = ((sh - h - DETAIL_H) / 2.0).max(10.0).round();
+                let x0 = ((sw - total) / 2.0).round();
+                let slots = (0..3).map(|k| Rect::new(x0 + 134.0, top + 50.0 + k as f32 * 60.0, SLOT, SLOT)).collect();
+                grids.push(Grid { side: Side::Equip, title: "Character".into(), panel: Rect::new(x0, top, SHEET_W, h), slots, cols: 1 });
+                let mut g = make_grid(Side::Player, player_title, vec2(x0 + SHEET_W + 24.0, top), cap, cols);
+                g.panel.h = h;
+                grids.push(g);
+            }
+            Some(uid) => {
+                let n = self.world.containers.get(&self.loaded.map.name).and_then(|m| m.get(&uid)).map_or(1, |c| c.capacity());
+                let ccols = n.clamp(1, 6);
+                let (mut a, b) = (grid_size(n, ccols), grid_size(cap, cols));
+                a.x = a.x.max(MIN_CONTAINER_W);
+                let total = a.x + 24.0 + b.x;
+                let top = ((sh - a.y.max(b.y) - DETAIL_H) / 2.0).max(10.0).round();
+                let x0 = ((sw - total) / 2.0).round();
+                let g = make_grid(Side::Container, self.container_name(uid), vec2(x0, top), n, ccols);
+                take_all = Some(Rect::new(g.panel.x + g.panel.w - 104.0, g.panel.y + 8.0, 90.0, 26.0));
+                grids.push(g);
+                grids.push(make_grid(Side::Player, player_title, vec2(x0 + a.x + 24.0, top), cap, cols));
+            }
+        }
+        let left = grids.iter().map(|g| g.panel.x).fold(f32::MAX, f32::min);
+        let right = grids.iter().map(|g| g.panel.x + g.panel.w).fold(0.0, f32::max);
+        let bottom = grids.iter().map(|g| g.panel.y + g.panel.h).fold(0.0, f32::max);
+        let last = grids.last().unwrap().panel;
+        let slots = quick_rects();
+        let bar = Rect::new(slots[0].x - 6.0, slots[0].y - 6.0, slots[QUICK_SLOTS - 1].right() - slots[0].x + 12.0, QUICK_SLOT + 12.0);
+        grids.push(Grid { side: Side::Quick, title: String::new(), panel: bar, slots, cols: QUICK_SLOTS });
+        Layout {
+            close: Rect::new(last.x + last.w - 30.0, last.y + 8.0, 22.0, 22.0),
+            detail: {
+                // At least wide enough for the help line.
+                let w = (right - left).max(measure_text(self.hint(), None, 16, 1.0).width + 2.0 * PAD);
+                Rect::new(((left + right) / 2.0 - w / 2.0).round(), bottom + 6.0, w, DETAIL_H)
+            },
+            grids,
+            take_all,
+        }
+    }
+
+    /// Screen center of a slot (for automated play-throughs): side "player", "chest" or "equip".
+    pub fn slot_screen_pos(&self, side: &str, i: usize) -> Option<Vec2> {
+        let side = match side {
+            "chest" => Side::Container,
+            "equip" => Side::Equip,
+            "quick" => Side::Quick,
+            _ => Side::Player,
+        };
+        let l = self.layout();
+        l.grid(side)?.slots.get(i).map(|r| r.center())
+    }
+
+    fn inv_of(&mut self, side: Side) -> Option<&mut Inventory> {
+        match side {
+            Side::Player => Some(&mut self.world.inventory),
+            Side::Container => {
+                let uid = self.inv.loot?;
+                self.container_inv(uid)
+            }
+            Side::Equip | Side::Quick => None,
+        }
+    }
+
+    fn slot_item(&mut self, side: Side, i: usize) -> Option<String> {
+        self.slot_stack(side, i).map(|s| s.item)
+    }
+
+    /// The stack shown in a slot of any panel.
+    fn slot_stack(&self, side: Side, i: usize) -> Option<ItemStack> {
+        match side {
+            Side::Player => self.world.inventory.slots.get(i).cloned().flatten(),
+            Side::Container => self.inv.loot.and_then(|u| self.world.containers.get(&self.loaded.map.name)?.get(&u)?.slots.get(i).cloned().flatten()),
+            Side::Equip => EQUIP_SLOTS.get(i).and_then(|s| self.world.equipment.get(*s).cloned()),
+            Side::Quick => self.quick_item(i).map(|id| ItemStack::new(&id, self.world.item_count(&id))),
+        }
+    }
+
+    fn quick_item(&self, k: usize) -> Option<String> {
+        self.world.quickbar.get(k).filter(|id| !id.is_empty()).cloned()
+    }
+
+    /// Puts an item type on quick bar slot `k` (moving it if it was on another slot).
+    fn assign_quick(&mut self, k: usize, item: &str) {
+        let bar = &mut self.world.quickbar;
+        bar.resize(QUICK_SLOTS, String::new());
+        for s in bar.iter_mut() {
+            if s == item {
+                s.clear();
+            }
+        }
+        bar[k] = item.to_string();
+    }
+
+    fn clear_quick(&mut self, k: usize) {
+        if let Some(s) = self.world.quickbar.get_mut(k) {
+            s.clear();
+        }
+    }
+
+    /// Uses the item on quick bar slot `k` (same as using it from the inventory).
+    pub(super) fn use_quick(&mut self, k: usize) {
+        let Some(id) = self.quick_item(k) else { return };
+        let name = self.project.db.item(&id).map_or(id.clone(), |d| d.name.clone());
+        self.inv.quick_flash = Some((k, get_time()));
+        if self.world.inventory.count(&id) == 0 {
+            if self.world.equipment.count(&id) > 0 {
+                self.ui.toast(format!("{name} is already equipped"));
+            } else {
+                self.ui.toast(format!("No {name} left"));
+            }
+            return;
+        }
+        self.use_item(&id);
+    }
+
+    /// Moves `count` (None = all) from a slot to the other side. Returns how many moved.
+    fn move_between(&mut self, from: Side, i: usize, count: Option<u32>) -> u32 {
+        let Some(uid) = self.inv.loot else { return 0 };
+        self.container_inv(uid);
+        let map = self.loaded.map.name.clone();
+        let w = &mut self.world;
+        let Some(chest) = w.containers.get_mut(&map).and_then(|m| m.get_mut(&uid)) else { return 0 };
+        let (src, dst) = match from {
+            Side::Container => (chest, &mut w.inventory),
+            Side::Player => (&mut w.inventory, chest),
+            Side::Equip | Side::Quick => return 0,
+        };
+        let had = src.slots.get(i).cloned().flatten();
+        let moved = Inventory::transfer(src, i, dst, count);
+        if let Some(stack) = had {
+            if moved == 0 {
+                self.ui.toast(if from == Side::Container { "Inventory full".into() } else { "No room in here".into() });
+            } else if from == Side::Container {
+                let name = self.project.db.item(&stack.item).map_or(stack.item.clone(), |d| d.name.clone());
+                self.ui.toast(if moved > 1 { format!("Took {name} x{moved}") } else { format!("Took {name}") });
+            }
+        }
+        moved
+    }
+
+    fn take_all(&mut self) {
+        let Some(n) = self.inv.loot.and_then(|u| self.container_inv(u)).map(|c| c.capacity()) else { return };
+        let mut moved = 0;
+        let mut blocked = false;
+        for i in 0..n {
+            let Some(uid) = self.inv.loot else { return };
+            let map = self.loaded.map.name.clone();
+            let w = &mut self.world;
+            let Some(chest) = w.containers.get_mut(&map).and_then(|m| m.get_mut(&uid)) else { return };
+            if chest.slots[i].is_none() {
+                continue;
+            }
+            let m = Inventory::transfer(chest, i, &mut w.inventory, None);
+            blocked |= chest.slots[i].is_some();
+            moved += m;
+        }
+        if moved > 0 {
+            self.audio.play(&self.project.config.sfx.pickup);
+        }
+        if blocked {
+            self.ui.toast("Inventory full".into());
+        } else if moved > 0 {
+            self.ui.toast(format!("Took {moved} item(s)"));
+        }
+    }
+
+    /// Drag & drop between any two slots.
+    fn drop_on(&mut self, from: (Side, usize), to: (Side, usize)) {
+        if from == to {
+            return;
+        }
+        match (from.0, to.0) {
+            // Shortcuts: items (from the inventory or the character sheet) onto the quick bar.
+            (Side::Player | Side::Equip, Side::Quick) => {
+                if let Some(id) = self.slot_item(from.0, from.1) {
+                    self.assign_quick(to.1, &id);
+                }
+                return;
+            }
+            (Side::Quick, Side::Quick) => {
+                self.world.quickbar.resize(QUICK_SLOTS, String::new());
+                self.world.quickbar.swap(from.1, to.1);
+                return;
+            }
+            // Dragging a shortcut anywhere off the bar removes it.
+            (Side::Quick, _) => {
+                self.clear_quick(from.1);
+                return;
+            }
+            (Side::Container, Side::Quick) => return,
+            (Side::Player, Side::Equip) => {
+                let fits = self.slot_item(Side::Player, from.1).and_then(|id| self.project.db.item(&id)?.equip_slot()) == EQUIP_SLOTS.get(to.1).copied();
+                if fits {
+                    self.equip_from_slot(from.1);
+                } else {
+                    self.ui.toast(format!("That doesn't go in the {} slot", EQUIP_SLOTS[to.1].label().to_lowercase()));
+                }
+                return;
+            }
+            (Side::Equip, Side::Player) => {
+                self.unequip(EQUIP_SLOTS[from.1], Some(to.1));
+                return;
+            }
+            (Side::Equip, _) | (_, Side::Equip) => return,
+            _ => {}
+        }
+        if from.0 == to.0 {
+            if let Some(inv) = self.inv_of(from.0) {
+                inv.move_slot(from.1, to.1);
+            }
+            return;
+        }
+        let Some(uid) = self.inv.loot else { return };
+        self.container_inv(uid);
+        let map = self.loaded.map.name.clone();
+        let w = &mut self.world;
+        let Some(chest) = w.containers.get_mut(&map).and_then(|m| m.get_mut(&uid)) else { return };
+        match from.0 {
+            Side::Container => Inventory::transfer_to_slot(chest, from.1, &mut w.inventory, to.1),
+            Side::Player => Inventory::transfer_to_slot(&mut w.inventory, from.1, chest, to.1),
+            Side::Equip | Side::Quick => false,
+        };
+    }
+
+    fn use_slot(&mut self, i: usize) {
+        let Some(item) = self.slot_item(Side::Player, i) else { return };
+        // Equipment goes into its slot (using the clicked stack).
+        if self.project.db.item(&item).is_some_and(|d| d.equip_slot().is_some()) {
+            self.equip_from_slot(i);
+            return;
+        }
+        self.use_item(&item);
+        // Close so dialogs / effects triggered by the item are visible.
+        if self.runner.busy() {
+            self.inv.close();
+        }
+    }
+
+    /// Primary action on a slot (click / Enter).
+    fn activate(&mut self, side: Side, i: usize, double: bool) {
+        if side == Side::Quick {
+            if double {
+                self.use_quick(i);
+            }
+            return;
+        }
+        if side == Side::Equip {
+            if double {
+                self.unequip(EQUIP_SLOTS[i], None);
+            }
+            return;
+        }
+        match (self.inv.loot.is_some(), side) {
+            (true, _) => {
+                if self.slot_item(side, i).is_some() {
+                    self.move_between(side, i, None);
+                }
+            }
+            (false, _) => {
+                if double {
+                    self.use_slot(i);
+                }
+            }
+        }
+    }
+
+    /// Handles the inventory / loot windows. Returns (key consumed, mouse consumed).
+    pub(super) fn update_inventory_ui(&mut self, allow: bool, key_consumed: bool) -> (bool, bool) {
+        if !allow {
+            return (false, false);
+        }
+        if let Some(uid) = self.inv.pending_loot.take() {
+            self.inv.open = false;
+            self.inv.loot = Some(uid);
+            self.inv.sel = Some((Side::Container, 0));
+            self.audio.play(&self.project.config.sfx.open_container);
+        }
+        let m = input::mouse_pos();
+        let (click, rclick) = (input::mouse_pressed(MouseButton::Left), input::mouse_pressed(MouseButton::Right));
+        if self.inv.loot.is_none() && !key_consumed && input::any_pressed(&[KeyCode::I, KeyCode::Tab, KeyCode::C]) {
+            self.inv.open = !self.inv.open;
+            self.inv.sel = Some((Side::Player, 0));
+            return (true, false);
+        }
+        if !self.inv.is_open() {
+            if click && bag_rect().contains(m) {
+                self.inv.open = true;
+                self.inv.sel = Some((Side::Player, 0));
+                return (false, true);
+            }
+            // Quick bar: keys 1-8 or a click use the item.
+            if !key_consumed {
+                if let Some(k) = QUICK_KEYS.iter().position(|k| input::pressed(*k)) {
+                    self.use_quick(k);
+                    return (true, false);
+                }
+            }
+            if click || rclick {
+                if let Some(k) = quick_rects().iter().position(|r| r.contains(m)) {
+                    self.use_quick(k);
+                    return (false, true);
+                }
+            }
+            return (false, false);
+        }
+
+        // ---- keyboard
+        let layout = self.layout();
+        if input::pressed(KeyCode::Escape) || (self.inv.loot.is_some() && input::pressed(KeyCode::I)) {
+            self.inv.close();
+            return (true, true);
+        }
+        if self.inv.loot.is_some() && input::pressed(KeyCode::T) {
+            self.take_all();
+        }
+        // 1-8 puts the selected item on the quick bar.
+        if let Some(k) = QUICK_KEYS.iter().position(|k| input::pressed(*k)) {
+            if let Some((side @ (Side::Player | Side::Equip), i)) = self.inv.sel {
+                if let Some(id) = self.slot_item(side, i) {
+                    self.assign_quick(k, &id);
+                }
+            }
+        }
+        if self.inv.loot.is_some() && input::pressed(KeyCode::Tab) {
+            if let Some((s, _)) = self.inv.sel {
+                self.inv.sel = Some((if s == Side::Player { Side::Container } else { Side::Player }, 0));
+            }
+        }
+        if let Some((side, i)) = self.inv.sel.filter(|s| s.0 != Side::Quick) {
+            if let Some(g) = layout.grid(side) {
+                let n = g.slots.len() as i32;
+                let c = g.cols as i32;
+                let mut j = i as i32;
+                let left = input::pressed(KeyCode::Left) || input::pressed(KeyCode::A);
+                let right = input::pressed(KeyCode::Right) || input::pressed(KeyCode::D);
+                // Hop between the character sheet and the inventory grid.
+                if side == Side::Player && left && i % g.cols == 0 && layout.grid(Side::Equip).is_some() {
+                    self.inv.sel = Some((Side::Equip, (i / g.cols).min(2)));
+                    return (true, true);
+                }
+                if side == Side::Equip && right {
+                    self.inv.sel = Some((Side::Player, i * cols_of(&layout, Side::Player)));
+                    return (true, true);
+                }
+                if left {
+                    j -= 1;
+                }
+                if right {
+                    j += 1;
+                }
+                if input::pressed(KeyCode::Up) || input::pressed(KeyCode::W) {
+                    j -= c;
+                }
+                if input::pressed(KeyCode::Down) || input::pressed(KeyCode::S) {
+                    j += c;
+                }
+                self.inv.sel = Some((side, j.clamp(0, n - 1) as usize));
+                let i = self.inv.sel.unwrap().1;
+                if input::any_pressed(&[KeyCode::Enter, KeyCode::E, KeyCode::Space]) {
+                    if side == Side::Equip {
+                        self.unequip(EQUIP_SLOTS[i], None);
+                    } else if self.inv.loot.is_some() {
+                        self.activate(side, i, false);
+                    } else {
+                        self.use_slot(i);
+                    }
+                } else if input::pressed(KeyCode::U) && side == Side::Player {
+                    self.use_slot(i);
+                }
+            }
+        }
+
+        // ---- mouse
+        let hit = layout.hit(m);
+        if click {
+            if layout.close.contains(m) {
+                self.inv.close();
+                return (true, true);
+            }
+            if layout.take_all.is_some_and(|r| r.contains(m)) {
+                self.take_all();
+                return (true, true);
+            }
+            match hit {
+                Some((side, i)) => {
+                    self.inv.press = Some((side, i, m));
+                    self.inv.dragging = false;
+                }
+                None if !layout.contains(m) => {
+                    self.inv.close();
+                    return (true, true);
+                }
+                None => {}
+            }
+        }
+        if let Some((side, i, start)) = self.inv.press {
+            if input::mouse_down(MouseButton::Left) && m.distance(start) > DRAG_START {
+                self.inv.dragging = true;
+            }
+            if input::mouse_released(MouseButton::Left) || !input::mouse_down(MouseButton::Left) {
+                self.inv.press = None;
+                if self.inv.dragging {
+                    self.inv.dragging = false;
+                    match hit {
+                        Some(to) => {
+                            self.drop_on((side, i), to);
+                            if to.0 != Side::Quick {
+                                self.inv.sel = Some(to);
+                            }
+                        }
+                        // Dragging a shortcut off the bar removes it.
+                        None if side == Side::Quick => self.clear_quick(i),
+                        None => {}
+                    }
+                } else if hit == Some((side, i)) {
+                    let now = get_time();
+                    let double = self.inv.last_click.is_some_and(|(s, j, t)| s == side && j == i && now - t < DOUBLE_CLICK);
+                    self.inv.last_click = Some((side, i, now));
+                    self.inv.sel = Some((side, i));
+                    self.activate(side, i, double);
+                }
+            }
+        }
+        if rclick {
+            if let Some((side, i)) = hit {
+                self.inv.sel = Some((side, i));
+                match (self.inv.loot.is_some(), side) {
+                    (_, Side::Quick) => self.clear_quick(i),
+                    (_, Side::Equip) => {
+                        self.unequip(EQUIP_SLOTS[i], None);
+                    }
+                    (true, _) => {
+                        self.move_between(side, i, Some(1));
+                    }
+                    (false, _) => self.use_slot(i),
+                }
+            }
+        }
+        (true, true)
+    }
+
+    // ------------------------------------------------------------ drawing
+
+    pub(super) fn draw_inventory_ui(&mut self) {
+        let m = input::mouse_pos();
+        if !self.ui.dialog_open() || self.inv.is_open() {
+            self.draw_quickbar();
+        }
+        if !self.inv.is_open() {
+            if !self.ui.dialog_open() {
+                let b = bag_rect();
+                let hover = b.contains(m);
+                draw_rectangle(b.x, b.y, b.w, b.h, Color::new(0.06, 0.06, 0.12, if hover { 0.95 } else { 0.7 }));
+                draw_rectangle_lines(b.x, b.y, b.w, b.h, 2.0, Color::new(0.85, 0.8, 0.6, 1.0));
+                let c = Color::new(0.65, 0.45, 0.25, 1.0);
+                draw_circle(b.x + 26.0, b.y + 31.0, 13.0, c);
+                draw_rectangle(b.x + 19.0, b.y + 12.0, 14.0, 8.0, c);
+                draw_line(b.x + 18.0, b.y + 20.0, b.x + 34.0, b.y + 20.0, 2.0, Color::new(0.35, 0.22, 0.1, 1.0));
+                draw_text("I", b.x + 40.0, b.y + 48.0, 16.0, LIGHTGRAY);
+            }
+            return;
+        }
+        let layout = self.layout();
+        let hover = layout.hit(m);
+        let dragging = if self.inv.dragging { self.inv.press.map(|(s, i, _)| (s, i)) } else { None };
+        for g in &layout.grids {
+            let p = g.panel;
+            if g.side != Side::Quick {
+                panel(p.x, p.y, p.w, p.h);
+                draw_text(&g.title, p.x + PAD, p.y + 28.0, 26.0, GOLD);
+            }
+            if g.side == Side::Equip {
+                self.draw_sheet(g, hover, dragging);
+                continue;
+            }
+            if g.side == Side::Quick {
+                continue;
+            }
+            let inv = match g.side {
+                Side::Player => Some(&self.world.inventory),
+                Side::Container => self.inv.loot.and_then(|u| self.world.containers.get(&self.loaded.map.name)?.get(&u)),
+                Side::Equip | Side::Quick => None,
+            };
+            let Some(inv) = inv else { continue };
+            for (i, r) in g.slots.iter().enumerate() {
+                let key = (g.side, i);
+                let selected = self.inv.sel == Some(key);
+                let bg = if hover == Some(key) { Color::new(1.0, 1.0, 1.0, 0.16) } else { Color::new(0.0, 0.0, 0.0, 0.35) };
+                draw_rectangle(r.x, r.y, r.w, r.h, bg);
+                let border = if selected { GOLD } else { Color::new(0.85, 0.8, 0.6, 0.35) };
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, if selected { 3.0 } else { 1.0 }, border);
+                let Some(stack) = inv.slots.get(i).cloned().flatten() else { continue };
+                let tint = if dragging == Some(key) { Color::new(1.0, 1.0, 1.0, 0.3) } else { WHITE };
+                if let Some(d) = self.project.db.item(&stack.item) {
+                    self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, Rect::new(r.x + 8.0, r.y + 8.0, 32.0, 32.0), tint);
+                } else {
+                    draw_text("?", r.x + 18.0, r.y + 32.0, 24.0, RED);
+                }
+                if stack.count > 1 {
+                    let t = stack.count.to_string();
+                    let w = measure_text(&t, None, 18, 1.0).width;
+                    draw_text(&t, r.x + r.w - w - 3.0, r.y + r.h - 4.0, 18.0, WHITE);
+                }
+            }
+        }
+        if let Some(r) = layout.take_all {
+            let h = r.contains(m);
+            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.3, 0.25, 0.1, if h { 1.0 } else { 0.8 }));
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, GOLD);
+            draw_text("Take all (T)", r.x + 6.0, r.y + 18.0, 16.0, WHITE);
+        }
+        let c = layout.close;
+        draw_text("x", c.x + 6.0, c.y + 17.0, 24.0, if c.contains(m) { WHITE } else { GRAY });
+
+        // Details of the hovered or selected stack.
+        let d = layout.detail;
+        panel(d.x, d.y, d.w, d.h);
+        let focus = hover.or(self.inv.sel);
+        let stack = focus.and_then(|(side, i)| self.slot_stack(side, i));
+        if let Some(s) = &stack {
+            let def = self.project.db.item(&s.item);
+            let name = def.map_or(s.item.as_str(), |d| d.name.as_str());
+            let title = if s.count > 1 { format!("{name}  x{}", s.count) } else { name.to_string() };
+            draw_text(&title, d.x + PAD, d.y + 24.0, 22.0, WHITE);
+            if let Some(def) = def {
+                let tw = measure_text(&title, None, 22, 1.0).width;
+                if let Some(line) = item_stats_line(def) {
+                    draw_text(&line, d.x + PAD + tw + 16.0, d.y + 23.0, 18.0, GOLD);
+                }
+                for (k, line) in wrap_text(&def.description, 18, d.w - 2.0 * PAD).iter().take(2).enumerate() {
+                    draw_text(line, d.x + PAD, d.y + 44.0 + k as f32 * 18.0, 18.0, LIGHTGRAY);
+                }
+            }
+        }
+        let hint = self.hint();
+        draw_text(hint, d.x + PAD, d.y + d.h - 8.0, 16.0, GRAY);
+
+        // The stack being dragged follows the cursor.
+        if let Some((side, i)) = dragging {
+            let item = self.slot_stack(side, i);
+            if let Some(def) = item.and_then(|s| self.project.db.item(&s.item)) {
+                self.assets.draw_frame_in(&def.icon.sheet, def.icon.frame, Rect::new(m.x - 16.0, m.y - 16.0, 32.0, 32.0), WHITE);
+            }
+        }
+    }
+}
+
+fn cols_of(layout: &Layout, side: Side) -> usize {
+    layout.grid(side).map_or(1, |g| g.cols)
+}
+
+/// Short stat summary of an equippable item, e.g. "Damage 2 · every 0.35s · reach 1.1".
+fn item_stats_line(d: &crate::defs::ItemDef) -> Option<String> {
+    if let Some(w) = &d.weapon {
+        return Some(match &w.ranged {
+            Some(r) => format!("Damage {} · every {:.2}s · range {:.0}", w.damage, w.cooldown, r.range),
+            None => format!("Damage {} · every {:.2}s · reach {:.1}", w.damage, w.cooldown, w.reach),
+        });
+    }
+    d.armor.as_ref().map(|a| {
+        let mut s = format!("{} · Defense +{}", a.slot.label(), a.defense);
+        if a.speed != 0.0 {
+            s.push_str(&format!(" · Speed {:+.0}%", a.speed * 100.0));
+        }
+        s
+    })
+}
+
+impl Game {
+    /// Character sheet: portrait, equipment slots and stats.
+    fn draw_sheet(&self, g: &Grid, hover: Option<(Side, usize)>, dragging: Option<(Side, usize)>) {
+        let p = g.panel;
+        self.draw_portrait(Rect::new(p.x + PAD, p.y + 50.0, 104.0, 168.0));
+        for (k, r) in g.slots.iter().enumerate() {
+            let key = (Side::Equip, k);
+            let selected = self.inv.sel == Some(key);
+            let bg = if hover == Some(key) { Color::new(1.0, 1.0, 1.0, 0.16) } else { Color::new(0.0, 0.0, 0.0, 0.35) };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, if selected { 3.0 } else { 1.5 }, if selected { GOLD } else { Color::new(0.85, 0.8, 0.6, 0.6) });
+            let slot = EQUIP_SLOTS[k];
+            draw_text(slot.label(), r.x + r.w + 8.0, r.y + 20.0, 18.0, LIGHTGRAY);
+            match self.world.equipment.get(slot).and_then(|s| self.project.db.item(&s.item)) {
+                Some(d) => {
+                    let tint = if dragging == Some(key) { Color::new(1.0, 1.0, 1.0, 0.3) } else { WHITE };
+                    self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, Rect::new(r.x + 8.0, r.y + 8.0, 32.0, 32.0), tint);
+                    for (n, line) in wrap_text(&d.name, 15, 80.0).iter().take(2).enumerate() {
+                        draw_text(line, r.x + r.w + 8.0, r.y + 36.0 + n as f32 * 13.0, 15.0, WHITE);
+                    }
+                }
+                None => {
+                    let hint = if slot == EquipSlot::Weapon { "bare hands" } else { "empty" };
+                    draw_text(hint, r.x + r.w + 8.0, r.y + 38.0, 15.0, GRAY);
+                }
+            }
+        }
+        let st = self.stats();
+        let hp = self.world.player_hp.unwrap_or(self.combat.max_hp);
+        let reach = if st.ranged { format!("Range       {:.0} tiles", st.reach) } else { format!("Reach       {:.1} tiles", st.reach) };
+        let lines = [
+            format!("Health      {} / {}", hp, self.combat.max_hp),
+            format!("Attack      {}", st.attack),
+            format!("Defense     {}", st.defense),
+            format!("Speed       {:.0}", st.speed),
+            format!("Attack time {:.2}s", st.cooldown),
+            reach,
+        ];
+        let y0 = p.y + 50.0 + 3.0 * 60.0 + 20.0;
+        draw_line(p.x + PAD, y0 - 12.0, p.x + p.w - PAD, y0 - 12.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
+        for (n, l) in lines.iter().enumerate() {
+            draw_text(l, p.x + PAD, y0 + 8.0 + n as f32 * 22.0, 19.0, WHITE);
+        }
+    }
+}
+
+impl Game {
+    /// The quick action bar (bottom center): icon, owned count, key number.
+    fn draw_quickbar(&self) {
+        let m = input::mouse_pos();
+        let rects = quick_rects();
+        let first = rects[0];
+        let last = rects[QUICK_SLOTS - 1];
+        draw_rectangle(first.x - 6.0, first.y - 6.0, last.right() - first.x + 12.0, QUICK_SLOT + 12.0, Color::new(0.04, 0.04, 0.08, 0.55));
+        let open = self.inv.is_open();
+        let dragging = if self.inv.dragging { self.inv.press.map(|(s, i, _)| (s, i)) } else { None };
+        let flash = self.inv.quick_flash.filter(|(_, t)| get_time() - t < 0.25).map(|(k, _)| k);
+        for (k, r) in rects.iter().enumerate() {
+            let hover = r.contains(m) && (open || !self.ui.dialog_open());
+            let bg = if flash == Some(k) {
+                Color::new(1.0, 0.9, 0.5, 0.45)
+            } else if hover {
+                Color::new(1.0, 1.0, 1.0, 0.18)
+            } else {
+                Color::new(0.0, 0.0, 0.0, 0.45)
+            };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            // While dragging something droppable, highlight the bar.
+            let drop_target = dragging.is_some_and(|(s, _)| matches!(s, Side::Player | Side::Equip | Side::Quick));
+            let border = if drop_target { GOLD } else { Color::new(0.85, 0.8, 0.6, 0.5) };
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, border);
+            draw_text((k + 1).to_string(), r.x + 3.0, r.y + 13.0, 15.0, Color::new(1.0, 1.0, 1.0, 0.7));
+            let Some(id) = self.quick_item(k) else { continue };
+            let Some(def) = self.project.db.item(&id) else { continue };
+            let owned = self.world.inventory.count(&id);
+            let equipped = self.world.equipment.count(&id) > 0;
+            let alpha = if dragging == Some((Side::Quick, k)) { 0.3 } else if owned == 0 && !equipped { 0.35 } else { 1.0 };
+            self.assets.draw_frame_in(&def.icon.sheet, def.icon.frame, Rect::new(r.x + 8.0, r.y + 8.0, 28.0, 28.0), Color::new(1.0, 1.0, 1.0, alpha));
+            if equipped {
+                draw_text("E", r.x + r.w - 11.0, r.y + 13.0, 15.0, GOLD);
+            }
+            if !(equipped && owned == 0) && (owned != 1 || def.max_stack > 1) {
+                let t = owned.to_string();
+                let w = measure_text(&t, None, 16, 1.0).width;
+                let c = if owned == 0 { Color::new(1.0, 0.45, 0.45, 1.0) } else { WHITE };
+                draw_text(&t, r.x + r.w - w - 3.0, r.y + r.h - 4.0, 16.0, c);
+            }
+        }
+    }
+}
+
+impl Game {
+    /// Help line at the bottom of the inventory / loot window.
+    fn hint(&self) -> &'static str {
+        if self.inv.loot.is_some() {
+            "Click: take/store stack · Right-click: one · Drag: move · T: take all · Esc: close"
+        } else {
+            "Double-click / right-click / Enter: use or equip · Drag to slots or quick bar (or press 1-8) · Esc: close"
+        }
+    }
+}
