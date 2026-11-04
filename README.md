@@ -47,7 +47,7 @@ The example project contains a short quest: talk to the elder, get the key from 
 | C | Character sheet + inventory (same window as I) |
 | Left click | Walk to the tile / attack the enemy under the cursor / advance dialog |
 | Right click | Walk to and interact with the NPC, item or prop under the cursor (or zones on that tile). NPCs behind a counter (one solid tile between, in a straight line) are talked to across it — also with E. |
-| I / Tab / C / bag button | Character sheet + inventory: arrows/click select, Enter / double-click / right-click use or equip, drag items onto / off the equipment slots or to rearrange, left arrow from the first column moves to the equipment slots (Enter unequips), Esc close |
+| I / Tab / C / bag button | Character sheet + inventory: arrows/click select, Enter / double-click / right-click use or equip, **G drops the selected stack on the ground (Shift+G: one item), dragging a stack out of the window drops it too** — dropped items stay where they are (also after leaving the map and in save games) until picked up again, drag items onto / off the equipment slots or to rearrange, left arrow from the first column moves to the equipment slots (Enter unequips), Esc close |
 | In a shop | Click a *Buy* / *Sell* button (or double-click a row, or Enter / E on the selected row) to trade one, hold Shift for ten; arrows / W S select, Tab / ← → switch between the merchant's stock and your items, mouse wheel scrolls, Esc close |
 | In a loot window | Click a stack to take it (right-click: take one), click your own stack to store it, drag between grids, T take all, Tab switch side, Esc close |
 | Esc | Pause menu: Resume, Save game (new named save or overwrite), Load game (all saves incl. the quicksave, newest first; Del deletes), Save and quit (saves to the slot this game was last saved to / loaded from, or a new "Save N", then returns to the main menu), Quit (back to the main menu without saving, after a confirmation). Only *Exit* on the main menu closes the game. |
@@ -222,7 +222,6 @@ RUST2D_EDITOR_SCRIPT="tool brush; brush 2 0 1 1; drag 2 2 20 2; dump 0 10 2; ren
 
 ## Limitations / ideas
 
-- Items can't be dropped onto the ground from the inventory yet (store them in a container instead).
 - Strings inside Rhai scripts are not updated by renames (the editor says so when it matters).
 - Enemies placed directly on a map stay dead once defeated; use a spawner zone for respawning enemies.
 - Native file dialogs need a running xdg-desktop-portal (standard on GNOME/KDE desktops); paths can always be typed by hand.

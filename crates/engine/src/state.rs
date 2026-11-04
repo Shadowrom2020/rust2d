@@ -108,6 +108,26 @@ pub struct WorldState {
     pub player_sex: Sex,
     #[serde(default)]
     pub player_look: String,
+    /// map -> items the player dropped there (they stay until picked up again).
+    #[serde(default)]
+    pub dropped: BTreeMap<String, Vec<DroppedItem>>,
+    /// Counter for the uids of dropped items (see [`DROPPED_UID_BASE`]).
+    #[serde(default)]
+    pub next_drop: u32,
+}
+
+/// Uids of dropped items start here, far above the uids of map entities.
+pub const DROPPED_UID_BASE: u32 = 0x4000_0000;
+
+/// An item stack the player dropped on a map.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DroppedItem {
+    pub uid: u32,
+    pub item: String,
+    pub count: u32,
+    /// Feet position in pixels.
+    pub x: f32,
+    pub y: f32,
 }
 
 /// The player character's sex (for dialogs, conditions and scripts).
@@ -169,6 +189,34 @@ impl WorldState {
         }
         out.push_str(rest);
         out
+    }
+
+    /// Puts dropped items on a map: onto a pile of the same item within `merge` pixels, else
+    /// as a new pile. Returns the pile's uid and whether it is new.
+    pub fn add_dropped(&mut self, map: &str, item: &str, count: u32, x: f32, y: f32, merge: f32) -> (u32, bool) {
+        let piles = self.dropped.entry(map.to_string()).or_default();
+        if let Some(p) = piles.iter_mut().find(|p| p.item == item && (p.x - x).hypot(p.y - y) <= merge) {
+            p.count += count;
+            return (p.uid, false);
+        }
+        let uid = DROPPED_UID_BASE + self.next_drop;
+        self.next_drop += 1;
+        piles.push(DroppedItem { uid, item: item.to_string(), count, x, y });
+        (uid, true)
+    }
+
+    /// Updates the size of a dropped pile (0 removes it).
+    pub fn set_dropped_count(&mut self, map: &str, uid: u32, count: u32) {
+        if let Some(piles) = self.dropped.get_mut(map) {
+            if count == 0 {
+                piles.retain(|p| p.uid != uid);
+            } else if let Some(p) = piles.iter_mut().find(|p| p.uid == uid) {
+                p.count = count;
+            }
+            if piles.is_empty() {
+                self.dropped.remove(map);
+            }
+        }
     }
 
     pub fn flag(&self, name: &str) -> bool {
@@ -233,6 +281,28 @@ impl WorldState {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn dropped_piles() {
+        let mut w = WorldState::default();
+        let (a, new_a) = w.add_dropped("village", "apple", 2, 100.0, 100.0, 16.0);
+        // Same item close by joins the pile; another item or far away makes a new one.
+        assert_eq!(w.add_dropped("village", "apple", 3, 105.0, 100.0, 16.0), (a, false));
+        let (b, new_b) = w.add_dropped("village", "sword", 1, 100.0, 100.0, 16.0);
+        assert!(new_a && new_b && a != b && a >= DROPPED_UID_BASE);
+        assert_eq!(w.dropped["village"][0].count, 5);
+        w.set_dropped_count("village", a, 1);
+        assert_eq!(w.dropped["village"][0].count, 1);
+        w.set_dropped_count("village", a, 0);
+        w.set_dropped_count("village", b, 0);
+        assert!(!w.dropped.contains_key("village"));
+        // Piles survive a save / load round trip.
+        w.add_dropped("forest", "coin", 7, 1.0, 2.0, 16.0);
+        let back: WorldState = ron::from_str(&ron::to_string(&w).unwrap()).unwrap();
+        assert_eq!(back.dropped["forest"][0].count, 7);
+        assert_eq!(back.next_drop, w.next_drop);
+    }
+
     use super::*;
 
     #[test]

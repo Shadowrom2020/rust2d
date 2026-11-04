@@ -200,7 +200,7 @@ impl Autoplay {
                 }
                 "press" => {
                     let keys: Vec<_> = arg(1).split('+').filter_map(key_from_name).collect();
-                    inject(&[], &keys);
+                    inject(&keys, &keys); // held too, so "shift+g" works
                     // Let one frame consume the press, then idle a little.
                     self.timer = 0.1;
                     return true;
@@ -238,7 +238,9 @@ impl Autoplay {
                 }
                 // slotdrag player|chest IDX player|chest IDX
                 "slotdrag" => {
-                    let (Some(a), Some(b)) = (game.slot_screen_pos(arg(1), secs(2) as usize), game.slot_screen_pos(arg(3), secs(4) as usize)) else { continue };
+                    // "slotdrag player 3 out" drags the stack out of the window (drops it).
+                    let to = if arg(3) == "out" { Some(vec2(8.0, screen_height() / 2.0)) } else { game.slot_screen_pos(arg(3), secs(4) as usize) };
+                    let (Some(a), Some(b)) = (game.slot_screen_pos(arg(1), secs(2) as usize), to) else { continue };
                     let l = MouseButton::Left;
                     self.mouse_frames.push_back(MouseInject { pos: a, pressed: vec![l], down: vec![l], released: vec![] });
                     for k in 1..=8 {
