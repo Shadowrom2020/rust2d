@@ -90,6 +90,9 @@ pub struct Zone {
     pub kind: ZoneKind,
     #[serde(default)]
     pub triggers: Vec<Trigger>,
+    /// Spawners: loot table of the spawned characters (None = the character's own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loot: Option<Vec<crate::defs::LootEntry>>,
 }
 
 impl Zone {

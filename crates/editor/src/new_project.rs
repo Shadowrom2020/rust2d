@@ -182,7 +182,7 @@ impl Editor {
             }
         }
         let uid = map.alloc_uid();
-        map.zones.push(Zone { uid, name: "start".into(), x: map.width / 2, y: map.height / 2, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![] });
+        map.zones.push(Zone { uid, name: "start".into(), x: map.width / 2, y: map.height / 2, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![], loot: None });
         if w.map_name != "start" {
             let _ = std::fs::remove_file(project.map_path("start"));
         }

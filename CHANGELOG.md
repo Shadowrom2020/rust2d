@@ -3,6 +3,32 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.0.6 — 2026-11-04
+
+### Gameplay
+- **Loot tables**: defeated characters drop items. Each line of a table is an item, a chance in
+  percent and an amount (min–max). Character definitions have a default table, placed characters
+  can use their own, and enemy spawners pass their table on to the characters they spawn. Drops
+  land where the character fell and stay (also in save games) until picked up.
+
+### Editor
+- **Unsaved markers follow undo**: maps, definitions, scripts and the pixel editor only count as
+  changed (• marker, save prompt on switching maps or closing) while they really differ from the
+  saved files. Undoing back to the saved state, or editing a field and changing it back, clears
+  the marker again.
+- **Mouse-wheel scrolling** in panels, lists, the inspector and the script editor moves about three
+  lines per notch (it was barely half a pixel).
+
+### Fixes
+- Dropped items and spawned characters could get the same internal id (both started at
+  0x4000_0000), which could mix them up. Dropped items now use their own range; piles in saves
+  from 0.0.5 are renumbered when loaded.
+
+### Example project
+- Slimes drop coins and apples, goblin archers arrows and coins (replacing the scripted rewards).
+  In the forest, the slime den adds potions and the goblin camp has its own table: arrows, coins,
+  bolts, sometimes a leather cap and rarely a crossbow.
+
 ## 0.0.5 — 2026-11-04
 
 0.0.4 was prepared but never released; its changes are part of this release.

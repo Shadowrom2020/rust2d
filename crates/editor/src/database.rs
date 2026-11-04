@@ -40,6 +40,8 @@ pub struct DbState {
     pub sel: usize,
     pub script_file: Option<std::path::PathBuf>,
     pub script_text: String,
+    /// The open script as on disk; `script_dirty` is only set while the text differs from it.
+    pub script_saved: String,
     pub script_dirty: bool,
     pub new_script: String,
     /// Character index to move the script editor's cursor to (and scroll to) next frame.
@@ -261,6 +263,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         defense: 0,
                         triggers: vec![],
                         shop: None,
+                        loot: vec![],
                     },
                     |d| &mut d.id,
                 ),
@@ -954,6 +957,14 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     ui.label("Ranged attack (hostile characters shoot at the player when in range and in sight):");
     weapon_ui(ui, "chr_weapon", &mut d.weapon, cx, true);
     ui.separator();
+    ui.heading("Loot");
+    if d.max_hp <= 0 {
+        ui.weak("This character can't be defeated (Max HP 0), so its loot never drops.");
+    } else {
+        ui.weak("What the character can drop when defeated. Placed characters and spawners can use their own table instead.");
+    }
+    widgets::loot_ui(ui, "chr_loot", &mut d.loot, cx.refs, cx.tex, cx.assets, cx.db);
+    ui.separator();
     ui.heading("Merchant");
     let mut on = d.shop.is_some();
     if ui.checkbox(&mut on, "Merchant (trades items with the player)").changed() {
@@ -1368,6 +1379,7 @@ impl Editor {
         if self.db.script_file.as_deref() != Some(f) {
             self.save_script_if_dirty();
             self.db.script_text = std::fs::read_to_string(f).unwrap_or_default();
+            self.db.script_saved = self.db.script_text.clone();
             self.db.script_file = Some(f.to_path_buf());
             self.db.script_dirty = false;
         }
@@ -1382,6 +1394,7 @@ impl Editor {
             match std::fs::write(&f, &self.db.script_text) {
                 Ok(()) => {
                     self.db.script_dirty = false;
+                    self.db.script_saved = self.db.script_text.clone();
                     self.set_status(format!("Saved {}", f.file_name().unwrap_or_default().to_string_lossy()));
                 }
                 Err(e) => self.set_status(format!("Saving script failed: {e}")),
@@ -1547,7 +1560,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
         };
         let res = crate::script_editor::show(ui, &mut st.script_text, &mut st.script_ed, &known, &problem_spans);
         if res.changed {
-            st.script_dirty = true;
+            st.script_dirty = st.script_text != st.script_saved;
         }
         goto = res.goto;
         if ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
@@ -1711,7 +1724,7 @@ impl Editor {
     /// of frames is added to the image. Returns the block's top-left frame.
     fn blank_frame(&mut self, sheet: &str, cells: (u32, u32)) -> anyhow::Result<u32> {
         let def = self.project.db.sheet(sheet).cloned().ok_or_else(|| anyhow::anyhow!("unknown sheet {sheet}"))?;
-        if self.px.doc.as_ref().is_some_and(|d| d.rel == def.image && d.dirty) {
+        if self.px.doc.as_ref().is_some_and(|d| d.rel == def.image && d.is_dirty()) {
             anyhow::bail!("save or revert the open image {} first", def.image);
         }
         let path = self.project.root.join(&def.image);

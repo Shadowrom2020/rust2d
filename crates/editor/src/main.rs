@@ -33,6 +33,12 @@ fn window_conf() -> Conf {
     }
 }
 
+/// egui-macroquad divides wheel deltas by 90 before handing them to egui, but macroquad on X11
+/// reports one wheel notch as 1.0 — so with egui's defaults a notch scrolled half a pixel.
+const EMQ_WHEEL_DIVISOR: f32 = 90.0;
+/// Scroll distance of one mouse-wheel notch in egui panels (about three lines of text).
+const WHEEL_POINTS_PER_NOTCH: f32 = 50.0;
+
 #[macroquad::main(window_conf)]
 async fn main() {
     // With a folder argument that project opens directly; otherwise the welcome screen shows.
@@ -45,6 +51,7 @@ async fn main() {
         None => Editor::empty(),
     };
     prevent_quit();
+    egui_macroquad::cfg(|ctx| ctx.options_mut(|o| o.line_scroll_speed = WHEEL_POINTS_PER_NOTCH * EMQ_WHEEL_DIVISOR));
     // Debug aid: RUST2D_EDITOR_SCRIPT="tool entity; select entity 3; wait 0.5; shot a.png; quit"
     let mut script: VecDeque<Vec<String>> = std::env::var("RUST2D_EDITOR_SCRIPT")
         .map(|s| s.split(';').map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>()).filter(|c| !c.is_empty()).collect())
@@ -145,7 +152,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                         "enter" => Respawn::OnEnter,
                         s => Respawn::After { seconds: s.parse().unwrap_or(10.0) },
                     };
-                    doc.dirty = true;
+                    doc.mark_changed();
                 }
             }
         }
@@ -215,7 +222,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "zones" => {
             if let Some(d) = &ed.doc {
                 for z in &d.map.zones {
-                    println!("[zones] {}: {} {:?} at {},{} {}x{}", d.map.name, z.name, z.kind, z.x, z.y, z.w, z.h);
+                    println!("[zones] {}: #{} {} {:?} at {},{} {}x{}", d.map.name, z.uid, z.name, z.kind, z.x, z.y, z.w, z.h);
                 }
             }
         }
@@ -255,7 +262,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 ed.settle_pending(p, c);
             }
         }
-        "status" => println!("[status] open={} project={} pending={} map={:?} dirty={} msg={}", ed.project_open, ed.project.root.display(), ed.pending.is_some(), ed.doc.as_ref().map(|d| d.map.name.clone()), ed.doc.as_ref().is_some_and(|d| d.dirty), ed.status.0),
+        "status" => println!("[status] open={} project={} pending={} map={:?} dirty={} msg={}", ed.project_open, ed.project.root.display(), ed.pending.is_some(), ed.doc.as_ref().map(|d| d.map.name.clone()), ed.doc.as_ref().is_some_and(|d| d.is_dirty()), ed.status.0),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),
         "rename" => {
             use rust2d_engine::refactor::RefKind;
@@ -282,7 +289,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                     m.name,
                     m.width,
                     m.height,
-                    d.dirty,
+                    d.is_dirty(),
                     ed.sel,
                     m.entities.iter().map(|e| format!("{}@{},{}", e.def, e.x, e.y)).collect::<Vec<_>>().join(" "),
                     m.zones.iter().map(|z| format!("{}:{}({},{} {}x{})", z.name, z.kind.label(), z.x, z.y, z.w, z.h)).collect::<Vec<_>>(),
@@ -482,6 +489,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "zone" => Selection::Zone(num(2) as u32),
                 // select named NAME: the entity with that instance name
                 "named" => ed.doc.as_ref().and_then(|d| d.map.entities.iter().find(|e| e.name == arg(2))).map_or(Selection::None, |e| Selection::Entity(e.uid)),
+                // select zonenamed NAME: the zone with that name
+                "zonenamed" => ed.doc.as_ref().and_then(|d| d.map.zones.iter().find(|z| z.name == arg(2))).map_or(Selection::None, |z| Selection::Zone(z.uid)),
                 _ => Selection::None,
             }
         }

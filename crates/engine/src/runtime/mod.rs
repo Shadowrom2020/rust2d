@@ -122,6 +122,8 @@ struct RtEntity {
     unlocked: bool,
     /// Patrol route and progress (characters with a route).
     patrol: Option<patrol::Patrol>,
+    /// What the character drops when defeated.
+    loot: Vec<crate::defs::LootEntry>,
 }
 
 struct Loaded {
@@ -342,6 +344,10 @@ impl Game {
             unlocked: false,
             state: 0,
             patrol: None,
+            loot: match (kind, self.project.db.character(def)) {
+                (EntityKind::Character, Some(d)) => d.loot.clone(),
+                _ => Vec::new(),
+            },
         }
     }
 
@@ -393,6 +399,9 @@ impl Game {
                 rt.count = count;
                 rt.sheet = e.sheet.clone();
                 if e.kind == EntityKind::Character {
+                    if let Some(loot) = &e.loot {
+                        rt.loot = loot.clone();
+                    }
                     rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
                     if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
                         let p = rt.patrol.get_or_insert_with(Default::default);
@@ -1022,6 +1031,7 @@ impl Game {
     /// Applies project rules (inventory size, stack limits) to the world state, e.g. after loading.
     fn prepare_world(&mut self) {
         self.migrate_equipment();
+        self.world.renumber_old_drops();
         // Games started without the creator (or saved before it existed) get the default name.
         if self.world.player_name.trim().is_empty() {
             self.world.player_name = self.default_player_name();

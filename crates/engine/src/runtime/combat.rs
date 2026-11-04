@@ -396,13 +396,28 @@ impl Game {
         e.active = false;
         e.knock = Vec2::ZERO;
         let (uid, pos, spawned_by) = (e.uid, e.body.pos - vec2(0.0, e.body.hitbox.y), e.spawned_by);
+        let (feet, loot) = (e.body.pos, e.loot.clone());
         self.effects.push((pos, 0.0));
         self.persist(i);
+        self.drop_loot(&loot, feet);
         if let Some(zone) = spawned_by {
             self.spawned_defeated(zone);
         }
         self.audio.play(&self.project.config.sfx.defeat);
         self.fire(GameEvent::Defeat, Source::Entity(uid));
+    }
+
+    /// Rolls a defeated character's loot table and puts what drops on the ground around
+    /// `feet` (saved like items the player dropped).
+    fn drop_loot(&mut self, loot: &[crate::defs::LootEntry], feet: Vec2) {
+        let drops = crate::defs::roll_loot(loot, || rand::gen_range(0.0, 1.0), |lo, hi| rand::gen_range(lo, hi + 1));
+        let u = self.u();
+        // Several different items fan out a little so each can be seen and picked up.
+        const SPOTS: [(f32, f32); 6] = [(0.0, 0.0), (10.0, 4.0), (-10.0, 4.0), (0.0, 9.0), (10.0, -5.0), (-10.0, -5.0)];
+        for (k, (item, count)) in drops.into_iter().enumerate() {
+            let (dx, dy) = SPOTS[k % SPOTS.len()];
+            self.place_drop(&item, count, feet + vec2(dx, dy) * u);
+        }
     }
 
     pub(super) fn hurt_player(&mut self, dmg: i32, from: Vec2) {

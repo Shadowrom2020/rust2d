@@ -135,8 +135,9 @@ pub struct WorldState {
     pub next_drop: u32,
 }
 
-/// Uids of dropped items start here, far above the uids of map entities.
-pub const DROPPED_UID_BASE: u32 = 0x4000_0000;
+/// Uids of dropped items start here, far above the uids of map entities and of spawned
+/// characters (`0x4000_0000..`).
+pub const DROPPED_UID_BASE: u32 = 0x6000_0000;
 
 /// An item stack the player dropped on a map.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -222,6 +223,19 @@ impl WorldState {
         self.next_drop += 1;
         piles.push(DroppedItem { uid, item: item.to_string(), count, x, y });
         (uid, true)
+    }
+
+    /// Saves from 0.0.5 numbered dropped piles from 0x4000_0000, the range of spawned
+    /// characters: give such piles uids in the current range.
+    pub fn renumber_old_drops(&mut self) {
+        let mut next = self.next_drop;
+        for p in self.dropped.values_mut().flatten() {
+            if p.uid < DROPPED_UID_BASE {
+                p.uid = DROPPED_UID_BASE + next;
+                next += 1;
+            }
+        }
+        self.next_drop = next;
     }
 
     /// Updates the size of a dropped pile (0 removes it).
@@ -315,6 +329,11 @@ mod tests {
         w.set_dropped_count("village", a, 0);
         w.set_dropped_count("village", b, 0);
         assert!(!w.dropped.contains_key("village"));
+        // Piles of old saves move out of the spawned characters' uid range.
+        let mut old = WorldState::default();
+        old.dropped.insert("m".into(), vec![DroppedItem { uid: 0x4000_0000, item: "coin".into(), count: 1, x: 0.0, y: 0.0 }]);
+        old.renumber_old_drops();
+        assert_eq!((old.dropped["m"][0].uid, old.next_drop), (DROPPED_UID_BASE, 1));
         // Piles survive a save / load round trip.
         w.add_dropped("forest", "coin", 7, 1.0, 2.0, 16.0);
         let back: WorldState = ron::from_str(&ron::to_string(&w).unwrap()).unwrap();

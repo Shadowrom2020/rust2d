@@ -81,6 +81,7 @@ fn add_transition(map: &mut Map, rect: (u32, u32, u32, u32), target_map: &str, t
         h: rect.3,
         kind: ZoneKind::Transition { target_map: target_map.into(), target_zone: target_zone.into() },
         triggers: vec![],
+        loot: None,
     });
     name
 }
@@ -140,7 +141,7 @@ impl Editor {
     pub fn link_next(&mut self, target: &str) {
         let Some(mut d) = self.link.clone() else { return };
         d.target = target.to_string();
-        if self.doc.as_ref().is_some_and(|doc| doc.dirty) {
+        if self.doc.as_ref().is_some_and(|doc| doc.is_dirty()) {
             self.save_map();
         }
         d.stage = LinkStage::PickArrival;
@@ -353,7 +354,7 @@ impl Editor {
 
     /// The map dropdown in the top bar.
     pub fn map_dropdown(&mut self, ui: &mut egui::Ui) {
-        let cur = self.doc.as_ref().map_or("(no map)".to_string(), |d| format!("{}{}", d.map.name, if d.dirty { " •" } else { "" }));
+        let cur = self.doc.as_ref().map_or("(no map)".to_string(), |d| format!("{}{}", d.map.name, if d.is_dirty() { " •" } else { "" }));
         let cur_name = self.doc.as_ref().map(|d| d.map.name.clone());
         let mut go = None;
         let mut new = false;

@@ -7,7 +7,9 @@ use crate::entity::{EntityKind, Facing};
 use crate::map::{Respawn, ZoneKind};
 
 /// Spawned characters get uids from here up, so they never collide with placed entities.
+/// Spawned characters get uids from here (below `state::DROPPED_UID_BASE`).
 pub(super) const SPAWN_UID_BASE: u32 = 1 << 30;
+const _: () = assert!(SPAWN_UID_BASE < crate::state::DROPPED_UID_BASE);
 /// Respawns don't happen closer than this to the player (tiles).
 const MIN_PLAYER_DIST: f32 = 3.0;
 
@@ -70,6 +72,10 @@ impl Game {
             let sp = &self.spawners[si];
             let mut e = self.new_rt_entity(EntityKind::Character, &sp.character.clone(), uid, "", pos, Facing::Down, true, 0);
             e.spawned_by = Some(sp.zone);
+            // The spawner's loot table goes to its characters.
+            if let Some(loot) = self.loaded.map.zones.iter().find(|z| z.uid == sp.zone).and_then(|z| z.loot.clone()) {
+                e.loot = loot;
+            }
             self.loaded.entities.push(e);
             if effect {
                 self.effects.push((pos - vec2(0.0, ts * 0.4), 0.0));

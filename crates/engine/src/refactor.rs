@@ -53,6 +53,12 @@ impl Renamer<'_> {
         }
     }
 
+    fn loot(&mut self, loot: &mut [crate::defs::LootEntry]) {
+        for e in loot {
+            self.fix(RefKind::Item, &mut e.item);
+        }
+    }
+
     fn weapon(&mut self, w: &mut Option<crate::defs::Weapon>) {
         if let Some(r) = w.as_mut().and_then(|w| w.ranged.as_mut()) {
             self.fix(RefKind::Sheet, &mut r.projectile.sheet);
@@ -134,6 +140,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.triggers(&mut d.triggers);
         r.weapon(&mut d.weapon);
         r.shop(&mut d.shop);
+        r.loot(&mut d.loot);
     }
     r.fix(RefKind::Character, &mut config.player);
     for l in &mut config.creation.looks {
@@ -166,6 +173,9 @@ pub fn rename_in_map(map: &mut Map, kind: RefKind, old: &str, new: &str) -> usiz
         r.container(&mut e.container);
         r.lock(&mut e.lock);
         r.shop(&mut e.shop);
+        if let Some(l) = &mut e.loot {
+            r.loot(l);
+        }
     }
     for z in &mut map.zones {
         match &mut z.kind {
@@ -174,6 +184,9 @@ pub fn rename_in_map(map: &mut Map, kind: RefKind, old: &str, new: &str) -> usiz
             _ => {}
         }
         r.triggers(&mut z.triggers);
+        if let Some(l) = &mut z.loot {
+            r.loot(l);
+        }
     }
     for l in [&mut map.edges.north, &mut map.edges.south, &mut map.edges.east, &mut map.edges.west].into_iter().flatten() {
         r.fix(RefKind::Map, &mut l.target_map);
@@ -223,6 +236,7 @@ pub fn refs_of_character(d: &crate::defs::CharacterDef) -> Vec<(RefKind, String)
     r.triggers(&mut d.triggers);
     r.weapon(&mut d.weapon);
     r.shop(&mut d.shop);
+    r.loot(&mut d.loot);
     r.found.unwrap_or_default()
 }
 
@@ -281,6 +295,7 @@ mod tests {
             h: 1,
             kind: ZoneKind::Portal { target_map: "village".into(), target_spawn: "s".into() },
             triggers: vec![],
+            loot: None,
         });
         assert_eq!(rename_in_map(&mut m, RefKind::Map, "village", "town"), 2);
         assert_eq!(m.edges.west.as_ref().unwrap().target_map, "town");

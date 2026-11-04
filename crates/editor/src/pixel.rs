@@ -53,7 +53,9 @@ pub struct PixelDoc {
     pub layout: Layout,
     undo: Vec<Rgba>,
     redo: Vec<Rgba>,
-    pub dirty: bool,
+    /// The image as on disk; the doc is dirty only while `img` differs from it.
+    saved: Rgba,
+    dirty: bool,
     tex: Option<TextureHandle>,
     tex_dirty: bool,
 }
@@ -80,8 +82,16 @@ impl PixelDoc {
         self.redo.clear();
     }
     pub fn changed(&mut self) {
-        self.dirty = true;
+        self.dirty = self.img != self.saved;
         self.tex_dirty = true;
+    }
+    /// Whether the image differs from the file (undoing back to it makes it clean again).
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+    pub fn mark_saved(&mut self) {
+        self.saved = self.img.clone();
+        self.dirty = false;
     }
     pub fn undo(&mut self) {
         if let Some(prev) = self.undo.pop() {
@@ -244,7 +254,7 @@ impl Default for PixelState {
 
 impl PixelState {
     pub fn is_dirty(&self) -> bool {
-        self.doc.as_ref().is_some_and(|d| d.dirty)
+        self.doc.as_ref().is_some_and(PixelDoc::is_dirty)
     }
 
     /// Applies the current tool at a pixel as a complete action (used by scripts / clicks).
@@ -296,7 +306,7 @@ impl Editor {
         self.px.zoom = (900.0 / img.w as f32).min(700.0 / img.h as f32).floor().clamp(1.0, 24.0);
         self.px.pan = egui::Vec2::ZERO;
         self.px.sel_frame = 0;
-        self.px.doc = Some(PixelDoc { rel: rel.to_string(), img, frame, layout, undo: vec![], redo: vec![], dirty: false, tex: None, tex_dirty: true });
+        self.px.doc = Some(PixelDoc { rel: rel.to_string(), saved: img.clone(), img, frame, layout, undo: vec![], redo: vec![], dirty: false, tex: None, tex_dirty: true });
         true
     }
 
@@ -378,7 +388,7 @@ impl Editor {
         let res = d.img.encode().and_then(|b| Ok(std::fs::write(self.project.root.join(&d.rel), b)?));
         match res {
             Ok(()) => {
-                d.dirty = false;
+                d.mark_saved();
                 let rel = d.rel.clone();
                 self.reload_assets();
                 self.set_status(format!("Saved {rel}"));
