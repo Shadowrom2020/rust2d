@@ -21,6 +21,7 @@ use rust2d_engine::script::ScriptHost;
 use crate::database::DbState;
 use crate::files;
 use crate::doc::{MapDoc, Objects};
+use crate::ui::{self, ph};
 use crate::widgets::{self, Refs, Textures};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,10 +48,12 @@ pub enum Tool {
     Zone,
     /// Drag an exit area, pick the target map, drag the arrival area there.
     Link,
+    /// Place multi-tile structures (houses, walls, rooms…) with one click.
+    Structure,
 }
 
 impl Tool {
-    pub const ALL: [(Tool, &'static str, &'static str); 10] = [
+    pub const ALL: [(Tool, &'static str, &'static str); 11] = [
         (Tool::Select, "Select", "V"),
         (Tool::Brush, "Brush", "B"),
         (Tool::Rect, "Rect", "R"),
@@ -61,9 +64,48 @@ impl Tool {
         (Tool::Entity, "Entities", "N"),
         (Tool::Zone, "Zones", "Z"),
         (Tool::Link, "Transition", "T"),
+        (Tool::Structure, "Structures", "H"),
     ];
     pub fn paints_tiles(self) -> bool {
         matches!(self, Tool::Brush | Tool::Rect | Tool::Fill | Tool::Erase | Tool::Pick)
+    }
+    pub fn icon(self) -> &'static str {
+        use crate::ui::ph;
+        match self {
+            Tool::Select => ph::CURSOR,
+            Tool::Brush => ph::PAINT_BRUSH,
+            Tool::Rect => ph::RECTANGLE,
+            Tool::Fill => ph::PAINT_BUCKET,
+            Tool::Erase => ph::ERASER,
+            Tool::Pick => ph::EYEDROPPER,
+            Tool::Collision => ph::WALL,
+            Tool::Entity => ph::SHAPES,
+            Tool::Zone => ph::BOUNDING_BOX,
+            Tool::Link => ph::SIGNPOST,
+            Tool::Structure => ph::HOUSE,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        Tool::ALL.iter().find(|t| t.0 == self).map_or("", |t| t.1)
+    }
+    pub fn key(self) -> &'static str {
+        Tool::ALL.iter().find(|t| t.0 == self).map_or("", |t| t.2)
+    }
+    /// One line on how to use the tool (tooltips and the status bar).
+    pub fn help(self) -> &'static str {
+        match self {
+            Tool::Select => "Click selects an entity or zone, drag moves it, click again cycles through stacked objects; empty space or right-click deselects",
+            Tool::Brush => "Click or drag paints the stamp on the active layer; right-click picks the tile under the cursor",
+            Tool::Rect => "Drag a rectangle to fill it with the stamp; Shift+drag erases",
+            Tool::Fill => "Click fills the connected area of identical tiles with the stamp",
+            Tool::Erase => "Click or drag empties tiles on the active layer",
+            Tool::Pick => "Click picks the tile under the cursor as the stamp (right-click does this with any paint tool)",
+            Tool::Collision => "Left: force solid · right: force walkable · Shift+left: back to the tileset default",
+            Tool::Entity => "Pick a prop, character or item in the panel and click the map to place it; right-click or Esc stops placing",
+            Tool::Zone => "Drag to draw a zone (spawn, portal, trigger, spawner); click selects one, drag moves it",
+            Tool::Link => "Drag over the exit area, choose the target map, then drag the arrival area on that map",
+            Tool::Structure => "Pick a structure in the panel and click the map to place it; New from map area captures a rectangle as a structure",
+        }
     }
 }
 
@@ -99,6 +141,9 @@ pub struct ViewOpts {
     pub zones: bool,
     pub dim_layers: bool,
     pub minimap: bool,
+    /// Shows the map's darkness and lights at `hour` (outdoor maps) in the editor.
+    pub lighting: bool,
+    pub hour: f32,
 }
 
 pub struct Cam {
@@ -184,6 +229,10 @@ pub struct Editor {
     /// Entity tool palette: kind tab (None = all kinds) and search text.
     pub place_tab: Option<EntityKind>,
     pub place_filter: String,
+    /// Structures tool: the armed structure id ("" = none), palette search, capture state.
+    pub place_structure: String,
+    pub structure_filter: String,
+    pub capture: crate::structures::CaptureState,
     /// Recently placed / picked definitions, newest first.
     pub place_recent: Vec<(EntityKind, String)>,
     pub zone_template: ZoneTemplate,
@@ -195,7 +244,19 @@ pub struct Editor {
     pub defs_dirty: bool,
     /// Definitions and project settings as last loaded / saved: `defs_dirty` is cleared again
     /// when the edits are reverted (e.g. undone in a text field, a checkbox toggled back).
-    defs_saved: Box<(rust2d_engine::defs::Database, rust2d_engine::project::ProjectConfig)>,
+    pub(crate) defs_saved: Box<(rust2d_engine::defs::Database, rust2d_engine::project::ProjectConfig)>,
+    /// This editor is the Asset Library window (`--library`): `project` is the library.
+    pub library_mode: bool,
+    /// Lighting preview: renderer and the map's tile lights (refreshed twice a second).
+    pub light_pass: Option<rust2d_engine::render::lighting::LightPass>,
+    pub light_cache: (f64, String, Vec<rust2d_engine::render::lighting::Light>),
+    /// Main editor: the Asset Library window it started.
+    pub lib_window: crate::library_window::LibWindow,
+    /// Library mode: modification time of the library's definitions as last loaded / saved,
+    /// when it was last checked, and whether another editor changed them meanwhile.
+    pub lib_stamp: Option<std::time::SystemTime>,
+    pub lib_check: f64,
+    pub lib_changed: bool,
     pub db: DbState,
     pub refs: Refs,
     pub pointer_over_ui: bool,
@@ -258,7 +319,7 @@ impl Editor {
         Self::with_project(project, false)
     }
 
-    fn with_project(project: Project, project_open: bool) -> Self {
+    pub(crate) fn with_project(project: Project, project_open: bool) -> Self {
         let assets = Assets::load(&project);
         let audio = Audio::load(&project);
         let maps = project.list_maps();
@@ -291,15 +352,25 @@ impl Editor {
             place_def: String::new(),
             place_tab: None,
             place_filter: String::new(),
+            place_structure: String::new(),
+            structure_filter: String::new(),
+            capture: Default::default(),
             place_recent: Vec::new(),
             zone_template: ZoneTemplate::Spawn,
-            view: ViewOpts { grid: true, collision: false, zones: true, dim_layers: false, minimap: true },
+            view: ViewOpts { grid: true, collision: false, zones: true, dim_layers: false, minimap: true, lighting: false, hour: 22.0 },
+            light_pass: None,
+            light_cache: (-1.0, String::new(), Vec::new()),
             status: (String::new(), 0.0),
             new_map: None,
             resize: None,
             pending: None,
             defs_dirty: false,
             defs_saved: Box::new((project.db.clone(), project.config.clone())),
+            library_mode: false,
+            lib_window: Default::default(),
+            lib_stamp: None,
+            lib_check: 0.0,
+            lib_changed: false,
             db: DbState::default(),
             lib: Default::default(),
             px: Default::default(),
@@ -416,6 +487,10 @@ impl Editor {
             Ok(()) => {
                 self.defs_dirty = false;
                 *self.defs_saved = (self.project.db.clone(), self.project.config.clone());
+                if self.library_mode {
+                    self.mark_library_saved();
+                    self.lib.tex_dirty = true;
+                }
                 self.set_status("Saved definitions");
             }
             Err(e) => self.set_status(format!("Saving definitions failed: {e:#}")),
@@ -435,6 +510,7 @@ impl Editor {
     }
 
     pub fn reload_assets(&mut self) {
+        self.lib.tex_dirty = true; // library thumbnails (the library window shows its own art)
         self.assets = Assets::load(&self.project);
         self.audio.stop_music();
         self.audio = Audio::load(&self.project);
@@ -575,7 +651,7 @@ impl Editor {
             }
         }
         self.defs_dirty = true;
-        self.set_status(format!("Renamed state '{old}' → '{new}' of '{prop}' ({changed} placed prop(s) updated). Save the definitions to keep it."));
+        self.set_status(format!("Renamed state '{old}' \u{E13A} '{new}' of '{prop}' ({changed} placed prop(s) updated). Save the definitions to keep it."));
     }
 
     pub fn rename_id(&mut self, kind: RefKind, old: &str, new: &str) {
@@ -596,6 +672,7 @@ impl Editor {
             RefKind::Character => db.characters.iter().any(|d| d.id == new),
             RefKind::Sound => db.sounds.iter().any(|d| d.id == new),
             RefKind::Map => self.maps.iter().any(|m| m == new),
+            RefKind::Structure => db.structures.iter().any(|d| d.id == new),
         };
         if taken {
             self.set_status(format!("'{new}' is already used"));
@@ -616,6 +693,7 @@ impl Editor {
             RefKind::Prop => rename_def!(db.props),
             RefKind::Character => rename_def!(db.characters),
             RefKind::Sound => rename_def!(db.sounds),
+            RefKind::Structure => rename_def!(db.structures),
             RefKind::Map => {
                 if let Err(e) = self.project.rename_map_file(old, new) {
                     self.set_status(format!("Rename failed: {e:#}"));
@@ -661,6 +739,7 @@ impl Editor {
         match kind {
             RefKind::Tileset if self.brush.tileset == old => self.brush.tileset = new.to_string(),
             RefKind::Prop | RefKind::Character | RefKind::Item if self.place_def == old => self.place_def = new.to_string(),
+            RefKind::Structure if self.place_structure == old => self.place_structure = new.to_string(),
             _ => {}
         }
         self.save_defs();
@@ -668,7 +747,7 @@ impl Editor {
             self.reload_assets();
         }
         self.refresh_refs();
-        let mut msg = format!("Renamed '{old}' → '{new}': {refs} reference(s) updated in {maps_changed} map file(s)");
+        let mut msg = format!("Renamed '{old}' \u{E13A} '{new}': {refs} reference(s) updated in {maps_changed} map file(s)");
         // Ids passed to script functions (give_item("old"), teleport("old", ...), ...).
         let changed = self.rename_in_scripts(kind, old, new, &mut errors);
         if !changed.is_empty() {
@@ -1042,7 +1121,18 @@ impl Editor {
             self.tex = Textures::build(ctx, &self.assets);
             self.tex_dirty = false;
         }
-        self.menu_bar(ctx);
+        if self.library_mode {
+            self.library_menu_bar(ctx);
+            self.watch_library();
+            if self.mode == Mode::Map {
+                self.mode = Mode::Library;
+            }
+            if self.mode != Mode::Pixel && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
+                self.save_all();
+            }
+        } else {
+            self.menu_bar(ctx);
+        }
         if !self.project_open {
             self.status_bar(ctx);
             self.welcome(ctx);
@@ -1078,6 +1168,9 @@ impl Editor {
             self.goto_map(&m, Some(&zone));
         }
         self.export_window(ctx);
+        self.capture_window(ctx);
+        self.confirm_remove_dialog(ctx);
+        self.add_from_library_dialog(ctx);
         self.canvas_rect = ctx.available_rect();
         self.dialogs(ctx);
         self.pointer_over_ui = ctx.is_pointer_over_area() || ctx.wants_pointer_input();
@@ -1092,11 +1185,11 @@ impl Editor {
                 ui.heading(egui::RichText::new("rust2d editor").size(34.0));
                 ui.label("Maps, characters, props, items and events for top-down RPGs.");
                 ui.add_space(24.0);
-                if ui.add_sized([260.0, 36.0], egui::Button::new("✨ New project…")).on_hover_text("Choose an empty folder for the project").clicked() {
+                if ui.add_sized([260.0, 36.0], egui::Button::new("\u{E6A2} New project…")).on_hover_text("Choose an empty folder for the project").clicked() {
                     self.request(Pending::NewProject(PathBuf::new()));
                 }
                 ui.add_space(6.0);
-                if ui.add_sized([260.0, 36.0], egui::Button::new("📂 Open project…")).on_hover_text("Choose a folder containing project.ron").clicked() {
+                if ui.add_sized([260.0, 36.0], egui::Button::new("\u{E256} Open project…")).on_hover_text("Choose a folder containing project.ron").clicked() {
                     self.open_file_dialog(files::Purpose::OpenProject);
                 }
                 let recent = files::recent_projects();
@@ -1111,7 +1204,7 @@ impl Editor {
                     }
                 }
                 ui.add_space(24.0);
-                ui.weak("Tip: the asset library (📂 Library, once a project is open) has ready-made tiles, characters, props and items.");
+                ui.weak("Tip: the Asset Library (Assets menu, once a project is open) has ready-made tiles, characters, props, items and structures.");
             });
         });
     }
@@ -1144,24 +1237,64 @@ impl Editor {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("New project…").clicked() {
+                    if ui.button(ui::t(ph::FILE_PLUS, "New project…")).clicked() {
                         self.request(Pending::NewProject(PathBuf::new()));
                         ui.close_menu();
                     }
-                    if ui.button("Open project…").clicked() {
+                    if ui.button(ui::t(ph::FOLDER_OPEN, "Open project…")).clicked() {
                         self.open_file_dialog(files::Purpose::OpenProject);
                         ui.close_menu();
                     }
-                    if ui.button("Close project").clicked() {
+                    if ui.button(ui::t(ph::X, "Close project")).clicked() {
                         self.request(Pending::CloseProject);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("New map…").clicked() {
+                    if ui.button(ui::t(ph::FLOPPY_DISK, "Save all   Ctrl+S")).on_hover_text("Saves the open map, the definitions and the image in the pixel editor").clicked() {
+                        self.save_all();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button(ui::t(ph::PACKAGE, "Export game (standalone)…")).clicked() {
+                        self.open_export();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button(ui::t(ph::POWER, "Quit")).clicked() {
+                        self.request(Pending::Quit);
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("Edit", |ui| {
+                    let (u, r) = self.doc.as_ref().map_or((false, false), |d| (d.can_undo(), d.can_redo()));
+                    if ui.add_enabled(u, egui::Button::new(ui::t(ph::ARROW_ARC_LEFT, "Undo   Ctrl+Z"))).clicked() {
+                        if let Some(d) = &mut self.doc {
+                            d.undo(&self.assets);
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(r, egui::Button::new(ui::t(ph::ARROW_ARC_RIGHT, "Redo   Ctrl+Y"))).clicked() {
+                        if let Some(d) = &mut self.doc {
+                            d.redo(&self.assets);
+                        }
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.add_enabled(self.sel != Selection::None, egui::Button::new(ui::t(ph::COPY, "Duplicate   Ctrl+D"))).clicked() {
+                        self.duplicate_selection();
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(self.sel != Selection::None, egui::Button::new(ui::t(ph::TRASH, "Delete   Del"))).clicked() {
+                        self.delete_selection();
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("Map", |ui| {
+                    if ui.button(ui::t(ph::PLUS, "New map…")).clicked() {
                         self.request(Pending::New);
                         ui.close_menu();
                     }
-                    ui.menu_button("Open map", |ui| {
+                    ui.menu_button(ui::t(ph::MAP_TRIFOLD, "Open map"), |ui| {
                         for m in self.maps.clone() {
                             if ui.button(&m).clicked() {
                                 self.request(Pending::Open(m));
@@ -1169,60 +1302,42 @@ impl Editor {
                             }
                         }
                     });
+                    ui.weak("Ctrl+M: search maps · Ctrl+PgUp / PgDn: previous / next");
                     ui.separator();
-                    if ui.button("Save map   Ctrl+S").clicked() {
-                        self.save_all();
+                    if ui.button(ui::t(ph::FLOPPY_DISK, "Save map")).clicked() {
+                        self.save_map();
                         ui.close_menu();
                     }
-                    if ui.button("Save definitions").clicked() {
-                        self.save_defs();
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("📦 Export game (standalone)…").clicked() {
-                        self.open_export();
-                        ui.close_menu();
-                    }
-                    if ui.button("Import asset package into project…").clicked() {
-                        self.open_file_dialog(files::Purpose::ImportPackage { into_library: false });
-                        ui.close_menu();
-                    }
-                    if ui.button("New asset…").clicked() {
-                        self.wizard = Some(crate::wizard::Wizard::new(&self.project));
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Reload assets & scripts").clicked() {
-                        self.reload_assets();
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Quit").clicked() {
-                        self.request(Pending::Quit);
+                    if ui.button(ui::t(ph::CORNERS_OUT, "Fit map to view   Home")).clicked() {
+                        self.fit_view();
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("Edit", |ui| {
-                    let (u, r) = self.doc.as_ref().map_or((false, false), |d| (d.can_undo(), d.can_redo()));
-                    if ui.add_enabled(u, egui::Button::new("Undo   Ctrl+Z")).clicked() {
-                        if let Some(d) = &mut self.doc {
-                            d.undo(&self.assets);
-                        }
+                ui.menu_button("Assets", |ui| {
+                    if ui.button(ui::t(ph::SPARKLE, "New asset…")).on_hover_text("A prop, item, character, tileset, sprite sheet or structure for this project").clicked() {
+                        self.wizard = Some(crate::wizard::Wizard::new(&self.project));
                         ui.close_menu();
                     }
-                    if ui.add_enabled(r, egui::Button::new("Redo   Ctrl+Y")).clicked() {
-                        if let Some(d) = &mut self.doc {
-                            d.redo(&self.assets);
-                        }
+                    if ui.button(ui::t(ph::DOWNLOAD_SIMPLE, "Add from library…")).on_hover_text("Copies assets from the shared asset library into this project").clicked() {
+                        self.open_add_dialog(None);
+                        ui.close_menu();
+                    }
+                    if ui.button(ui::t(ph::PACKAGE, "Import asset package into project…")).clicked() {
+                        self.open_file_dialog(files::Purpose::ImportPackage { into_library: false });
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.add_enabled(self.sel != Selection::None, egui::Button::new("Duplicate   Ctrl+D")).clicked() {
-                        self.duplicate_selection();
+                    if ui.button(ui::t(ph::BOOKS, "Asset Library window…")).on_hover_text("Opens the shared asset library in its own window: edit, create, import and export library assets").clicked() {
+                        self.open_library_window();
                         ui.close_menu();
                     }
-                    if ui.add_enabled(self.sel != Selection::None, egui::Button::new("Delete   Del")).clicked() {
-                        self.delete_selection();
+                    ui.separator();
+                    if ui.button(ui::t(ph::FLOPPY_DISK, "Save definitions")).clicked() {
+                        self.save_defs();
+                        ui.close_menu();
+                    }
+                    if ui.button(ui::t(ph::ARROW_CLOCKWISE, "Reload assets & scripts")).clicked() {
+                        self.reload_assets();
                         ui.close_menu();
                     }
                 });
@@ -1232,33 +1347,112 @@ impl Editor {
                     ui.checkbox(&mut self.view.zones, "Zones & edges");
                     ui.checkbox(&mut self.view.dim_layers, "Dim inactive layers");
                     ui.checkbox(&mut self.view.minimap, "Minimap");
-                    if ui.button("Fit map   Home").clicked() {
-                        self.fit_view();
-                        ui.close_menu();
-                    }
+                    ui.checkbox(&mut self.view.lighting, "Lighting preview");
                 });
                 ui.menu_button("Play", |ui| {
-                    if ui.button("Play here   F5").clicked() {
+                    if ui.button(ui::t(ph::PLAY, "Play here   F5")).clicked() {
                         self.play(true);
                         ui.close_menu();
                     }
-                    if ui.button("Play from start   F6").clicked() {
+                    if ui.button(ui::t(ph::FAST_FORWARD, "Play from start   F6")).clicked() {
                         self.play(false);
                         ui.close_menu();
                     }
                 });
                 ui.separator();
-                ui.selectable_value(&mut self.mode, Mode::Map, "🗺 Map");
-                ui.selectable_value(&mut self.mode, Mode::Database, "📚 Database");
-                ui.selectable_value(&mut self.mode, Mode::Library, "📂 Library");
-                let px_label = if self.px.is_dirty() { "✏ Pixel editor •" } else { "✏ Pixel editor" };
-                ui.selectable_value(&mut self.mode, Mode::Pixel, px_label);
+                ui::tab(ui, self.mode == Mode::Map, ph::MAP_TRIFOLD, "Map").on_hover_text("Maps: tiles, entities, zones, transitions").clicked().then(|| self.mode = Mode::Map);
+                ui::tab(ui, self.mode == Mode::Database, ph::DATABASE, "Database").on_hover_text("Definitions: items, props, characters, tilesets, sprite sheets, sounds, structures, quests, project settings, scripts").clicked().then(|| self.mode = Mode::Database);
+                let px_label = if self.px.is_dirty() { "Pixel editor •" } else { "Pixel editor" };
+                ui::tab(ui, self.mode == Mode::Pixel, ph::IMAGE, px_label).on_hover_text("Draw and edit the project's images").clicked().then(|| self.mode = Mode::Pixel);
+                if ui.button(ui::t(ph::BOOKS, &format!("Asset Library {}", ph::ARROW_SQUARE_OUT))).on_hover_text("Opens the shared asset library in its own window: edit, create, import and export library assets").clicked() {
+                    self.open_library_window();
+                }
                 ui.separator();
                 self.map_dropdown(ui);
                 if self.defs_dirty {
                     ui.colored_label(Color32::YELLOW, "defs •");
                 }
             });
+        });
+        if self.mode == Mode::Map {
+            self.ribbon(ctx);
+        }
+    }
+
+    /// Map mode: the tool ribbon under the menu (grouped icon buttons with tooltips).
+    fn ribbon(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("ribbon").show(ctx, |ui| {
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                let (u, r) = self.doc.as_ref().map_or((false, false), |d| (d.can_undo(), d.can_redo()));
+                ui::group(ui, "Edit", |ui| {
+                    if ui::icon_button(ui, u, ph::ARROW_ARC_LEFT, "Undo", "Ctrl+Z", "").clicked() {
+                        if let Some(d) = &mut self.doc {
+                            d.undo(&self.assets);
+                        }
+                    }
+                    if ui::icon_button(ui, r, ph::ARROW_ARC_RIGHT, "Redo", "Ctrl+Y", "").clicked() {
+                        if let Some(d) = &mut self.doc {
+                            d.redo(&self.assets);
+                        }
+                    }
+                });
+                let groups: [(&str, &[Tool]); 4] = [
+                    ("Select", &[Tool::Select]),
+                    ("Paint", &[Tool::Brush, Tool::Rect, Tool::Fill, Tool::Erase, Tool::Pick]),
+                    ("Collision", &[Tool::Collision]),
+                    ("Objects", &[Tool::Entity, Tool::Zone, Tool::Link, Tool::Structure]),
+                ];
+                for (caption, tools) in groups {
+                    ui::group(ui, caption, |ui| {
+                        for &t in tools {
+                            if ui::tool_button(ui, self.tool == t, t.icon(), t.name(), t.key(), t.help()).clicked() {
+                                self.tool = t;
+                            }
+                        }
+                    });
+                }
+                ui::group(ui, "Layer", |ui| {
+                    let names: Vec<String> = self.doc.as_ref().map_or(Vec::new(), |d| d.map.layers.iter().map(|l| l.name.clone()).collect());
+                    let current = names.get(self.layer).cloned().unwrap_or_else(|| "–".into());
+                    egui::ComboBox::from_id_salt("ribbon_layer").selected_text(format!("{}. {current}", self.layer + 1)).width(130.0).show_ui(ui, |ui| {
+                        for (i, n) in names.iter().enumerate() {
+                            ui.selectable_value(&mut self.layer, i, format!("{}. {n}", i + 1));
+                        }
+                    })
+                    .response
+                    .on_hover_text("The layer paint tools work on (keys 1–9). Visibility, order and new layers: Layers in the left panel");
+                });
+                ui::group(ui, "View", |ui| {
+                    ui::toggle(ui, &mut self.view.grid, ph::GRID_FOUR, "Grid", "G", "Tile grid over the map");
+                    ui::toggle(ui, &mut self.view.collision, ph::WALL, "Collision overlay", "", "Red = blocked, green = walkable override");
+                    ui::toggle(ui, &mut self.view.zones, ph::BOUNDING_BOX, "Zones & edges", "", "Zone rectangles, labels and edge links");
+                    ui::toggle(ui, &mut self.view.dim_layers, ph::STACK, "Dim inactive layers", "", "Fades every layer except the active one");
+                    ui::toggle(ui, &mut self.view.minimap, ph::MAP_TRIFOLD, "Minimap", "", "Overview in the corner of the map");
+                    ui::toggle(ui, &mut self.view.lighting, ph::LIGHTBULB, "Lighting preview", "", "Shows the map's darkness and its lights as in the game (outdoor maps at the hour chosen next to it)");
+                    let outdoor = self.doc.as_ref().is_some_and(|d| d.map.lighting.mode == rust2d_engine::map::LightMode::Outdoor);
+                    if self.view.lighting && outdoor {
+                        let mut h = self.view.hour;
+                        let label = format!("{:02}:{:02}", h as u32, (h.fract() * 60.0) as u32);
+                        if ui.add(egui::Slider::new(&mut h, 0.0..=23.99).show_value(false)).on_hover_text(format!("Preview time of day: {label}")).changed() {
+                            self.view.hour = h;
+                        }
+                        ui.label(egui::RichText::new(label).small());
+                    }
+                    if ui::icon_button(ui, self.doc.is_some(), ph::CORNERS_OUT, "Fit map to view", "Home", "").clicked() {
+                        self.fit_view();
+                    }
+                });
+                ui::group(ui, "Play", |ui| {
+                    if ui::icon_button(ui, self.doc.is_some(), ph::PLAY, "Play here", "F5", "Saves everything and starts the game at the camera position (or the selected spawn point)").clicked() {
+                        self.play(true);
+                    }
+                    if ui::icon_button(ui, self.doc.is_some(), ph::FAST_FORWARD, "Play from start", "F6", "Saves everything and starts the game at the project's start map").clicked() {
+                        self.play(false);
+                    }
+                });
+            });
+            ui.add_space(2.0);
         });
     }
 
@@ -1275,13 +1469,20 @@ impl Editor {
                     }
                     ui.separator();
                 }
-                ui.monospace(format!("zoom {:.0}%", self.cam.zoom * 100.0));
+                if !self.library_mode && self.project_open {
+                    ui.monospace(format!("zoom {:.0}%", self.cam.zoom * 100.0));
+                }
                 if let Some(doc) = &self.doc {
                     ui.separator();
                     ui.monospace(format!("{}x{}  ents {}  zones {}", doc.map.width, doc.map.height, doc.map.entities.len(), doc.map.zones.len()));
                 }
                 ui.separator();
                 ui.monospace(format!("{} fps", macroquad::time::get_fps()));
+                if self.mode == Mode::Map && self.project_open && !self.library_mode {
+                    ui.separator();
+                    ui.label(egui::RichText::new(format!("{} {}", self.tool.icon(), self.tool.name())).strong());
+                    ui.weak(self.tool.help());
+                }
                 if self.file_dialog.is_some() {
                     ui.separator();
                     ui.colored_label(Color32::YELLOW, "File dialog open…");
@@ -1343,7 +1544,7 @@ impl Editor {
                     // Opening replaces the whole editor state, closing the old project.
                     self.close_project();
                     self.switch_project(dir);
-                    self.set_status("New project created. Add art from 📂 Library (or Database → Tilesets), then paint a map.");
+                    self.set_status("New project created. Add art with Assets \u{E13A} Add from library (or Database \u{E13A} Tilesets), then paint a map.");
                 }
                 Err(e) => self.set_status(format!("Could not create project: {e:#}")),
             },
@@ -1481,22 +1682,17 @@ impl Editor {
 
     // ------------------------------------------------------------ left panel
 
+    /// Left panel: the active tool's options, then the map's layers.
     fn left_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Tools");
-        egui::Grid::new("tools").num_columns(2).show(ui, |ui| {
-            for (i, (tool, label, key)) in Tool::ALL.iter().enumerate() {
-                if ui.selectable_label(self.tool == *tool, *label).on_hover_text(format!("Shortcut: {key}")).clicked() {
-                    self.tool = *tool;
-                }
-                if i % 2 == 1 {
-                    ui.end_row();
-                }
-            }
-        });
+        self.tool_options(ui);
+        ui.add_space(6.0);
         ui.separator();
+        egui::CollapsingHeader::new(ui::t(ph::STACK, "Layers")).default_open(true).show(ui, |ui| self.layers_panel(ui));
+    }
 
+    /// Visibility, order, names and the active layer of the open map.
+    fn layers_panel(&mut self, ui: &mut egui::Ui) {
         if let Some(doc) = &mut self.doc {
-            ui.heading("Layers");
             let n = doc.map.layers.len();
             let mut layer_op: Option<(&str, usize)> = None;
             for i in 0..n {
@@ -1510,13 +1706,13 @@ impl Editor {
                         ui.weak("overhead");
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if n > 1 && ui.small_button("✖").on_hover_text("Delete layer").clicked() {
+                        if n > 1 && ui.small_button(ph::TRASH).on_hover_text("Delete layer").clicked() {
                             layer_op = Some(("del", i));
                         }
-                        if i + 1 < n && ui.small_button("⏷").clicked() {
+                        if i + 1 < n && ui.small_button(ph::ARROW_DOWN).on_hover_text("Move down (drawn later)").clicked() {
                             layer_op = Some(("down", i));
                         }
-                        if i > 0 && ui.small_button("⏶").clicked() {
+                        if i > 0 && ui.small_button(ph::ARROW_UP).on_hover_text("Move up (drawn earlier)").clicked() {
                             layer_op = Some(("up", i));
                         }
                     });
@@ -1529,7 +1725,7 @@ impl Editor {
                     ui.checkbox(&mut l.above_entities, "overhead").on_hover_text("Drawn above characters, never collides");
                 });
             }
-            if ui.button("+ Layer").clicked() {
+            if ui.button(ui::t(ph::PLUS, "Layer")).clicked() {
                 layer_op = Some(("add", 0));
             }
             if let Some((op, i)) = layer_op {
@@ -1555,9 +1751,11 @@ impl Editor {
                 }
                 doc.record_map(before, &self.assets);
             }
-            ui.separator();
         }
+    }
 
+    /// The active tool's panel (palette, placement list, structures, help).
+    fn tool_options(&mut self, ui: &mut egui::Ui) {
         match self.tool {
             Tool::Select => {
                 ui.heading("Select");
@@ -1570,16 +1768,17 @@ impl Editor {
             Tool::Collision => {
                 ui.heading("Collision");
                 ui.label("Left: force solid\nRight: force walkable\nShift+Left: reset to tileset default");
-                ui.weak("Red = blocked, green = walkable override. Tileset tiles flagged solid block automatically (edit flags in Database → Tilesets).");
+                ui.weak("Red = blocked, green = walkable override. Tileset tiles flagged solid block automatically (edit flags in Database \u{E13A} Tilesets).");
             }
             Tool::Entity => self.entity_palette(ui),
+            Tool::Structure => self.structure_palette(ui),
             Tool::Link => {
                 ui.heading("Transition");
                 ui.label("Link two maps with a pair of transition zones, e.g. where a road leaves one map and enters the other:");
                 ui.label("1. Drag over the exit (the road end).");
                 ui.label("2. Choose the target map.");
                 ui.label("3. On the target map, drag the other end.");
-                ui.weak("Each end leads to the other; players arrive one tile inside the other end (so they don't bounce back). Transition zones can also be drawn with the Zones tool and linked in the inspector (Leads to map / Other end, ✏ Draw the other end, ↗ Go to, Unlink). Portals and spawn points still work as before.");
+                ui.weak("Each end leads to the other; players arrive one tile inside the other end (so they don't bounce back). Transition zones can also be drawn with the Zones tool and linked in the inspector (Leads to map / Other end, \u{E3B4} Draw the other end, \u{E5DE} Go to, Unlink). Portals and spawn points still work as before.");
             }
             Tool::Zone => {
                 ui.heading("Zones");
@@ -1596,7 +1795,10 @@ impl Editor {
     }
 
     fn palette(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Tileset");
+        ui.horizontal(|ui| {
+            ui.heading("Tileset");
+            self.add_from_library_button(ui, Some(rust2d_engine::refactor::RefKind::Tileset));
+        });
         let mut ids: Vec<String> = self.project.db.tilesets.iter().map(|t| t.id.clone()).collect();
         ids.sort();
         egui::ComboBox::from_id_salt("brush_ts").selected_text(self.brush.tileset.as_str()).show_ui(ui, |ui| {
@@ -1662,7 +1864,13 @@ impl Editor {
         // What a click on empty space does.
         ui.horizontal(|ui| {
             ui.heading("Place");
-            if !self.place_def.is_empty() && ui.button("✖ Stop placing").on_hover_text("Right-click or Esc on the map").clicked() {
+            let kind = self.place_tab.map(|k| match k {
+                EntityKind::Prop => rust2d_engine::refactor::RefKind::Prop,
+                EntityKind::Character => rust2d_engine::refactor::RefKind::Character,
+                EntityKind::Item => rust2d_engine::refactor::RefKind::Item,
+            });
+            self.add_from_library_button(ui, kind);
+            if !self.place_def.is_empty() && ui.button("\u{E4F6} Stop placing").on_hover_text("Right-click or Esc on the map").clicked() {
                 self.disarm();
             }
         });
@@ -1694,12 +1902,12 @@ impl Editor {
         }
 
         ui.horizontal(|ui| {
-            ui.label("🔍");
+            ui.label("\u{E30C}");
             let r = ui.add(egui::TextEdit::singleline(&mut self.place_filter).hint_text("search name or id").desired_width(150.0));
             if r.changed() {
                 self.palette_scroll_to_armed = false;
             }
-            if !self.place_filter.is_empty() && ui.small_button("✖").on_hover_text("Clear search").clicked() {
+            if !self.place_filter.is_empty() && ui.small_button("\u{E4F6}").on_hover_text("Clear search").clicked() {
                 self.place_filter.clear();
             }
         });
@@ -1797,7 +2005,7 @@ impl Editor {
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
         let Some(doc) = &mut self.doc else {
-            ui.label("No map open. Use File → New map.");
+            ui.label("No map open. Use Map \u{E13A} New map.");
             return;
         };
         // Speakers follow the map while it is edited (new characters, renamed entities, ...).
@@ -1915,6 +2123,21 @@ impl Editor {
                     duplicate = ui.button("Duplicate").clicked();
                     delete = ui.button("Delete").clicked();
                 });
+                {
+                    ui.separator();
+                    let def_light = match e.kind {
+                        EntityKind::Prop => db.prop(&e.def).and_then(|d| d.state_index(&e.state).and_then(|i| d.state_light(i)).cloned()),
+                        EntityKind::Character => db.character(&e.def).and_then(|d| d.light.clone()),
+                        EntityKind::Item => db.item(&e.def).and_then(|d| d.light.clone()),
+                    };
+                    let what = if def_light.is_some() { "Own light (instead of the definition's)" } else { "Gives light (just this one)" };
+                    egui::CollapsingHeader::new(ui::t(ph::LIGHTBULB, "Light")).default_open(e.light.is_some()).show(ui, |ui| {
+                        if def_light.is_some() && e.light.is_none() {
+                            ui.weak("Uses the definition's light.");
+                        }
+                        widgets::light_ui(ui, &format!("ent_light{}", e.uid), &mut e.light, what);
+                    });
+                }
                 if e.kind == EntityKind::Character {
                     ui.separator();
                     ui.heading("Merchant");
@@ -1979,7 +2202,7 @@ impl Editor {
                     match &mut e.patrol {
                         None => {
                             ui.weak("No route: the character follows its definition's behaviour.");
-                            if ui.button("➕ Add a patrol route").on_hover_text("Then click tiles on the map to add waypoints").clicked() {
+                            if ui.button("\u{E3D4} Add a patrol route").on_hover_text("Then click tiles on the map to add waypoints").clicked() {
                                 e.patrol = Some(PatrolRoute { points: vec![tile], ..Default::default() });
                                 self.route_edit = Some(uid);
                             }
@@ -1997,7 +2220,7 @@ impl Editor {
                             });
                             let editing = self.route_edit == Some(uid);
                             ui.horizontal(|ui| {
-                                let label = if editing { "✔ Done editing" } else { "✏ Edit on map" };
+                                let label = if editing { "\u{E182} Done editing" } else { "\u{E3B4} Edit on map" };
                                 if ui.selectable_label(editing, label).on_hover_text("Click tiles to add waypoints, drag one to move it, right-click to remove it, Esc when done").clicked() {
                                     self.route_edit = if editing { None } else { Some(uid) };
                                 }
@@ -2007,7 +2230,7 @@ impl Editor {
                             for (k, p) in r.points.iter().enumerate() {
                                 ui.horizontal(|ui| {
                                     ui.monospace(format!("{:>2}. tile {},{}", k + 1, p.0, p.1));
-                                    if ui.small_button("✖").clicked() {
+                                    if ui.small_button("\u{E4F6}").clicked() {
                                         del = Some(k);
                                     }
                                 });
@@ -2166,10 +2389,10 @@ impl Editor {
                 ui.horizontal(|ui| {
                     ui.label("Music");
                     widgets::suggest(ui, "map_music", &mut map.music, &refs.sounds, 130.0);
-                    if !map.music.is_empty() && ui.small_button("▶").on_hover_text("Preview").clicked() {
+                    if !map.music.is_empty() && ui.small_button("\u{E3D0}").on_hover_text("Preview").clicked() {
                         self.audio.play_music(&map.music);
                     }
-                    if self.audio.current_music().is_some() && ui.small_button("■").on_hover_text("Stop").clicked() {
+                    if self.audio.current_music().is_some() && ui.small_button("\u{E46C}").on_hover_text("Stop").clicked() {
                         self.audio.stop_music();
                     }
                 });
@@ -2190,6 +2413,27 @@ impl Editor {
                     }
                 });
                 ui.separator();
+                ui.heading("Lighting");
+                {
+                    use rust2d_engine::map::LightMode;
+                    let l = &mut map.lighting;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.radio_value(&mut l.mode, LightMode::Bright, "Always bright").on_hover_text("No darkness; lights are not drawn");
+                        ui.radio_value(&mut l.mode, LightMode::Outdoor, "Outdoor (day & night)").on_hover_text("Bright by day, darker at night (the game clock runs on)");
+                        ui.radio_value(&mut l.mode, LightMode::Dark, "Dark (dungeon, cave)").on_hover_text("Always dark: only light sources show anything");
+                    });
+                    if l.mode != LightMode::Bright {
+                        ui.horizontal(|ui| {
+                            ui.label(if l.mode == LightMode::Outdoor { "Night darkness" } else { "Darkness" });
+                            let mut pct = (l.darkness * 100.0).round();
+                            if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %")).changed() {
+                                l.darkness = pct / 100.0;
+                            }
+                        });
+                        ui.weak("Lights: tiles (Database › Tilesets › Light tiles), props per state, characters and items (Database), and the player's equipped light. Preview: View › Lighting preview.");
+                    }
+                }
+                ui.separator();
                 ui.heading("Edge transitions");
                 ui.weak("Walking into a linked edge moves the player to the target map, keeping the position along the edge (+offset).");
                 for e in Edge::ALL {
@@ -2202,7 +2446,7 @@ impl Editor {
                             }
                             if let Some(l) = link {
                                 widgets::suggest(ui, "edge_map", &mut l.target_map, &refs.maps, 90.0);
-                                if ui.small_button("↗").on_hover_text(format!("Go to {}", l.target_map)).clicked() {
+                                if ui.small_button("\u{E5DE}").on_hover_text(format!("Go to {}", l.target_map)).clicked() {
                                     GOTO.with(|g| *g.borrow_mut() = Some((l.target_map.clone(), String::new())));
                                 }
                             }
@@ -2338,7 +2582,7 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
                 ui.label("");
                 match other {
                     Some((_, m, z)) if *m == me && *z == zone_name => {
-                        ui.colored_label(Color32::LIGHT_GREEN, "✔ linked both ways");
+                        ui.colored_label(Color32::LIGHT_GREEN, "\u{E182} linked both ways");
                     }
                     Some(_) => {
                         ui.horizontal(|ui| {
@@ -2360,11 +2604,11 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             ui.label("");
             ui.horizontal_wrapped(|ui| {
                 let map_for_draw = if target_map.is_empty() { refs.maps.iter().find(|m| **m != refs.current_map).cloned().unwrap_or_default() } else { target_map.clone() };
-                if !map_for_draw.is_empty() && ui.button(format!("✏ Draw the other end on {map_for_draw}")).on_hover_text("Opens that map: drag the other end there; both ends get linked").clicked() {
+                if !map_for_draw.is_empty() && ui.button(format!("\u{E3B4} Draw the other end on {map_for_draw}")).on_hover_text("Opens that map: drag the other end there; both ends get linked").clicked() {
                     crate::maps::request_transition(crate::maps::TransitionReq::DrawOther { zone: zone_name.clone(), map: map_for_draw });
                 }
                 if !target_map.is_empty() {
-                    if ui.button(format!("↗ Go to {target_map}")).clicked() {
+                    if ui.button(format!("\u{E5DE} Go to {target_map}")).clicked() {
                         GOTO.with(|g| *g.borrow_mut() = Some((target_map.clone(), target_zone.clone())));
                     }
                     if ui.button("Unlink").on_hover_text("Also unlinks the other end if it leads here").clicked() {
@@ -2383,7 +2627,7 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             widgets::suggest(ui, "pspawn", target_spawn, &spawns, 120.0);
             ui.end_row();
             ui.label("");
-            if ui.button(format!("↗ Go to {target_map}")).on_hover_text("Open the target map at the target spawn (or double-click the portal)").clicked() {
+            if ui.button(format!("\u{E5DE} Go to {target_map}")).on_hover_text("Open the target map at the target spawn (or double-click the portal)").clicked() {
                 GOTO.with(|g| *g.borrow_mut() = Some((target_map.clone(), target_spawn.clone())));
             }
             ui.end_row();

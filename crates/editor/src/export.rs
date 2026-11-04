@@ -92,10 +92,10 @@ impl Editor {
                 None => ui.colored_label(Color32::LIGHT_RED, "rust2d-game not found next to the editor; build it with `cargo build --release -p rust2d-game`."),
             };
             for e in &check.errors {
-                ui.colored_label(Color32::LIGHT_RED, format!("✖ {e}"));
+                ui.colored_label(Color32::LIGHT_RED, format!("\u{E4F6} {e}"));
             }
             for w in &check.warnings {
-                ui.colored_label(Color32::YELLOW, format!("⚠ {w}"));
+                ui.colored_label(Color32::YELLOW, format!("\u{E4E0} {w}"));
             }
             if let Some(r) = &d.result {
                 match r {
@@ -104,7 +104,7 @@ impl Editor {
                 };
             }
             let ok = check.errors.is_empty() && !d.name.trim().is_empty() && !d.out.trim().is_empty() && game_binary().is_some();
-            if ui.add_enabled(ok, egui::Button::new("📦 Export")).clicked() {
+            if ui.add_enabled(ok, egui::Button::new("\u{E390} Export")).clicked() {
                 go = true;
             }
         });

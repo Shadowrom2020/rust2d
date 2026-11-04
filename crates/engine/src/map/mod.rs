@@ -30,13 +30,11 @@ impl Tile {
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
-    /// `(tileset_slot, tile_index)`, or `None` for the empty tile.
+    /// `(tileset_slot, tile_index)`, or `None` for the empty tile (and for values without a
+    /// tileset slot, which only bad data contains).
     pub fn parts(self) -> Option<(usize, u32)> {
-        if self.0 == 0 {
-            None
-        } else {
-            Some((((self.0 >> Self::INDEX_BITS) - 1) as usize, self.0 & Self::INDEX_MASK))
-        }
+        let slot = self.0 >> Self::INDEX_BITS;
+        (slot > 0).then(|| ((slot - 1) as usize, self.0 & Self::INDEX_MASK))
     }
 }
 
@@ -117,6 +115,14 @@ impl TileLayer {
         std::mem::replace(&mut chunk.tiles[ti], tile)
     }
 
+    /// Every non-empty tile as `(x, y, tile)`, chunk by chunk (skips unallocated chunks).
+    pub fn tiles(&self) -> impl Iterator<Item = (u32, u32, Tile)> + '_ {
+        self.chunks.iter().enumerate().filter_map(|(ci, c)| c.as_ref().map(|c| (ci as u32, c))).flat_map(move |(ci, c)| {
+            let (cx, cy) = (ci % self.chunks_w * CHUNK_SIZE, ci / self.chunks_w * CHUNK_SIZE);
+            c.tiles.iter().enumerate().filter(|(_, t)| !t.is_empty()).map(move |(i, t)| (cx + i as u32 % CHUNK_SIZE, cy + i as u32 / CHUNK_SIZE, *t))
+        })
+    }
+
     /// Frees chunks that became completely empty (called before saving).
     pub fn compact(&mut self) {
         for slot in &mut self.chunks {
@@ -167,6 +173,38 @@ pub struct Map {
     pub background: [u8; 3],
     /// Looping music sound id ("" = keep whatever is playing).
     pub music: String,
+    /// Darkness of the map: always bright, day / night, or dark (dungeons).
+    pub lighting: MapLighting,
+}
+
+/// How dark a map is when nothing lights it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LightMode {
+    /// No darkness at all (the default; lights are not drawn).
+    #[default]
+    Bright,
+    /// Follows the time of day: bright by day, `darkness` at night.
+    Outdoor,
+    /// Always `darkness` (1 = pitch black: only light sources show anything).
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MapLighting {
+    pub mode: LightMode,
+    /// 0..1: how dark it gets without lights (outdoor: at midnight).
+    #[serde(default = "default_darkness")]
+    pub darkness: f32,
+}
+
+fn default_darkness() -> f32 {
+    0.7
+}
+
+impl Default for MapLighting {
+    fn default() -> Self {
+        MapLighting { mode: LightMode::Bright, darkness: default_darkness() }
+    }
 }
 
 impl Map {
@@ -191,6 +229,7 @@ impl Map {
             next_uid: 1,
             background: [20, 20, 28],
             music: String::new(),
+            lighting: MapLighting::default(),
         }
     }
 

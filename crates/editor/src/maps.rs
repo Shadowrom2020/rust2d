@@ -195,7 +195,7 @@ impl Editor {
                     self.sel = Selection::Zone(z.uid);
                 }
                 self.save_map();
-                self.set_status(format!("Map transition: '{a}' {a_zone} ⇄ '{b}' {b_zone}"));
+                self.set_status(format!("Map transition: '{a}' {a_zone} \u{E0A0} '{b}' {b_zone}"));
             }
             Err(e) => self.set_status(format!("Could not link the maps: {e:#}")),
         }
@@ -231,7 +231,7 @@ impl Editor {
                         set_target(m, &other, &c, &zone);
                     })
                 })
-                .map(|_| format!("Linked both ways: '{cur}' {zone} ⇄ '{map}' {other}"))
+                .map(|_| format!("Linked both ways: '{cur}' {zone} \u{E0A0} '{map}' {other}"))
             }
             TransitionReq::Unlink { zone } => {
                 let target = self.doc.as_ref().and_then(|d| d.map.zones.iter().find(|z| z.name == zone)).and_then(|z| match &z.kind {
@@ -290,7 +290,7 @@ impl Editor {
                     });
                     ui.weak("Next, the target map opens: drag the other end there (e.g. where the road enters). A transition zone is created on both maps, each leading to the other; players arrive next to the other end.");
                     ui.horizontal(|ui| {
-                        if ui.button(format!("Next: arrival on '{}' ▶", d.target)).clicked() {
+                        if ui.button(format!("Next: arrival on '{}' \u{E3D0}", d.target)).clicked() {
                             next = true;
                         }
                         if ui.button("Cancel").clicked() {

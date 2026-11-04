@@ -4,9 +4,12 @@ use egui_macroquad::egui::{self, pos2, vec2, Color32, PointerButton, Rect, Sense
 use rust2d_engine::imageio::Rgba;
 
 use crate::app::Editor;
+use crate::ui::{self, ph};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PxTool {
+    /// Default: a click only selects the frame under it (for copy / paste etc.), never draws.
+    Select,
     Pencil,
     Eraser,
     Fill,
@@ -16,16 +19,19 @@ pub enum PxTool {
 }
 
 impl PxTool {
-    const ALL: [(PxTool, &'static str, &'static str); 6] = [
-        (PxTool::Pencil, "✏ Pencil", "B"),
-        (PxTool::Eraser, "Eraser", "E"),
-        (PxTool::Fill, "Fill", "G"),
-        (PxTool::Line, "Line", "L"),
-        (PxTool::Rect, "Rectangle", "R"),
-        (PxTool::Picker, "💧 Pick color", "I"),
+    /// (tool, icon, name, key, help)
+    const ALL: [(PxTool, &'static str, &'static str, &'static str, &'static str); 7] = [
+        (PxTool::Select, ph::SELECTION, "Select frame", "S", "Click a frame to select it (for copy / cut / paste); nothing is drawn"),
+        (PxTool::Pencil, ph::PENCIL_SIMPLE, "Pencil", "B", "Click or drag to draw single pixels with the left / right color"),
+        (PxTool::Eraser, ph::ERASER, "Eraser", "E", "Click or drag to make pixels transparent"),
+        (PxTool::Fill, ph::PAINT_BUCKET, "Fill", "G", "Click to fill the connected area of the same color"),
+        (PxTool::Line, ph::LINE_SEGMENT, "Line", "L", "Drag to draw a straight line"),
+        (PxTool::Rect, ph::RECTANGLE, "Rectangle", "R", "Drag to draw a rectangle outline"),
+        (PxTool::Picker, ph::EYEDROPPER, "Pick color", "I", "Click a pixel to make its color the left / right color"),
     ];
     pub fn parse(s: &str) -> Option<PxTool> {
         Some(match s {
+            "select" => PxTool::Select,
             "pencil" => PxTool::Pencil,
             "eraser" => PxTool::Eraser,
             "fill" => PxTool::Fill,
@@ -227,7 +233,9 @@ pub struct PixelState {
     stroke: Option<Stroke3>,
     pub sel_frame: u32,
     fps: f32,
+    /// Copied / cut frame, and the frame it came from (shown in the panel).
     clipboard: Option<Rgba>,
+    clip_from: u32,
     grid: bool,
     resize: (u32, u32),
     checker: Option<TextureHandle>,
@@ -237,7 +245,7 @@ impl Default for PixelState {
     fn default() -> Self {
         PixelState {
             doc: None,
-            tool: PxTool::Pencil,
+            tool: PxTool::Select,
             colors: [[0x1a, 0x16, 0x22, 255], [0, 0, 0, 0]],
             zoom: 8.0,
             pan: egui::Vec2::ZERO,
@@ -245,6 +253,7 @@ impl Default for PixelState {
             sel_frame: 0,
             fps: 6.0,
             clipboard: None,
+            clip_from: 0,
             grid: true,
             resize: (1, 1),
             checker: None,
@@ -257,11 +266,53 @@ impl PixelState {
         self.doc.as_ref().is_some_and(PixelDoc::is_dirty)
     }
 
+    /// The selected frame of the open image (clamped to the frames it has).
+    fn frame(&self) -> Option<u32> {
+        let d = self.doc.as_ref()?;
+        Some(self.sel_frame.min(d.cols() * d.rows() - 1))
+    }
+
+    /// Copies the selected frame (Ctrl+C). Returns the frame copied.
+    pub fn copy_frame(&mut self) -> Option<u32> {
+        let f = self.frame()?;
+        self.clipboard = Some(self.doc.as_ref()?.frame_pixels(f));
+        self.clip_from = f;
+        Some(f)
+    }
+
+    /// Copies the selected frame and clears it (Ctrl+X), one undo step.
+    pub fn cut_frame(&mut self) -> Option<u32> {
+        let f = self.copy_frame()?;
+        let d = self.doc.as_mut()?;
+        d.snapshot();
+        d.put_frame(f, &Rgba::new(d.frame.0, d.frame.1), false);
+        d.changed();
+        Some(f)
+    }
+
+    /// Replaces the selected frame with the clipboard (Ctrl+V), optionally mirrored; one undo step.
+    pub fn paste_frame(&mut self, mirrored: bool) -> Option<u32> {
+        let f = self.frame()?;
+        let clip = self.clipboard.as_ref()?;
+        let d = self.doc.as_mut()?;
+        d.snapshot();
+        // Transparent pixels of the frame are cleared too: the frame becomes exactly the copy.
+        d.put_frame(f, &Rgba::new(d.frame.0, d.frame.1), false);
+        d.put_frame(f, clip, mirrored);
+        d.changed();
+        Some(f)
+    }
+
     /// Applies the current tool at a pixel as a complete action (used by scripts / clicks).
     pub fn apply_at(&mut self, button: usize, p: (i32, i32)) {
         let c = if self.tool == PxTool::Eraser { [0; 4] } else { self.colors[button] };
         let Some(d) = &mut self.doc else { return };
         match self.tool {
+            PxTool::Select => {
+                if d.img.in_bounds(p.0, p.1) {
+                    self.sel_frame = d.frame_at(p.0, p.1);
+                }
+            }
             PxTool::Picker => self.colors[button] = d.img.get(p.0, p.1),
             PxTool::Fill => {
                 d.snapshot();
@@ -421,9 +472,34 @@ impl Editor {
         self.pixel_keys(ctx);
     }
 
+    /// Frame clipboard: "copy", "cut", "paste" or "mirror" (paste mirrored), with a status message.
+    pub fn frame_clipboard(&mut self, action: &str) {
+        let done = match action {
+            "copy" => self.px.copy_frame().map(|f| format!("Copied frame {f}")),
+            "cut" => self.px.cut_frame().map(|f| format!("Cut frame {f}: select another frame and press Ctrl+V to move it there")),
+            "paste" | "mirror" => self.px.paste_frame(action == "mirror").map(|f| format!("Pasted frame {} into frame {f}", self.px.clip_from)),
+            _ => None,
+        };
+        if let Some(msg) = done {
+            self.set_status(msg);
+        }
+    }
+
     fn pixel_keys(&mut self, ctx: &egui::Context) {
         if ctx.wants_keyboard_input() {
             return;
+        }
+        // egui-miniquad turns Ctrl+C / X / V into text clipboard events (V only when the system
+        // clipboard holds text), so these come from macroquad's keyboard state.
+        {
+            use macroquad::input::{is_key_down, is_key_pressed, KeyCode};
+            if is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl) {
+                for (k, action) in [(KeyCode::C, "copy"), (KeyCode::X, "cut"), (KeyCode::V, "paste")] {
+                    if is_key_pressed(k) {
+                        self.frame_clipboard(action);
+                    }
+                }
+            }
         }
         let (ctrl, shift) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
         let pressed = |k: egui::Key| ctx.input(|i| i.key_pressed(k));
@@ -443,7 +519,7 @@ impl Editor {
             }
             return;
         }
-        for (k, t) in [(egui::Key::B, PxTool::Pencil), (egui::Key::E, PxTool::Eraser), (egui::Key::G, PxTool::Fill), (egui::Key::L, PxTool::Line), (egui::Key::R, PxTool::Rect), (egui::Key::I, PxTool::Picker)] {
+        for (k, t) in [(egui::Key::S, PxTool::Select), (egui::Key::B, PxTool::Pencil), (egui::Key::E, PxTool::Eraser), (egui::Key::G, PxTool::Fill), (egui::Key::L, PxTool::Line), (egui::Key::R, PxTool::Rect), (egui::Key::I, PxTool::Picker)] {
             if pressed(k) {
                 self.px.tool = t;
             }
@@ -477,18 +553,18 @@ impl Editor {
             self.open_pixel(&rel, frame, layout);
         }
         if self.px.doc.is_none() {
-            ui.weak("Open an image above, or create one with Library → New asset…");
+            ui.weak("Open an image above, or create one with Assets \u{E13A} New asset…");
             return;
         }
         ui.horizontal(|ui| {
-            if ui.add_enabled(dirty, egui::Button::new("💾 Save   Ctrl+S")).clicked() {
+            if ui.add_enabled(dirty, egui::Button::new(ui::t(ph::FLOPPY_DISK, "Save   Ctrl+S"))).on_hover_text("Writes the PNG and reloads it everywhere").clicked() {
                 self.save_pixel();
             }
-            if ui.add_enabled(dirty, egui::Button::new("Revert")).clicked() {
+            if ui.add_enabled(dirty, egui::Button::new(ui::t(ph::ARROW_COUNTER_CLOCKWISE, "Revert"))).on_hover_text("Back to the saved image").clicked() {
                 let d = self.px.doc.take().unwrap();
                 self.load_pixel(&d.rel, d.frame, d.layout);
             }
-            if !embedded && ui.add_enabled(!dirty, egui::Button::new("Close")).clicked() {
+            if !embedded && ui.add_enabled(!dirty, egui::Button::new(ui::t(ph::X, "Close"))).clicked() {
                 self.px.doc = None;
             }
         });
@@ -499,26 +575,28 @@ impl Editor {
         ui.weak(format!("{}×{} px · frames {}×{} px · {}×{} frames", d.img.w, d.img.h, d.frame.0, d.frame.1, d.cols(), d.rows()));
         ui.horizontal(|ui| {
             let (u, r) = (!d.undo.is_empty(), !d.redo.is_empty());
-            if ui.add_enabled(u, egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() {
+            if ui::icon_button(ui, u, ph::ARROW_ARC_LEFT, "Undo", "Ctrl+Z", "").clicked() {
                 d.undo();
             }
-            if ui.add_enabled(r, egui::Button::new("Redo")).on_hover_text("Ctrl+Y").clicked() {
+            if ui::icon_button(ui, r, ph::ARROW_ARC_RIGHT, "Redo", "Ctrl+Y", "").clicked() {
                 d.redo();
             }
         });
 
         ui.separator();
-        ui.label("Tool");
-        egui::Grid::new("px_tools").num_columns(2).show(ui, |ui| {
-            for (i, (t, label, key)) in PxTool::ALL.iter().enumerate() {
-                if ui.selectable_label(self.px.tool == *t, *label).on_hover_text(format!("Shortcut: {key}")).clicked() {
-                    self.px.tool = *t;
-                }
-                if i % 2 == 1 {
-                    ui.end_row();
+        ui.horizontal(|ui| {
+            for (t, icon, name, key, help) in PxTool::ALL {
+                if ui::tool_button(ui, self.px.tool == t, icon, name, key, help).clicked() {
+                    self.px.tool = t;
                 }
             }
         });
+        if let Some((_, icon, name, _, help)) = PxTool::ALL.iter().find(|t| t.0 == self.px.tool) {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(format!("{icon} {name}")).strong());
+                ui.weak(*help);
+            });
+        }
 
         ui.separator();
         ui.horizontal(|ui| {
@@ -585,32 +663,39 @@ impl Editor {
         ui.separator();
         ui.label(format!("Frame {} (click on the canvas selects it)", self.px.sel_frame));
         let f = self.px.sel_frame.min(d.cols() * d.rows() - 1);
+        let mut clip: Option<&str> = None;
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Copy").clicked() {
-                self.px.clipboard = Some(d.frame_pixels(f));
+            if ui.button(ui::t(ph::COPY, "Copy")).on_hover_text("Ctrl+C").clicked() {
+                clip = Some("copy");
             }
-            if ui.add_enabled(self.px.clipboard.is_some(), egui::Button::new("Paste")).clicked() {
-                d.snapshot();
-                d.put_frame(f, self.px.clipboard.as_ref().unwrap(), false);
-                d.changed();
+            if ui.button(ui::t(ph::SCISSORS, "Cut")).on_hover_text("Ctrl+X: copy and clear the frame (paste it elsewhere to move it)").clicked() {
+                clip = Some("cut");
             }
-            if ui.add_enabled(self.px.clipboard.is_some(), egui::Button::new("Paste mirrored")).on_hover_text("e.g. turn a left-facing frame into a right-facing one").clicked() {
-                d.snapshot();
-                d.put_frame(f, self.px.clipboard.as_ref().unwrap(), true);
-                d.changed();
+            if ui.add_enabled(self.px.clipboard.is_some(), egui::Button::new(ui::t(ph::CLIPBOARD_TEXT, "Paste"))).on_hover_text("Ctrl+V").clicked() {
+                clip = Some("paste");
             }
-            if ui.button("Flip ↔").clicked() {
+            if ui.add_enabled(self.px.clipboard.is_some(), egui::Button::new(ui::t(ph::FLIP_HORIZONTAL, "Paste mirrored"))).on_hover_text("e.g. turn a left-facing frame into a right-facing one").clicked() {
+                clip = Some("mirror");
+            }
+            if ui.button(ui::t(ph::ARROWS_LEFT_RIGHT, "Flip")).on_hover_text("Mirror the frame horizontally").clicked() {
                 let cur = d.frame_pixels(f);
                 d.snapshot();
                 d.put_frame(f, &cur, true);
                 d.changed();
             }
-            if ui.button("Clear").clicked() {
+            if ui.button(ui::t(ph::ERASER, "Clear")).on_hover_text("Empty the frame").clicked() {
                 d.snapshot();
                 d.put_frame(f, &Rgba::new(d.frame.0, d.frame.1), false);
                 d.changed();
             }
         });
+        if self.px.clipboard.is_some() {
+            ui.weak(format!("Clipboard: frame {} · click another frame, then Ctrl+V", self.px.clip_from));
+        }
+        if let Some(action) = clip {
+            self.frame_clipboard(action);
+            return;
+        }
         ui.horizontal(|ui| {
             ui.label("Canvas");
             ui.add(egui::DragValue::new(&mut self.px.resize.0).range(1..=64));
@@ -744,7 +829,13 @@ impl Editor {
         let tool = self.px.tool;
         if let Some(p) = hover.filter(|_| resp.hovered()) {
             if d.img.in_bounds(p.0, p.1) {
-                let r = Rect::from_min_size(origin + vec2(p.0 as f32, p.1 as f32) * zoom, vec2(zoom, zoom));
+                // Select outlines the frame a click would select, the drawing tools the pixel.
+                let r = if tool == PxTool::Select {
+                    let (fx, fy) = d.frame_origin(d.frame_at(p.0, p.1));
+                    Rect::from_min_size(origin + vec2(fx as f32, fy as f32) * zoom, vec2(d.frame.0 as f32, d.frame.1 as f32) * zoom)
+                } else {
+                    Rect::from_min_size(origin + vec2(p.0 as f32, p.1 as f32) * zoom, vec2(zoom, zoom))
+                };
                 painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, Color32::WHITE), StrokeKind::Outside);
             }
             if let Some(b) = (0..2).find(|&b| pressed[b]) {
@@ -753,6 +844,7 @@ impl Editor {
                 }
                 let c = if tool == PxTool::Eraser { [0; 4] } else { self.px.colors[b] };
                 match tool {
+                    PxTool::Select => {}
                     PxTool::Picker => self.px.colors[b] = d.img.get(p.0, p.1),
                     PxTool::Fill => {
                         d.snapshot();

@@ -4,6 +4,8 @@
 //! quads that share a texture). When zoomed far out, an [`Overview`] texture with one
 //! pixel per tile replaces the per-tile drawing, so even a 1024x1024 map renders fast.
 
+pub mod lighting;
+
 use std::collections::HashMap;
 
 use macroquad::prelude::*;

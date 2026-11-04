@@ -108,6 +108,9 @@ pub struct EntityInstance {
     /// Overrides the character definition's merchant spec (stock, prices).
     #[serde(default)]
     pub shop: Option<crate::defs::ShopSpec>,
+    /// Light of this placed entity, instead of its definition's (props: of its current state).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<crate::defs::LightSpec>,
 }
 
 fn yes() -> bool {
@@ -197,6 +200,7 @@ impl EntityInstance {
             container: None,
             lock: None,
             shop: None,
+            light: None,
             sheet: String::new(),
             patrol: None,
             loot: None,

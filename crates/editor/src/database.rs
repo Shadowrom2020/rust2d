@@ -1,6 +1,8 @@
 //! Definition editors: items, props, characters, tilesets, sprite sheets, sounds, project and scripts.
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Sense, Stroke, StrokeKind};
+
+use crate::ui::{self, ph};
 use rust2d_engine::audio::Audio;
 use rust2d_engine::defs::*;
 use rust2d_engine::events::TriggerOn;
@@ -24,6 +26,7 @@ pub enum Tab {
     Quests,
     Project,
     Scripts,
+    Structures,
 }
 
 /// Inline "rename id" editor state; at most one rename is open at a time.
@@ -58,6 +61,10 @@ pub struct DbState {
     pub art_open: bool,
     /// What the embedded editor last focused (to select its frame once).
     pub art_focus: Option<(String, u32)>,
+    /// Tilesets tab: clicks on the tile grid toggle light tiles.
+    pub tile_light_pick: bool,
+    /// The structure editor (Structures tab).
+    pub st_edit: crate::structures::StructEdit,
 }
 
 /// Everything the definition forms need besides the definition itself.
@@ -81,11 +88,35 @@ struct Cx<'a> {
     art_open: &'a mut bool,
     /// Art actions handled after the form (they need the whole editor).
     art: &'a mut Option<ArtAction>,
+    st_edit: &'a mut crate::structures::StructEdit,
+    tile_light_pick: &'a mut bool,
 }
 
 /// An id not yet used in `ids`, based on `prefix`.
 fn unique(prefix: &str, ids: &[String]) -> String {
     (1..).map(|n| format!("{prefix}_{n}")).find(|c| !ids.contains(c)).unwrap()
+}
+
+thread_local! {
+    /// The Database view belongs to the Asset Library window (set each frame by `ui`):
+    /// deleting goes through the library's remove confirmation instead of `list_ui`.
+    static LIBRARY_MODE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Icon of a Database tab.
+fn tab_icon(t: Tab) -> &'static str {
+    match t {
+        Tab::Items => ph::SWORD,
+        Tab::Props => ph::TREASURE_CHEST,
+        Tab::Characters => ph::USERS,
+        Tab::Tilesets => ph::GRID_FOUR,
+        Tab::Sheets => ph::IMAGE,
+        Tab::Sounds => ph::SPEAKER_HIGH,
+        Tab::Structures => ph::HOUSE,
+        Tab::Quests => ph::SCROLL,
+        Tab::Project => ph::GEAR,
+        Tab::Scripts => ph::CODE,
+    }
 }
 
 /// List with add / duplicate / delete. Returns true if the list changed.
@@ -100,12 +131,12 @@ fn list_ui<T: Clone>(
     let mut changed = false;
     let mut ids: Vec<String> = items.iter_mut().map(|t| id_of(t).clone()).collect();
     ui.horizontal(|ui| {
-        if ui.button("+ New").clicked() {
+        if ui.button(ui::t(ph::PLUS, "New")).on_hover_text("A new definition with default values").clicked() {
             items.push(make(&ids));
             *sel = items.len() - 1;
             changed = true;
         }
-        if ui.add_enabled(*sel < items.len(), egui::Button::new("Duplicate")).clicked() {
+        if ui.add_enabled(*sel < items.len(), egui::Button::new(ui::t(ph::COPY, "Duplicate"))).on_hover_text("A copy of the selected definition with a new id").clicked() {
             let mut c = items[*sel].clone();
             let id = id_of(&mut c);
             *id = unique(id, &ids);
@@ -114,7 +145,8 @@ fn list_ui<T: Clone>(
             *sel = items.len() - 1;
             changed = true;
         }
-        if ui.add_enabled(*sel < items.len(), egui::Button::new("Delete")).on_hover_text("References in maps are not removed").clicked() {
+        let library = LIBRARY_MODE.with(|m| m.get());
+        if !library && ui.add_enabled(*sel < items.len(), egui::Button::new(ui::t(ph::TRASH, "Delete"))).on_hover_text("Removes the definition (references in maps are not removed)").clicked() {
             items.remove(*sel);
             *sel = sel.saturating_sub(1);
             changed = true;
@@ -132,6 +164,11 @@ fn list_ui<T: Clone>(
 }
 
 pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
+    let library = ed.library_mode;
+    LIBRARY_MODE.with(|m| m.set(library));
+    if library && matches!(ed.db.tab, Tab::Quests | Tab::Project | Tab::Scripts) {
+        ed.db.tab = Tab::Items;
+    }
     ui.horizontal(|ui| {
         let tabs = [
             (Tab::Items, "Items"),
@@ -140,12 +177,16 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             (Tab::Tilesets, "Tilesets"),
             (Tab::Sheets, "Sprite sheets"),
             (Tab::Sounds, "Sounds"),
+            (Tab::Structures, "Structures"),
             (Tab::Quests, "Quests"),
             (Tab::Project, "Project"),
             (Tab::Scripts, "Scripts"),
         ];
         for (t, l) in tabs {
-            if ui.selectable_label(ed.db.tab == t, l).clicked() && ed.db.tab != t {
+            if library && matches!(t, Tab::Quests | Tab::Project | Tab::Scripts) {
+                continue; // the library only holds assets
+            }
+            if ui.selectable_label(ed.db.tab == t, ui::t(tab_icon(t), l)).clicked() && ed.db.tab != t {
                 ed.db.tab = t;
                 ed.db.sel = 0;
                 ed.db.rename = RenameUi::default();
@@ -153,10 +194,10 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             }
         }
         ui.separator();
-        if ui.button("💾 Save definitions").clicked() {
+        if ui.button(ui::t(ph::FLOPPY_DISK, "Save definitions")).on_hover_text("Writes defs/*.ron (Ctrl+S saves everything)").clicked() {
             ed.save_defs();
         }
-        if ui.button("⟳ Reload assets").clicked() {
+        if ui.button(ui::t(ph::ARROW_CLOCKWISE, "Reload assets")).on_hover_text("Re-reads images, sounds and scripts from disk").clicked() {
             ed.reload_assets();
         }
         ui.separator();
@@ -170,18 +211,38 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             Tab::Tilesets => db.tilesets.get(i).map(|d| (RefKind::Tileset, d.id.clone())),
             Tab::Sheets => db.sheets.get(i).map(|d| (RefKind::Sheet, d.id.clone())),
             Tab::Sounds => db.sounds.get(i).map(|d| (RefKind::Sound, d.id.clone())),
+            Tab::Structures => db.structures.get(i).map(|d| (RefKind::Structure, d.id.clone())),
             _ => None,
         };
+        if !library {
+            let kind = match ed.db.tab {
+                Tab::Items => Some(RefKind::Item),
+                Tab::Props => Some(RefKind::Prop),
+                Tab::Characters => Some(RefKind::Character),
+                Tab::Tilesets => Some(RefKind::Tileset),
+                Tab::Sheets => Some(RefKind::Sheet),
+                Tab::Sounds => Some(RefKind::Sound),
+                Tab::Structures => Some(RefKind::Structure),
+                _ => None,
+            };
+            if kind.is_some() {
+                ed.add_from_library_button(ui, kind);
+            }
+        }
         if let Some(a) = current {
-            if ui.button("📂 Add to library").on_hover_text(format!("Copies '{}' and everything it needs into the shared asset library", a.1)).clicked() {
+            if library {
+                if ui.button(ui::t(ph::TRASH, "Delete…")).on_hover_text(format!("Removes '{}' from the library (asks first)", a.1)).clicked() {
+                    ed.lib.confirm_remove = Some(vec![a.clone()]);
+                }
+            } else if ui.button(ui::t(ph::UPLOAD_SIMPLE, "Add to library")).on_hover_text(format!("Copies '{}' and everything it needs into the shared asset library", a.1)).clicked() {
                 let r = ed.project_to_library(std::slice::from_ref(&a));
                 ed.show_result(r);
             }
-            if ui.button("📦 Export…").on_hover_text(format!("Saves '{}' and everything it needs as a .r2dpack file", a.1)).clicked() {
+            if ui.button(ui::t(ph::PACKAGE, "Export…")).on_hover_text(format!("Saves '{}' and everything it needs as a .r2dpack file", a.1)).clicked() {
                 ed.open_file_dialog(Purpose::ExportPackage { from_library: false, assets: vec![a] });
             }
         }
-        if ui.button("✨ New asset…").clicked() {
+        if ui.button(ui::t(ph::SPARKLE, "New asset…")).on_hover_text("A prop, item, character, tileset, sprite sheet or structure (a wizard asks the details)").clicked() {
             ed.wizard = Some(crate::wizard::Wizard::new(&ed.project));
         }
     });
@@ -193,6 +254,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let mut art: Option<ArtAction> = None;
     let mut art_target: Option<(String, (u32, u32), bool, u32)> = None;
     let mut list_changed = false;
+    let mut place_structure: Option<String> = None;
     let tab = ed.db.tab;
     let sel_before = ed.db.sel;
     if matches!(tab, Tab::Project | Tab::Scripts) {
@@ -221,6 +283,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         armor: None,
                         max_stack: 99,
                         value: 0,
+        light: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -240,6 +303,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         lock: None,
                         default_state: default_state_name(),
                         states: vec![],
+        light: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -264,6 +328,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         triggers: vec![],
                         shop: None,
                         loot: vec![],
+        light: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -272,7 +337,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.tilesets,
                     sel,
                     |d| d.id.clone(),
-                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![] },
+                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![], lights: vec![] },
                     |d| &mut d.id,
                 ),
                 Tab::Sheets => list_ui(
@@ -289,6 +354,14 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     sel,
                     |d| d.id.clone(),
                     |ids| SoundDef { id: unique("sound", ids), file: "sounds/new.wav".into(), volume: 1.0 },
+                    |d| &mut d.id,
+                ),
+                Tab::Structures => list_ui(
+                    ui,
+                    &mut db.structures,
+                    sel,
+                    |d| format!("{}  ({})", d.name, d.id),
+                    |ids| StructureDef { id: unique("structure", ids), name: "New structure".into(), w: 6, h: 5, ..Default::default() },
                     |d| &mut d.id,
                 ),
                 Tab::Quests => list_ui(
@@ -334,6 +407,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     state_renamed: &mut state_renamed,
                     art_open: &mut ed.db.art_open,
                     art: &mut art,
+                    st_edit: &mut ed.db.st_edit,
+                    tile_light_pick: &mut ed.db.tile_light_pick,
                 };
                 let i = ed.db.sel;
                 let db = &mut ed.project.db;
@@ -379,6 +454,13 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                             quest_form(ui, d, &mut cx);
                         }
                     }
+                    Tab::Structures => {
+                        if let Some(d) = db.structures.get_mut(i) {
+                            if structure_form(ui, d, &mut cx) {
+                                place_structure = Some(d.id.clone());
+                            }
+                        }
+                    }
                     _ => {}
                 }
             });
@@ -421,6 +503,10 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     }
     if let Some(a) = art.take() {
         ed.art_action(a, tab);
+    }
+    if let Some(id) = place_structure {
+        ed.mode = crate::app::Mode::Map;
+        ed.arm_structure(&id);
     }
     if list_changed || before.0 != ed.project.db || before.1 != ed.project.config {
         ed.defs_dirty = true;
@@ -522,6 +608,11 @@ fn weapon_ui(ui: &mut egui::Ui, id: &str, w: &mut Option<Weapon>, cx: &mut Cx, c
         ui.label("Knockback");
         ui.add(egui::DragValue::new(&mut w.knockback).range(0.0..=5.0).speed(0.05)).on_hover_text("Multiplier");
         ui.end_row();
+        if !character {
+            ui.label("Hands");
+            ui.checkbox(&mut w.two_handed, "Two-handed").on_hover_text("Nothing can be held in the left hand (shield, lantern) while this weapon is equipped");
+            ui.end_row();
+        }
         if let Some(r) = &mut w.ranged {
             ui.label("Speed (px/s)");
             ui.add(egui::DragValue::new(&mut r.speed).range(10.0..=2000.0));
@@ -565,26 +656,32 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     let mut kind = match (&d.weapon, &d.armor) {
         (Some(_), _) => 1,
         (None, Some(a)) if a.slot == EquipSlot::Head => 2,
+        (None, Some(a)) if a.slot == EquipSlot::Offhand => 4,
         (None, Some(_)) => 3,
         _ => 0,
     };
     let old = kind;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.radio_value(&mut kind, 0, "None");
         ui.radio_value(&mut kind, 1, "Weapon");
         ui.radio_value(&mut kind, 2, "Helmet");
         ui.radio_value(&mut kind, 3, "Body armor");
+        ui.radio_value(&mut kind, 4, "Left hand").on_hover_text("A shield (defense) or a light (lantern, torch: set its light below). Not usable together with a two-handed weapon.");
     });
     if kind != old {
         d.weapon = (kind == 1).then(|| Weapon::melee(1, 0.4));
         d.armor = match kind {
-            2 | 3 => {
-                let slot = if kind == 2 { EquipSlot::Head } else { EquipSlot::Body };
+            2..=4 => {
+                let slot = match kind {
+                    2 => EquipSlot::Head,
+                    3 => EquipSlot::Body,
+                    _ => EquipSlot::Offhand,
+                };
                 Some(d.armor.take().map(|a| Armor { slot, ..a }).unwrap_or(Armor { slot, defense: 1, speed: 0.0, overlay: String::new() }))
             }
             _ => None,
         };
-        if kind != 0 {
+        if kind != 0 && kind != 4 {
             d.max_stack = 1;
         }
     }
@@ -622,6 +719,9 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         }
     }
     ui.separator();
+    ui.heading("Light");
+    widgets::light_ui(ui, "item_light", &mut d.light, "Gives light (while equipped, e.g. in the left hand, or lying on the ground)");
+    ui.separator();
     ui.heading("Icon");
     widgets::sprite_field(ui, "item_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
     art_buttons(ui, cx, "icon", (1, 1));
@@ -643,6 +743,16 @@ fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     hitbox(ui, &mut d.hitbox);
     ui.separator();
     prop_states_ui(ui, d, cx);
+    ui.separator();
+    ui.heading("Light");
+    ui.weak("Light per state, e.g. a lamp that is lit in its \"lit\" state and dark in \"off\". Placed props can have their own light (map inspector).");
+    let names = d.state_names();
+    for (i, name) in names.iter().enumerate() {
+        let slot = if i == 0 { &mut d.light } else { &mut d.states[i - 1].light };
+        ui.push_id(("prop_light", i), |ui| {
+            widgets::light_ui(ui, "prop_light", slot, &format!("'{name}' gives light"));
+        });
+    }
     ui.separator();
     let states = d.state_names();
     ui.heading("Container");
@@ -676,7 +786,7 @@ fn prop_states_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     ui.heading("States");
     ui.weak("A prop always shows one of its states. Placed props start in the default state (or the one chosen in the map inspector); a lock, a container, the 'Set prop state' action or set_state(target, \"name\") in scripts switch to another.");
     // All states as one list (index 0 = the default state).
-    let mut all: Vec<PropState> = std::iter::once(PropState { name: d.default_state.clone(), sprite: d.sprite.clone(), solid: d.solid }).chain(d.states.iter().cloned()).collect();
+    let mut all: Vec<PropState> = std::iter::once(PropState { name: d.default_state.clone(), sprite: d.sprite.clone(), solid: d.solid, light: None }).chain(d.states.iter().cloned()).collect();
     let used: Vec<String> = [
         d.lock.as_ref().and_then(|l| match &l.on_unlock {
             OnUnlock::ToState { state } => Some(state.clone()),
@@ -728,7 +838,7 @@ fn prop_states_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
                                 if ui.selectable_label(selected, egui::RichText::new(&st.name).strong()).clicked() {
                                     *cx.state_sel = i;
                                 }
-                                if ui.small_button("✏").on_hover_text("Rename (placed props using it follow)").clicked() {
+                                if ui.small_button("\u{E3B4}").on_hover_text("Rename (placed props using it follow)").clicked() {
                                     *cx.state_rename = Some((i, st.name.clone()));
                                 }
                             }
@@ -746,14 +856,14 @@ fn prop_states_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
                             if ui.small_button("Make default").on_hover_text("Placed props without a chosen state start in this one").clicked() {
                                 op = Some(Op::MakeDefault(i));
                             }
-                            if i > 1 && ui.small_button("⏶").clicked() {
+                            if i > 1 && ui.small_button("\u{E13C}").clicked() {
                                 op = Some(Op::Up(i));
                             }
-                            if i + 1 < n && ui.small_button("⏷").clicked() {
+                            if i + 1 < n && ui.small_button("\u{E136}").clicked() {
                                 op = Some(Op::Down(i));
                             }
                             let in_use = used.contains(&st.name);
-                            if ui.add_enabled(!in_use, egui::Button::new("✖").small()).on_hover_text(if in_use { "Used by the lock or container" } else { "Delete this state" }).clicked() {
+                            if ui.add_enabled(!in_use, egui::Button::new("\u{E4F6}").small()).on_hover_text(if in_use { "Used by the lock or container" } else { "Delete this state" }).clicked() {
                                 op = Some(Op::Delete(i));
                             }
                         }
@@ -787,7 +897,7 @@ fn prop_states_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
             let sprite = SpriteRef { frame: last.sprite.frame + last.sprite.cells().0, ..last.sprite.clone() };
             let names: Vec<String> = all.iter().map(|s| s.name.clone()).collect();
             let name = (2..).map(|k| format!("state_{k}")).find(|c| !names.contains(c)).unwrap();
-            all.push(PropState { name: name.clone(), sprite, solid: all[0].solid });
+            all.push(PropState { name: name.clone(), sprite, solid: all[0].solid, light: None });
             *cx.state_sel = all.len() - 1;
             *cx.state_rename = Some((all.len() - 1, name));
         }
@@ -873,11 +983,11 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
                     ui.selectable_value(&mut d.sheet, s.to_string(), s.as_str());
                 }
             });
-            if ui.button("👤 Choose model…").on_hover_text("Pick a look from this project or the asset library (library models are copied into the project)").clicked() {
+            if ui.button("\u{E4C2} Choose model…").on_hover_text("Pick a look from this project or the asset library (library models are copied into the project)").clicked() {
                 crate::models::request_model(crate::models::ModelTarget::Def(d.id.clone()));
             }
             let mut on = *cx.art_open;
-            if ui.toggle_value(&mut on, "🎨 Edit art").on_hover_text("Show the pixel editor for this character's sheet").changed() {
+            if ui.toggle_value(&mut on, "\u{E6C8} Edit art").on_hover_text("Show the pixel editor for this character's sheet").changed() {
                 *cx.art_open = on;
             }
             ui.menu_button("+ New sheet", |ui| {
@@ -965,6 +1075,10 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     }
     widgets::loot_ui(ui, "chr_loot", &mut d.loot, cx.refs, cx.tex, cx.assets, cx.db);
     ui.separator();
+    ui.heading("Light");
+    widgets::light_ui(ui, "chr_light", &mut d.light, "Carries a light (e.g. a lantern)");
+    ui.weak("Placed characters can carry their own light instead (map inspector).");
+    ui.separator();
     ui.heading("Merchant");
     let mut on = d.shop.is_some();
     if ui.checkbox(&mut on, "Merchant (trades items with the player)").changed() {
@@ -1022,7 +1136,7 @@ fn quest_form(ui: &mut egui::Ui, d: &mut rust2d_engine::quest::QuestDef, _cx: &m
             if ui.add_enabled(k + 1 < n, egui::Button::new("v").small()).on_hover_text("Move down").clicked() {
                 swap = Some(k);
             }
-            if ui.small_button("✖").on_hover_text("Remove (later stages move up: check your triggers)").clicked() {
+            if ui.small_button("\u{E4F6}").on_hover_text("Remove (later stages move up: check your triggers)").clicked() {
                 remove = Some(k);
             }
         });
@@ -1045,14 +1159,14 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
     ui.horizontal(|ui| {
         ui.label("Image");
         ui.text_edit_singleline(&mut d.image);
-        if ui.button("✏ Edit pixels").on_hover_text("Open the image in the pixel editor").clicked() {
+        if ui.button("\u{E3B4} Edit pixels").on_hover_text("Open the image in the pixel editor").clicked() {
             *cx.paint = Some((d.image.clone(), (tile as u32, tile as u32), false, 0));
         }
         if ui.button("Browse…").clicked() {
             *cx.browse = Some(Purpose::TilesetImage(d.id.clone()));
         }
     });
-    ui.weak(format!("Path relative to the project; files from elsewhere are copied into tilesets/. Tiles are {tile}px squares. After editing the path by hand, use ⟳ Reload assets."));
+    ui.weak(format!("Path relative to the project; files from elsewhere are copied into tilesets/. Tiles are {tile}px squares. After editing the path by hand, use \u{E036} Reload assets."));
     let (Some(t), Some(ts)) = (cx.tex.tilesets.get(&d.id), cx.assets.tilesets.get_mut(&d.id)) else {
         ui.colored_label(Color32::LIGHT_RED, "Not loaded — reload assets.");
         return;
@@ -1083,7 +1197,7 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
             }
             ui.label("fps");
             ui.add(egui::DragValue::new(&mut a.fps).range(0.1..=60.0).speed(0.1));
-            if ui.small_button("✖").clicked() {
+            if ui.small_button("\u{E4F6}").clicked() {
                 remove = Some(k);
             }
         });
@@ -1103,11 +1217,43 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
     });
     ui.ctx().request_repaint();
 
+    // ---- light tiles
+    ui.separator();
+    ui.heading("Light tiles");
+    ui.weak("Tiles that give light wherever they are placed (wall torches, lamps, glowing windows). Lights only show on maps that are dark (Map › Lighting).");
+    let mut remove = None;
+    for (k, tl) in d.lights.iter_mut().enumerate() {
+        ui.push_id(("tile_light", k), |ui| {
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
+                ui.painter().image(t.id(), rect, uv_of(tl.tile), Color32::WHITE);
+                ui.label(format!("tile {}", tl.tile));
+                if ui.small_button(ui::ph::TRASH).on_hover_text("No light for this tile").clicked() {
+                    remove = Some(k);
+                }
+            });
+            let mut l = Some(tl.light.clone());
+            widgets::light_ui(ui, "tile_light", &mut l, "gives light");
+            match l {
+                Some(l) => tl.light = l,
+                None => remove = Some(k),
+            }
+        });
+    }
+    if let Some(k) = remove {
+        d.lights.remove(k);
+    }
+    if ui.selectable_label(*cx.tile_light_pick, ui::t(ui::ph::LIGHTBULB, "Pick light tiles in the grid")).on_hover_text("While on, clicking a tile below adds or removes its light").clicked() {
+        *cx.tile_light_pick = !*cx.tile_light_pick;
+        *cx.anim_target = None;
+    }
+
     // ---- tile grid
     ui.separator();
-    match *cx.anim_target {
-        Some(k) => ui.label(format!("Click tiles to append frames to animation #{} (the first click also sets its base tile).", k + 1)),
-        None => ui.label("Click tiles to toggle solidity (red = blocks movement)."),
+    match (*cx.anim_target, *cx.tile_light_pick) {
+        (Some(k), _) => ui.label(format!("Click tiles to append frames to animation #{} (the first click also sets its base tile).", k + 1)),
+        (None, true) => ui.label("Click tiles to add or remove their light (yellow bulb = gives light)."),
+        (None, false) => ui.label("Click tiles to toggle solidity (red = blocks movement)."),
     };
     let scale = 3.0;
     let size = vec2(ts.image.width as f32 * scale, ts.image.height as f32 * scale);
@@ -1127,6 +1273,9 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
             if animated.contains(&i) {
                 p.rect_stroke(r, 0.0, Stroke::new(2.0_f32, Color32::LIGHT_BLUE), StrokeKind::Inside);
             }
+            if d.lights.iter().any(|l| l.tile == i) {
+                p.text(r.right_top() + vec2(-3.0, 2.0), egui::Align2::RIGHT_TOP, ui::ph::LIGHTBULB, egui::FontId::proportional(16.0), Color32::YELLOW);
+            }
             p.text(r.left_top() + vec2(2.0, 1.0), egui::Align2::LEFT_TOP, i.to_string(), egui::FontId::monospace(9.0), Color32::from_white_alpha(120));
         }
         if resp.clicked() {
@@ -1141,6 +1290,12 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
                             }
                             a.frames.push(i);
                         }
+                        None if *cx.tile_light_pick => match d.lights.iter().position(|l| l.tile == i) {
+                            Some(k) => {
+                                d.lights.remove(k);
+                            }
+                            None => d.lights.push(rust2d_engine::defs::TileLight { tile: i, light: rust2d_engine::defs::LightSpec::torch(4.0) }),
+                        },
                         None => {
                             if let Some(k) = d.solid.iter().position(|&s| s == i) {
                                 d.solid.remove(k);
@@ -1170,7 +1325,7 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
         ui.label("Image");
         ui.horizontal(|ui| {
             ui.text_edit_singleline(&mut d.image);
-            if ui.button("✏ Edit pixels").on_hover_text("Open the image in the pixel editor").clicked() {
+            if ui.button("\u{E3B4} Edit pixels").on_hover_text("Open the image in the pixel editor").clicked() {
                 let character = cx.db.characters.iter().any(|c| c.sheet == d.id);
                 *cx.paint = Some((d.image.clone(), (d.frame_w, d.frame_h), character, 0));
             }
@@ -1203,6 +1358,56 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
     ui.weak("Edit the image below: draw, add frames (Canvas … Resize), copy / mirror frames. Ctrl+S saves it and updates it everywhere.");
 }
 
+/// Structure form: id, name, category, a one-line summary and the structure editor. Returns true
+/// when "Place on map" was clicked.
+fn structure_form(ui: &mut egui::Ui, d: &mut StructureDef, cx: &mut Cx) -> bool {
+    let library = LIBRARY_MODE.with(|m| m.get());
+    let mut place = false;
+    ui.horizontal(|ui| {
+        ui.heading(if d.name.is_empty() { d.id.as_str() } else { d.name.as_str() });
+        ui.add_space(8.0);
+        rename_row(ui, RefKind::Structure, &d.id, cx.rename);
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Name");
+        ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(220.0));
+        ui.add_space(12.0);
+        ui.label("Category");
+        ui.add(egui::TextEdit::singleline(&mut d.category).desired_width(140.0).hint_text("e.g. Buildings"))
+            .on_hover_text("Groups structures in the map palette, e.g. Buildings, Walls & fences, Rooms, Outdoor");
+        let mut cats: Vec<String> = cx.db.structures.iter().map(|s| s.category.clone()).filter(|c| !c.is_empty()).collect();
+        cats.sort();
+        cats.dedup();
+        egui::ComboBox::from_id_salt("st_form_cat").selected_text("").width(24.0).show_ui(ui, |ui| {
+            for c in cats {
+                ui.selectable_value(&mut d.category, c.clone(), c);
+            }
+        });
+    });
+    ui.horizontal_wrapped(|ui| {
+        let missing: Vec<&String> = d.tilesets.iter().filter(|t| cx.db.tileset(t).is_none()).collect();
+        let tilesets = if d.tilesets.is_empty() { "no tiles yet".to_string() } else { format!("tilesets: {}", d.tilesets.join(", ")) };
+        let props = match d.entities.len() {
+            0 => String::new(),
+            1 => " · 1 prop".to_string(),
+            n => format!(" · {n} props"),
+        };
+        ui.weak(format!("{} × {} tiles · {tilesets}{props}", d.w, d.h));
+        if !missing.is_empty() {
+            ui.colored_label(Color32::YELLOW, format!("\u{E4E0} not in this project: {}", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
+        }
+        if !library {
+            place = ui.button("\u{E31A} Place on map").on_hover_text("Switches to the map with the Structures tool and this structure picked").clicked();
+        }
+    });
+    ui.separator();
+    crate::structures::structure_editor(ui, d, cx.st_edit, cx.db, cx.tex, cx.assets);
+    if !library {
+        ui.weak("You can also capture an area of a map: Structures tool (H), \u{E69C} New from map area…");
+    }
+    place
+}
+
 fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {
     ui.heading("Sound");
     rename_row(ui, RefKind::Sound, &d.id, cx.rename);
@@ -1219,10 +1424,10 @@ fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {
         ui.add(egui::Slider::new(&mut d.volume, 0.0..=1.0));
         ui.end_row();
     });
-    ui.weak("WAV or OGG, path relative to the project. Use ⟳ Reload assets after changing the file or volume.");
+    ui.weak("WAV or OGG, path relative to the project. Use \u{E036} Reload assets after changing the file or volume.");
     ui.horizontal(|ui| {
         if cx.audio.has(&d.id) {
-            if ui.button("▶ Play").clicked() {
+            if ui.button("\u{E3D0} Play").clicked() {
                 cx.audio.play(&d.id);
             }
         } else {
@@ -1259,6 +1464,13 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         ui.end_row();
         ui.label("Inventory slots");
         ui.add(egui::DragValue::new(&mut c.inventory_size).range(1..=200));
+        ui.end_row();
+        ui.label("Day length");
+        ui.add(egui::DragValue::new(&mut c.day_minutes).range(0.0..=1440.0).speed(0.5).suffix(" min"))
+            .on_hover_text("Real minutes one in-game day lasts on outdoor maps (0 = the clock stands still)");
+        ui.end_row();
+        ui.label("New games start at");
+        ui.add(egui::DragValue::new(&mut c.start_hour).range(0.0..=23.99).speed(0.25).suffix(" h"));
         ui.end_row();
         ui.label("Player character");
         let ids: Vec<String> = ed.project.db.characters.iter().map(|d| d.id.clone()).collect();
@@ -1320,7 +1532,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
                     if ui.add_enabled(k + 1 < n, egui::Button::new("v").small()).clicked() {
                         swap = Some(k);
                     }
-                    if ui.small_button("✖").clicked() {
+                    if ui.small_button("\u{E4F6}").clicked() {
                         remove = Some(k);
                     }
                 });
@@ -1339,7 +1551,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     if let Some(k) = remove {
         cc.looks.remove(k);
     }
-    if ui.button("👤 + Add a look…").on_hover_text("From this project or the asset library").clicked() {
+    if ui.button("\u{E4C2} + Add a look…").on_hover_text("From this project or the asset library").clicked() {
         crate::models::request_model(crate::models::ModelTarget::Look(n));
     }
     let needed: Vec<rust2d_engine::state::Sex> = match cc.sex.fixed() {
@@ -1443,7 +1655,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
             for f in &files {
                 let name = f.file_name().unwrap().to_string_lossy().to_string();
                 let current = st.script_file.as_ref() == Some(f);
-                let row = ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| ui.selectable_label(current, format!("📄 {name}")));
+                let row = ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| ui.selectable_label(current, format!("\u{E23A} {name}")));
                 if row.inner.clicked() {
                     open = Some((f.clone(), None));
                 }
@@ -1466,7 +1678,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
             }
             ui.separator();
             if issues.is_empty() {
-                ui.weak("✔ No unknown ids in script calls");
+                ui.weak("\u{E182} No unknown ids in script calls");
             } else {
                 ui.colored_label(Color32::YELLOW, format!("Problems ({})", issues.len()))
                     .on_hover_text("Ids passed to script functions (give_item, teleport, start_quest, play_sound, set_state, ...) that don't exist in this project");
@@ -1543,7 +1755,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
             if st.script_dirty {
                 ui.colored_label(Color32::YELLOW, "• edited");
             }
-            save = ui.button("💾 Save & check").on_hover_text("Ctrl+S").clicked();
+            save = ui.button("\u{E248} Save & check").on_hover_text("Ctrl+S").clicked();
         });
         if let Some(ci) = st.script_jump.take() {
             st.script_ed.set_cursor = Some(ci);
@@ -1614,7 +1826,7 @@ fn art_of(db: &Database, sprite: &SpriteRef, character: bool) -> Option<(String,
 fn art_buttons(ui: &mut egui::Ui, cx: &mut Cx, what: &str, cells: (u32, u32)) {
     ui.horizontal(|ui| {
         let mut on = *cx.art_open;
-        if ui.toggle_value(&mut on, "🎨 Edit art").on_hover_text("Show the pixel editor under this form, at this sprite").changed() {
+        if ui.toggle_value(&mut on, "\u{E6C8} Edit art").on_hover_text("Show the pixel editor under this form, at this sprite").changed() {
             *cx.art_open = on;
         }
         if ui.button(format!("+ New blank {what}")).on_hover_text("Uses an empty frame of the sheet (or adds a row of frames) and opens it for drawing").clicked() {

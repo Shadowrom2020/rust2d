@@ -15,6 +15,8 @@ pub struct Equipment {
     pub head: Option<ItemStack>,
     pub body: Option<ItemStack>,
     pub weapon: Option<ItemStack>,
+    /// Left hand: shield or light.
+    pub offhand: Option<ItemStack>,
 }
 
 impl Equipment {
@@ -23,6 +25,7 @@ impl Equipment {
             EquipSlot::Head => self.head.as_ref(),
             EquipSlot::Body => self.body.as_ref(),
             EquipSlot::Weapon => self.weapon.as_ref(),
+            EquipSlot::Offhand => self.offhand.as_ref(),
         }
     }
     pub fn slot_mut(&mut self, slot: EquipSlot) -> &mut Option<ItemStack> {
@@ -30,6 +33,7 @@ impl Equipment {
             EquipSlot::Head => &mut self.head,
             EquipSlot::Body => &mut self.body,
             EquipSlot::Weapon => &mut self.weapon,
+            EquipSlot::Offhand => &mut self.offhand,
         }
     }
     pub fn item(&self, slot: EquipSlot) -> Option<&str> {
@@ -107,6 +111,9 @@ pub struct WorldState {
     /// Total play time in seconds.
     #[serde(default)]
     pub play_time: f64,
+    /// Time of day in hours (0..24), advanced while playing.
+    #[serde(default = "crate::project::default_start_hour")]
+    pub hour: f32,
     /// map -> spawner zone uid -> characters defeated for good (`Respawn::Never`).
     #[serde(default)]
     pub spawner_kills: BTreeMap<String, BTreeMap<u32, u32>>,

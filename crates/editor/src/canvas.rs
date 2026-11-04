@@ -57,6 +57,8 @@ pub enum Drag {
     NewZone { start: (i32, i32) },
     /// Transition tool: exit / arrival area.
     LinkRect { start: (i32, i32) },
+    /// Structures tool: the area of a new structure ("New from map area").
+    Capture { start: (i32, i32) },
 }
 
 fn modifier_ctrl() -> bool {
@@ -326,6 +328,7 @@ impl Editor {
             (KeyCode::N, Tool::Entity),
             (KeyCode::Z, Tool::Zone),
             (KeyCode::T, Tool::Link),
+            (KeyCode::H, Tool::Structure),
         ];
         for (k, t) in tools {
             if is_key_pressed(k) {
@@ -363,6 +366,9 @@ impl Editor {
             self.sel = Selection::None;
             if self.tool == Tool::Entity && !self.place_def.is_empty() {
                 self.disarm();
+            } else if self.tool == Tool::Structure && (!self.place_structure.is_empty() || self.capture.dragging) {
+                self.place_structure.clear();
+                self.capture.dragging = false;
             } else {
                 self.tool = Tool::Select;
             }
@@ -433,6 +439,10 @@ impl Editor {
                 self.sel = Selection::None;
             }
             Tool::Zone | Tool::Select => self.sel = Selection::None,
+            Tool::Structure => {
+                self.place_structure.clear();
+                self.capture.dragging = false;
+            }
             _ => {}
         }
     }
@@ -525,6 +535,14 @@ impl Editor {
                 }
             }
             Tool::Link => self.drag = Some(Drag::LinkRect { start: tile }),
+            Tool::Structure if self.capture.dragging => self.drag = Some(Drag::Capture { start: tile }),
+            Tool::Structure if !self.place_structure.is_empty() => {
+                let origin = self.project.db.structure(&self.place_structure).map(|d| self.structure_origin(d, tile));
+                if let Some(o) = origin {
+                    self.place_structure_at(o);
+                }
+            }
+            Tool::Structure => self.sel = Selection::None,
             Tool::Zone => {
                 if let Some(uid) = self.zone_at(world) {
                     self.sel = Selection::Zone(uid);
@@ -622,6 +640,16 @@ impl Editor {
                     }
                 }
             }
+            Some(Drag::Capture { start }) => {
+                let Some(doc) = &self.doc else { return };
+                let (mw, mh) = (doc.map.width as i32, doc.map.height as i32);
+                let (x0, y0, w, h) = rect_of(start, tile);
+                let (x1, y1) = ((x0 + w).min(mw), (y0 + h).min(mh));
+                let (x0, y0) = (x0.max(0), y0.max(0));
+                if x1 > x0 && y1 > y0 {
+                    self.capture_dragged((x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32));
+                }
+            }
             Some(Drag::LinkRect { start }) => {
                 let Some(doc) = &self.doc else { return };
                 let (mw, mh) = (doc.map.width as i32, doc.map.height as i32);
@@ -690,6 +718,12 @@ impl Editor {
 
     fn draw_map(&mut self, doc: &mut crate::doc::MapDoc, cam: &Camera2D, view: Rect, px: f32) {
         let ts = self.ts();
+        // Lighting preview: darkness and lights (drawn over the map, under the overlays).
+        let lighting = if self.view.lighting {
+            render::lighting::ambient(doc.map.lighting, self.view.hour).map(|a| (a, self.preview_lights(&doc.map)))
+        } else {
+            None
+        };
         let map = &doc.map;
         let (mw, mh) = (map.width as f32 * ts, map.height as f32 * ts);
         let bg = map.background;
@@ -749,6 +783,11 @@ impl Editor {
                 }
                 render::draw_layer(map, l, &sets, ts, view, t);
             }
+        }
+
+        if let Some((ambient, lights)) = lighting {
+            self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(cam, ambient, &lights, ts, get_time());
+            set_camera(cam);
         }
 
         // Visible tile range.
@@ -855,6 +894,12 @@ impl Editor {
                     let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
                     draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, SKYBLUE);
                 }
+                (Some(Drag::Capture { start }), _) => {
+                    let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
+                    draw_rectangle(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, Color::new(0.3, 1.0, 0.5, 0.2));
+                    draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, GREEN);
+                }
+                (None, Tool::Structure) if !self.place_structure.is_empty() => self.draw_structure_ghost((tx, ty)),
                 (Some(Drag::LinkRect { start }), _) => {
                     let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
                     draw_rectangle(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, Color::new(1.0, 0.6, 0.1, 0.25));
@@ -1055,5 +1100,36 @@ impl Editor {
             return true;
         }
         false
+    }
+}
+
+impl Editor {
+    /// Lights of the map for the lighting preview: tiles (cached, refreshed twice a second) and
+    /// placed props, characters and items.
+    fn preview_lights(&mut self, map: &rust2d_engine::map::Map) -> Vec<render::lighting::Light> {
+        use render::lighting::Light;
+        let ts = self.ts();
+        let now = get_time();
+        if now - self.light_cache.0 > 0.5 || self.light_cache.1 != map.name {
+            self.light_cache = (now, map.name.clone(), render::lighting::tile_lights(map, &self.project.db, ts));
+        }
+        let mut out = self.light_cache.2.clone();
+        let db = &self.project.db;
+        for e in map.entities.iter().filter(|e| e.active) {
+            let (spec, lift) = match e.kind {
+                EntityKind::Prop => {
+                    let Some(d) = db.prop(&e.def) else { continue };
+                    let i = d.state_index(&e.state).unwrap_or(0);
+                    let lift = self.assets.sprite_size(d.state_look(i).0, ts).y * 0.65;
+                    (e.light.clone().or_else(|| d.state_light(i).cloned()), lift)
+                }
+                EntityKind::Character => (e.light.clone().or_else(|| db.character(&e.def).and_then(|d| d.light.clone())), ts * 0.6),
+                EntityKind::Item => (e.light.clone().or_else(|| db.item(&e.def).and_then(|d| d.light.clone())), ts * 0.35),
+            };
+            if let Some(l) = spec {
+                out.push(Light::new(vec2(e.x, e.y - lift), &l));
+            }
+        }
+        out
     }
 }

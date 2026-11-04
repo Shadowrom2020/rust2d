@@ -31,6 +31,19 @@ pub struct ProjectConfig {
     /// Character creator shown when a new game starts.
     #[serde(default)]
     pub creation: CharacterCreation,
+    /// Real minutes one in-game day lasts (day / night on outdoor maps).
+    #[serde(default = "default_day_minutes")]
+    pub day_minutes: f32,
+    /// Time of day a new game starts at (hours, 0..24).
+    #[serde(default = "default_start_hour")]
+    pub start_hour: f32,
+}
+
+fn default_day_minutes() -> f32 {
+    24.0
+}
+pub fn default_start_hour() -> f32 {
+    8.0
 }
 
 /// The character creator: the player chooses a name, sex and look before a new game.
@@ -107,6 +120,8 @@ impl ProjectConfig {
             sfx: GameSfx::default(),
             inventory_size: default_inventory_size(),
             creation: CharacterCreation::default(),
+            day_minutes: default_day_minutes(),
+            start_hour: default_start_hour(),
         }
     }
 }
@@ -163,7 +178,7 @@ pub struct Project {
     pub db: Database,
 }
 
-const DEFS: [&str; 7] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests"];
+const DEFS: [&str; 8] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "structures"];
 
 fn read_ron<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
     if !path.exists() {
@@ -199,6 +214,7 @@ impl Project {
             characters: read_ron(&d(DEFS[4]))?,
             sounds: read_ron(&d(DEFS[5]))?,
             quests: read_ron(&d(DEFS[6]))?,
+            structures: read_ron(&d(DEFS[7]))?,
         };
         let mut db = db;
         db.upgrade_prop_states();
@@ -217,7 +233,12 @@ impl Project {
         write_ron(&d(DEFS[3]), &self.db.props)?;
         write_ron(&d(DEFS[4]), &self.db.characters)?;
         write_ron(&d(DEFS[5]), &self.db.sounds)?;
-        write_ron(&d(DEFS[6]), &self.db.quests)
+        write_ron(&d(DEFS[6]), &self.db.quests)?;
+        // Only projects that have structures get the file (older editors ignore it anyway).
+        if !self.db.structures.is_empty() || d(DEFS[7]).exists() {
+            write_ron(&d(DEFS[7]), &self.db.structures)?;
+        }
+        Ok(())
     }
 
     pub fn path(&self, rel: &str) -> PathBuf {

@@ -18,6 +18,64 @@ pub struct TilesetDef {
     /// Animated tiles: wherever `tile` is placed, it cycles through `frames`.
     #[serde(default)]
     pub animations: Vec<TileAnim>,
+    /// Tiles that give light wherever they are placed (wall torches, lamps).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lights: Vec<TileLight>,
+}
+
+/// A light source: a soft circle of light around a tile, prop, character or carried item.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LightSpec {
+    /// Radius in tiles.
+    #[serde(default = "default_light_radius")]
+    pub radius: f32,
+    #[serde(default = "default_light_color")]
+    pub color: [u8; 3],
+    /// 0..1: how strongly it lights its circle.
+    #[serde(default = "default_intensity")]
+    pub intensity: f32,
+    /// Flickers like a flame (torches, campfires).
+    #[serde(default)]
+    pub flicker: bool,
+}
+
+fn default_light_radius() -> f32 {
+    4.0
+}
+fn default_light_color() -> [u8; 3] {
+    [255, 214, 160]
+}
+fn default_intensity() -> f32 {
+    1.0
+}
+
+impl Default for LightSpec {
+    fn default() -> Self {
+        LightSpec { radius: default_light_radius(), color: default_light_color(), intensity: default_intensity(), flicker: false }
+    }
+}
+
+impl LightSpec {
+    pub fn new(radius: f32, color: [u8; 3], flicker: bool) -> Self {
+        LightSpec { radius, color, intensity: 1.0, flicker }
+    }
+    /// A flickering warm torch light.
+    pub fn torch(radius: f32) -> Self {
+        LightSpec::new(radius, [255, 190, 120], true)
+    }
+}
+
+/// A tile of a tileset that gives light.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TileLight {
+    pub tile: u32,
+    pub light: LightSpec,
+}
+
+impl TilesetDef {
+    pub fn light_of(&self, tile: u32) -> Option<&LightSpec> {
+        self.lights.iter().find(|l| l.tile == tile).map(|l| &l.light)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -126,6 +184,9 @@ pub struct Weapon {
     /// Knockback multiplier for hit targets.
     #[serde(default = "default_knockback")]
     pub knockback: f32,
+    /// Needs both hands: nothing can be held in the left hand at the same time.
+    #[serde(default)]
+    pub two_handed: bool,
 }
 
 fn default_reach() -> f32 {
@@ -141,7 +202,7 @@ fn default_knockback() -> f32 {
 impl Weapon {
     /// A melee weapon with default reach / arc / knockback.
     pub fn melee(damage: i32, cooldown: f32) -> Self {
-        Weapon { damage, cooldown, ranged: None, reach: default_reach(), arc: default_arc(), knockback: default_knockback() }
+        Weapon { damage, cooldown, ranged: None, reach: default_reach(), arc: default_arc(), knockback: default_knockback(), two_handed: false }
     }
     pub fn ranged(damage: i32, cooldown: f32, ranged: Ranged) -> Self {
         Weapon { ranged: Some(ranged), ..Weapon::melee(damage, cooldown) }
@@ -154,23 +215,26 @@ pub enum EquipSlot {
     Head,
     Body,
     Weapon,
+    /// Left hand: a shield or a light (not while holding a two-handed weapon).
+    Offhand,
 }
 
 impl EquipSlot {
-    pub const ALL: [EquipSlot; 3] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon];
+    pub const ALL: [EquipSlot; 4] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
     pub fn label(self) -> &'static str {
         match self {
             EquipSlot::Head => "Head",
             EquipSlot::Body => "Body",
             EquipSlot::Weapon => "Weapon",
+            EquipSlot::Offhand => "Left hand",
         }
     }
 }
 
-/// Helmets and body armor.
+/// Helmets, body armor and left-hand items (shields, lanterns, torches).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Armor {
-    /// `Head` or `Body`.
+    /// `Head`, `Body` or `Offhand`.
     pub slot: EquipSlot,
     /// Subtracted from incoming damage (at least 1 damage always gets through).
     #[serde(default)]
@@ -233,6 +297,9 @@ pub struct ItemDef {
     /// Base trade value (merchants without their own price use it; 0 = worthless).
     #[serde(default)]
     pub value: u32,
+    /// Gives light while equipped (e.g. a lantern in the left hand) or lying on the ground.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<LightSpec>,
 }
 
 fn default_max_stack() -> u32 {
@@ -360,6 +427,9 @@ pub struct PropDef {
     /// Default lock for every placed instance (instances can override it).
     #[serde(default)]
     pub lock: Option<LockSpec>,
+    /// Light of the default state (e.g. a lit lamp).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<LightSpec>,
 }
 
 /// A named look of a prop: its sprite and whether it blocks movement.
@@ -369,6 +439,9 @@ pub struct PropState {
     pub sprite: SpriteRef,
     #[serde(default)]
     pub solid: bool,
+    /// Light in this state (e.g. "lit"; none for "off").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<LightSpec>,
 }
 
 pub fn default_state_name() -> String {
@@ -376,6 +449,15 @@ pub fn default_state_name() -> String {
 }
 
 impl PropDef {
+    /// Light of state `i` (0 = default state).
+    pub fn state_light(&self, i: usize) -> Option<&LightSpec> {
+        if i == 0 {
+            self.light.as_ref()
+        } else {
+            self.states.get(i - 1).and_then(|s| s.light.as_ref())
+        }
+    }
+
     /// All state names, the default state first.
     pub fn state_names(&self) -> Vec<String> {
         std::iter::once(self.default_state.clone()).chain(self.states.iter().map(|s| s.name.clone())).collect()
@@ -413,7 +495,7 @@ impl PropDef {
             n = format!("{name}_{k}");
             k += 1;
         }
-        self.states.push(PropState { name: n.clone(), sprite, solid });
+        self.states.push(PropState { name: n.clone(), sprite, solid, light: None });
         n
     }
     /// Converts the legacy frame offsets of the lock / container to named states.
@@ -499,6 +581,9 @@ pub struct CharacterDef {
     /// override it).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loot: Vec<LootEntry>,
+    /// A light the character carries (placed instances can override it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<LightSpec>,
 }
 
 /// One line of a loot table: `item` drops with `chance` percent, `min..=max` of them.
@@ -642,6 +727,37 @@ pub struct Database {
     pub characters: Vec<CharacterDef>,
     pub sounds: Vec<SoundDef>,
     pub quests: Vec<crate::quest::QuestDef>,
+    /// Multi-tile assets for the editor (houses, walls, rooms…); the game doesn't use them.
+    pub structures: Vec<StructureDef>,
+}
+
+/// A multi-tile asset ("structure"): tiles on several map layers, collision overrides and
+/// entities that the editor places on a map in one click (a house, a wall segment, a room…).
+/// Placing it writes ordinary tiles and entities, so the game never needs it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StructureDef {
+    pub id: String,
+    pub name: String,
+    /// Group in the editor's palette ("Buildings", "Walls", "Rooms", "Nature", …).
+    #[serde(default)]
+    pub category: String,
+    /// Size in tiles.
+    pub w: u32,
+    pub h: u32,
+    /// Tilesets the tiles come from; a tile's slot indexes into this list.
+    #[serde(default)]
+    pub tilesets: Vec<String>,
+    /// Tiles per map layer (0 = ground, 1 = detail, 2 = overhead, …), row by row (`w × h`),
+    /// encoded like map tiles: 0 = keep the map's tile, `StructureDef::CLEAR` = empty it.
+    #[serde(default)]
+    pub layers: Vec<Vec<u32>>,
+    /// Collision override per tile (`CollisionOverride` as a byte; 0 = keep the map's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collision: Vec<u8>,
+    /// Entities placed with it (doors, chests, signs…); positions are relative to the
+    /// structure's top-left corner (uids are assigned when placing).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<crate::entity::EntityInstance>,
 }
 
 impl Database {
@@ -665,6 +781,9 @@ impl Database {
     }
     pub fn sound(&self, id: &str) -> Option<&SoundDef> {
         self.sounds.iter().find(|d| d.id == id)
+    }
+    pub fn structure(&self, id: &str) -> Option<&StructureDef> {
+        self.structures.iter().find(|d| d.id == id)
     }
 
     /// Ids of all definitions of a kind (for editor dropdowns).
@@ -787,6 +906,7 @@ mod tests {
                 armor: None,
                 max_stack: 99,
                 value,
+        light: None,
             });
         }
         let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };

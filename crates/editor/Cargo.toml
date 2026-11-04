@@ -8,6 +8,7 @@ license.workspace = true
 rust2d-engine.workspace = true
 macroquad.workspace = true
 egui-macroquad.workspace = true
+egui-phosphor = "0.9"
 anyhow.workspace = true
 ron.workspace = true
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }

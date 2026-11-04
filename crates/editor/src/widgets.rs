@@ -143,7 +143,7 @@ pub fn lock_ui(ui: &mut Ui, id: &str, lock: &mut LockSpec, refs: &Refs, tex: &Te
                 }
             });
             if names.len() < 2 {
-                ui.colored_label(Color32::YELLOW, "The prop has only one state: add an 'open' state in Database → Props.");
+                ui.colored_label(Color32::YELLOW, "The prop has only one state: add an 'open' state in Database \u{E13A} Props.");
             }
         });
         if let Some(p) = prop {
@@ -264,7 +264,7 @@ pub fn container_ui(ui: &mut Ui, id: &str, spec: &mut ContainerSpec, refs: &Refs
             if !s.item.is_empty() && db.item(&s.item).is_none() {
                 ui.colored_label(Color32::LIGHT_RED, "unknown item");
             }
-            if ui.small_button("✖").clicked() {
+            if ui.small_button("\u{E4F6}").clicked() {
                 remove = Some(k);
             }
         });
@@ -324,7 +324,7 @@ pub fn loot_ui(ui: &mut Ui, id: &str, table: &mut Vec<LootEntry>, refs: &Refs, t
                 if e.max < e.min {
                     e.max = e.min;
                 }
-                if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                if ui.small_button("\u{E4F6}").on_hover_text("Remove").clicked() {
                     remove = Some(k);
                 }
                 ui.end_row();
@@ -418,7 +418,7 @@ pub fn shop_ui(ui: &mut Ui, id: &str, spec: &mut ShopSpec, refs: &Refs, tex: &Te
                     swap = Some(k);
                 }
             });
-            if ui.small_button("✖").on_hover_text("Remove").clicked() {
+            if ui.small_button("\u{E4F6}").on_hover_text("Remove").clicked() {
                 remove = Some(k);
             }
             ui.end_row();
@@ -572,7 +572,7 @@ pub fn suggest(ui: &mut Ui, id: &str, value: &mut String, options: &[String], wi
         ui.add(egui::TextEdit::singleline(value).desired_width(width));
         if !options.is_empty() {
             ui.push_id(id, |ui| {
-                ui.menu_button("⏷", |ui| {
+                ui.menu_button("\u{E136}", |ui| {
                     egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                         for o in options {
                             if ui.selectable_label(o == value, o).clicked() {
@@ -594,7 +594,7 @@ pub fn suggest_described(ui: &mut Ui, id: &str, value: &mut String, options: &[(
         ui.add(egui::TextEdit::singleline(value).desired_width(width));
         if !options.is_empty() {
             ui.push_id(id, |ui| {
-                ui.menu_button("⏷", |ui| {
+                ui.menu_button("\u{E136}", |ui| {
                     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                         for (o, hint) in options {
                             let text = egui::RichText::new(o.as_str());
@@ -642,7 +642,7 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
         let useless = !owner.allows(&t.on);
         let title = format!(
             "{}On {}{}  ·  {} cond, {} act{}",
-            if useless { "⚠ " } else { "" },
+            if useless { "\u{E4E0} " } else { "" },
             t.on.label(),
             match &t.on {
                 TriggerOn::UseItem { item } if !item.is_empty() => format!(" [{item}]"),
@@ -677,13 +677,13 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
                 }
                 ui.checkbox(&mut t.once, "once");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("✖").on_hover_text("Delete trigger").clicked() {
+                    if ui.small_button("\u{E4F6}").on_hover_text("Delete trigger").clicked() {
                         remove = Some(i);
                     }
-                    if i + 1 < n && ui.small_button("⏷").clicked() {
+                    if i + 1 < n && ui.small_button("\u{E136}").clicked() {
                         swap = Some((i, i + 1));
                     }
-                    if i > 0 && ui.small_button("⏶").clicked() {
+                    if i > 0 && ui.small_button("\u{E13C}").clicked() {
                         swap = Some((i - 1, i));
                     }
                 });
@@ -766,6 +766,13 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                         quest_stage_field(ui, &format!("{id}/qs"), quest, stage, refs);
                     }
                 }
+                Cond::TimeBetween { from, to } => {
+                    ui.label("time from");
+                    ui.add(egui::DragValue::new(from).range(0.0..=24.0).speed(0.25).suffix(" h"));
+                    ui.label("to");
+                    ui.add(egui::DragValue::new(to).range(0.0..=24.0).speed(0.25).suffix(" h"))
+                        .on_hover_text("Hours 0–24; e.g. 20 to 6 = at night (wraps around midnight)");
+                }
                 Cond::PlayerSex { sex } => {
                     ui.label("player is");
                     egui::ComboBox::from_id_salt(format!("{id}/sex")).selected_text(sex.label()).show_ui(ui, |ui| {
@@ -790,7 +797,7 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                     ui.add(egui::DragValue::new(value));
                 }
             }
-            if ui.small_button("✖").clicked() {
+            if ui.small_button("\u{E4F6}").clicked() {
                 remove = Some(i);
             }
         });
@@ -821,13 +828,13 @@ pub fn actions_ui(ui: &mut Ui, salt: &str, actions: &mut Vec<Action>, refs: &Ref
                 ui.strong(format!("{}.", i + 1));
                 ui.strong(a.label());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("✖").clicked() {
+                    if ui.small_button("\u{E4F6}").clicked() {
                         remove = Some(i);
                     }
-                    if i + 1 < n && ui.small_button("⏷").clicked() {
+                    if i + 1 < n && ui.small_button("\u{E136}").clicked() {
                         swap = Some((i, i + 1));
                     }
-                    if i > 0 && ui.small_button("⏶").clicked() {
+                    if i > 0 && ui.small_button("\u{E13C}").clicked() {
                         swap = Some((i - 1, i));
                     }
                 });
@@ -915,6 +922,11 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             target_field(ui, id, target, refs);
             labeled(ui, "state", |ui| suggest(ui, &format!("{id}/state"), state, &refs.states, 100.0));
         }
+        Action::SetTime { hour } => {
+            labeled(ui, "time", |ui| {
+                ui.add(egui::DragValue::new(hour).range(0.0..=24.0).speed(0.25).suffix(" h")).on_hover_text("Hours 0–24, e.g. 22 = 10 pm");
+            });
+        }
         Action::Quest { quest, op, stage } => {
             labeled(ui, "quest", |ui| suggest(ui, &format!("{id}/q"), quest, &refs.quests, 120.0));
             ui.horizontal(|ui| {
@@ -928,7 +940,7 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 }
             });
             if !quest.is_empty() && !refs.quests.contains(quest) {
-                ui.colored_label(Color32::LIGHT_RED, "unknown quest (Database → Quests)");
+                ui.colored_label(Color32::LIGHT_RED, "unknown quest (Database \u{E13A} Quests)");
             }
         }
         Action::Patrol { target, active, points } => {
@@ -939,11 +951,11 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             if *active {
                 if points.is_empty() {
-                    ui.weak("walks the character's own route (map inspector → Patrol route)");
+                    ui.weak("walks the character's own route (map inspector \u{E13A} Patrol route)");
                 } else {
                     let list: Vec<String> = points.iter().map(|(x, y)| format!("{x},{y}")).collect();
                     ui.horizontal(|ui| {
-                        ui.weak(format!("route: {}", list.join(" → ")));
+                        ui.weak(format!("route: {}", list.join(" \u{E13A} ")));
                         if ui.small_button("use own route").clicked() {
                             points.clear();
                         }
@@ -1095,7 +1107,7 @@ pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Texture
                 let size = if (w, h) == (1, 1) { String::new() } else { format!(" · {w}×{h} cells") };
                 ui.label(format!("{} · frame {}{size}", sprite.sheet, sprite.frame));
             }
-            let open_it = ui.button("🖼 Choose…").on_hover_text("Pick a frame visually from any sprite sheet").clicked() || resp.double_clicked() || requested;
+            let open_it = ui.button("\u{E2CA} Choose…").on_hover_text("Pick a frame visually from any sprite sheet").clicked() || resp.double_clicked() || requested;
             if open_it {
                 st.open = true;
                 st.pick = sprite.clone();
@@ -1124,7 +1136,7 @@ pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Texture
                     paint_sprite(ui, tex, assets, &st.pick, r.shrink(3.0));
                     ui.label(format!("{} · frame {}", st.pick.sheet, st.pick.frame));
                 }
-                if ui.add_enabled(!st.pick.sheet.is_empty(), egui::Button::new("✔ Use this")).clicked() {
+                if ui.add_enabled(!st.pick.sheet.is_empty(), egui::Button::new("\u{E182} Use this")).clicked() {
                     done = Some(true);
                 }
                 if ui.button("Cancel").clicked() {
@@ -1136,7 +1148,7 @@ pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Texture
                 // Sheets.
                 ui.vertical(|ui| {
                     ui.set_width(200.0);
-                    ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text("🔍 search sheets").desired_width(190.0));
+                    ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text("\u{E30C} search sheets").desired_width(190.0));
                     egui::ScrollArea::vertical().id_salt(key.with("sheets")).max_height(440.0).show(ui, |ui| {
                         let mut ids: Vec<&String> = assets.sheets.keys().collect();
                         ids.sort();
@@ -1298,4 +1310,46 @@ pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Texture
     }
     ui.ctx().data_mut(|d| d.insert_temp(key, st));
     changed
+}
+
+/// Edits an optional light: on / off, radius (tiles), color, strength, flicker and presets.
+/// Returns true if it changed.
+pub fn light_ui(ui: &mut Ui, id: &str, l: &mut Option<rust2d_engine::defs::LightSpec>, label: &str) -> bool {
+    use rust2d_engine::defs::LightSpec;
+    let before = l.clone();
+    let mut on = l.is_some();
+    if ui.checkbox(&mut on, label).changed() {
+        *l = on.then(LightSpec::default);
+    }
+    if let Some(spec) = l {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("radius");
+            ui.add(egui::DragValue::new(&mut spec.radius).range(0.5..=24.0).speed(0.1).suffix(" tiles"));
+            ui.label("color");
+            egui::color_picker::color_edit_button_srgb(ui, &mut spec.color);
+            ui.label("strength");
+            let mut pct = (spec.intensity * 100.0).round();
+            if ui.add(egui::DragValue::new(&mut pct).range(0.0..=100.0).suffix(" %")).changed() {
+                spec.intensity = pct / 100.0;
+            }
+            ui.checkbox(&mut spec.flicker, "flickers").on_hover_text("Like a flame (torches, campfires)");
+        });
+        ui.horizontal(|ui| {
+            ui.weak("presets:");
+            let presets = [
+                ("Torch", LightSpec::torch(4.0)),
+                ("Lantern", LightSpec::new(5.5, [255, 220, 170], false)),
+                ("Campfire", LightSpec::torch(6.0)),
+                ("Window", LightSpec { intensity: 0.7, ..LightSpec::new(1.8, [255, 205, 130], false) }),
+                ("Magic", LightSpec { intensity: 0.85, ..LightSpec::new(4.0, [150, 200, 255], false) }),
+            ];
+            for (name, p) in presets {
+                if ui.small_button(name).clicked() {
+                    *spec = p;
+                }
+            }
+        });
+        let _ = id;
+    }
+    *l != before
 }

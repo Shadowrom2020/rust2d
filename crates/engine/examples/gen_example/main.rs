@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use rust2d_engine::defs::*;
 use rust2d_engine::entity::{EntityInstance, EntityKind};
 use rust2d_engine::events::*;
-use rust2d_engine::map::{EdgeLink, Map, Respawn, Tile, Zone, ZoneKind};
+use rust2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
 use rust2d_engine::audio::wav_bytes;
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
@@ -15,6 +15,7 @@ use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
 use rust2d_engine::state::Sex;
 
 mod art;
+mod structures;
 use art::*;
 
 // ------------------------------------------------------------------ sounds
@@ -208,6 +209,12 @@ impl B {
     }
 }
 
+/// An item that gives light (equipped or lying on the ground).
+fn light(mut d: ItemDef, l: LightSpec) -> ItemDef {
+    d.light = Some(l);
+    d
+}
+
 fn quest(id: &str, op: QuestOp, stage: u32) -> Action {
     Action::Quest { quest: id.into(), op, stage }
 }
@@ -395,6 +402,8 @@ fn village() -> Map {
     // A town guard patrolling the main road (back and forth, pausing at each point).
     let guard = b.entity(EntityKind::Character, "guard", 8, 18);
     guard.name = "guard".into();
+    // The guard carries a lantern: at night it lights the road as he walks.
+    guard.light = Some(LightSpec::new(4.5, [255, 220, 170], false));
     guard.patrol = Some(rust2d_engine::entity::PatrolRoute {
         points: vec![(8, 18), (20, 18), (30, 18), (38, 18)],
         mode: rust2d_engine::entity::PatrolMode::PingPong,
@@ -415,6 +424,7 @@ fn village() -> Map {
     }];
     b.m.background = [20, 40, 20];
     b.m.music = "music_village".into();
+    b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.7 };
     b.m
 }
 
@@ -455,6 +465,9 @@ fn shop() -> Map {
             ShopEntry::new("spear", 1, 0),
             ShopEntry::new("iron_helmet", 1, 0),
             ShopEntry::new("chainmail", 1, 0),
+            ShopEntry::new("lantern", 1, 0),
+            ShopEntry { unlimited: true, ..ShopEntry::new("torch", 0, 0) },
+            ShopEntry::new("wooden_shield", 1, 0),
         ],
         sell_rate: 50,
         open_on_talk: true,
@@ -672,6 +685,22 @@ fn forest() -> Map {
     b.m.edges.west = Some(EdgeLink { target_map: "village".into(), offset: -6, depth: 1 });
     b.m.background = [10, 25, 10];
     b.m.music = "music_forest".into();
+    b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.8 };
+    // The old mine: a second cave mouth in the cliff, west of the one to the wilds.
+    for yy in 7..=9 {
+        for xx in 52..=56 {
+            b.m.layers[1].set(xx as u32, yy as u32, Tile::EMPTY);
+            b.m.layers[2].set(xx as u32, (yy - 1) as u32, Tile::EMPTY);
+        }
+    }
+    b.set(1, 53, 6, t::CAVE);
+    b.m.set_collision(53, 6, rust2d_engine::map::CollisionOverride::Walkable);
+    b.fill(0, 53, 7, 4, 1, t::PATH);
+    b.portal(53, 6, "mine", "entrance");
+    b.spawn("mine", 53, 7);
+    // A torch lies at the mine entrance (it glows on the ground at night).
+    let torch = b.entity(EntityKind::Item, "torch", 54, 8);
+    torch.count = 2;
     b.m
 }
 
@@ -793,6 +822,7 @@ fn wilds() -> Map {
     });
     b.m.background = [30, 60, 120];
     b.m.music = "music_forest".into();
+    b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.75 };
     b.m
 }
 
@@ -811,8 +841,9 @@ fn database() -> Database {
         lock: None,
         default_state: default_state_name(),
         states: vec![],
+        light: None,
     };
-    let state = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid };
+    let state = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid, light: None };
     let ch = |id: &str, name: &str, sheet: &str, speed: f32, behavior: Behavior| CharacterDef {
         id: id.into(),
         name: name.into(),
@@ -829,6 +860,7 @@ fn database() -> Database {
         triggers: vec![],
         shop: None,
         loot: vec![],
+        light: None,
     };
     let item = |id: &str, name: &str, desc: &str, frame: u32, consumable: bool, on_use: Vec<Trigger>| ItemDef {
         id: id.into(),
@@ -841,6 +873,7 @@ fn database() -> Database {
         armor: None,
         max_stack: 99,
         value: 0,
+        light: None,
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -873,12 +906,16 @@ fn database() -> Database {
     hero.max_hp = 12; // 6 hearts
     hero.damage = 1;
     let mut db = Database {
+        structures: structures::example_structures(),
         tilesets: vec![TilesetDef {
             id: "terrain".into(),
             image: "tilesets/terrain.png".into(),
             solid: SOLID.to_vec(),
             animations: vec![TileAnim { tile: t::WATER, frames: vec![t::WATER, t::WATER_2, t::WATER_3, t::WATER_2], fps: 3.0 }],
-        }],
+            // Lit windows glow a little at night.
+            lights: vec![TileLight { tile: t::WINDOW, light: LightSpec { intensity: 0.7, ..LightSpec::new(1.8, [255, 205, 130], false) } }],
+        },
+        art::extra::dungeon_tileset().0],
         quests: vec![
             QuestDef {
                 id: "strange_lights".into(),
@@ -959,6 +996,10 @@ fn database() -> Database {
             stack(armor(item("iron_helmet", "Iron Helmet", "Sturdy, a little heavy.", it::HELMET, false, vec![]), Armor { slot: EquipSlot::Head, defense: 2, speed: -0.05, overlay: "ov_helmet".into() }), 1),
             stack(armor(item("leather_armor", "Leather Armor", "Light body armor.", it::LEATHER, false, vec![]), Armor { slot: EquipSlot::Body, defense: 1, speed: 0.0, overlay: "ov_leather".into() }), 1),
             stack(armor(item("chainmail", "Chainmail", "Strong protection, but you move slower.", it::CHAIN, false, vec![]), Armor { slot: EquipSlot::Body, defense: 3, speed: -0.15, overlay: "ov_chain".into() }), 1),
+            // Left hand: lights and a shield (not together with a two-handed weapon).
+            light(stack(armor(item("lantern", "Lantern", "A steady light for dark places. Hold it in your left hand.", it::LANTERN, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new() }), 1), LightSpec::new(5.5, [255, 220, 170], false)),
+            light(stack(armor(item("torch", "Torch", "A flickering torch for the left hand. Cheap, but it lights less than a lantern.", it::TORCH, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new() }), 5), LightSpec::torch(4.0)),
+            stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new() }), 1),
             stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
         ],
         props: vec![
@@ -1065,10 +1106,86 @@ fn database() -> Database {
         ("leather_armor", 35),
         ("chainmail", 90),
         ("bronze_key", 5),
+        ("lantern", 25),
+        ("torch", 4),
+        ("wooden_shield", 18),
     ] {
         db.items.iter_mut().find(|i| i.id == id).expect(id).value = v;
     }
+    // Spear, bow and crossbow need both hands (nothing in the left hand then).
+    for id in ["spear", "bow", "crossbow"] {
+        db.items.iter_mut().find(|i| i.id == id).and_then(|i| i.weapon.as_mut()).expect(id).two_handed = true;
+    }
+    // The shrine glows once it is lit.
+    if let Some(st) = db.props.iter_mut().find(|p| p.id == "shrine").and_then(|p| p.states.iter_mut().find(|s| s.name == "glowing")) {
+        st.light = Some(LightSpec { intensity: 0.85, ..LightSpec::new(5.0, [150, 200, 255], false) });
+    }
     db
+}
+
+/// The old mine (off the forest): pitch dark except for its wall torches; a treasure room
+/// without torches needs a light (a lantern or torch in the left hand).
+fn mine() -> Map {
+    let (w, h) = (28u32, 20u32);
+    let mut b = B::new("mine", w, h);
+    let dg = b.m.tileset_slot("dungeon");
+    let set = |b: &mut B, layer: usize, x: i32, y: i32, tile: u32| {
+        if b.m.in_bounds(x, y) {
+            b.m.layers[layer].set(x as u32, y as u32, Tile::new(dg, tile));
+        }
+    };
+    // Solid rock (ceiling) everywhere, then carved rooms and corridors.
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            set(&mut b, 1, x, y, 16);
+        }
+    }
+    let carve = |b: &mut B, x0: i32, y0: i32, cw: i32, ch: i32| {
+        for y in y0..y0 + ch {
+            for x in x0..x0 + cw {
+                set(b, 0, x, y, 0);
+                b.m.layers[1].set(x as u32, y as u32, Tile::EMPTY);
+            }
+        }
+        // Wall faces above the carved area.
+        for x in x0..x0 + cw {
+            if b.m.layers[1].get(x as u32, (y0 - 1) as u32) == Tile::new(dg, 16) {
+                set(b, 1, x, y0 - 1, 8);
+            }
+        }
+    };
+    carve(&mut b, 3, 3, 20, 5); // the big cavern
+    carve(&mut b, 14, 8, 2, 5); // corridor down to the entrance hall
+    carve(&mut b, 11, 13, 7, 6); // entrance hall
+    carve(&mut b, 4, 8, 2, 3); // corridor to the treasure room
+    carve(&mut b, 2, 11, 6, 5); // treasure room (no torches)
+    // Entrance: a door in the bottom wall leads back to the forest.
+    set(&mut b, 0, 14, 19, 0);
+    set(&mut b, 1, 14, 19, 6);
+    b.m.set_collision(14, 19, rust2d_engine::map::CollisionOverride::Walkable);
+    b.portal(14, 19, "forest", "mine");
+    b.spawn("entrance", 14, 18);
+    // Wall torches (tile lights) in the entrance hall and the cavern.
+    for (x, y) in [(11, 12), (17, 12), (6, 2), (13, 2), (20, 2)] {
+        set(&mut b, 1, x, y, 10);
+    }
+    // Rubble, puddles and bones.
+    for (x, y, tile) in [(5, 4, 20), (9, 6, 21), (17, 5, 17), (21, 6, 20), (12, 15, 20), (3, 14, 17), (6, 12, 21)] {
+        set(&mut b, 0, x, y, tile);
+    }
+    // Slimes live in the cavern.
+    b.zone("mine_slimes", 7, 3, 12, 5, ZoneKind::Spawner { character: "slime".into(), count: 3, respawn: Respawn::OnEnter });
+    // The treasure: a chest with a shield, coins and a potion.
+    let chest = b.entity(EntityKind::Prop, "chest", 4, 12);
+    chest.container = Some(ContainerSpec {
+        size: 8,
+        items: vec![ItemStack::new("wooden_shield", 1), ItemStack::new("coin", 15), ItemStack::new("potion", 1)],
+        open_state: "open".into(),
+        ..Default::default()
+    });
+    b.m.background = [0, 0, 0];
+    b.m.lighting = MapLighting { mode: LightMode::Dark, darkness: 1.0 };
+    b.m
 }
 
 const SCRIPT: &str = r#"// Rhai scripts for the example project.
@@ -1196,6 +1313,8 @@ fn main() {
     slime(&out);
     props(&out);
     items(&out);
+    let (_, png) = art::extra::dungeon_tileset();
+    std::fs::write(out.join("tilesets/dungeon.png"), png).unwrap();
     std::fs::create_dir_all(out.join("sounds")).unwrap();
     for (id, make) in SOUNDS {
         std::fs::write(out.join(format!("sounds/{id}.wav")), wav_bytes(&make(), RATE)).unwrap();
@@ -1238,12 +1357,13 @@ fn main() {
                 .map(|(sheet, sex, label)| rust2d_engine::project::PlayerLook { sheet: sheet.to_string(), sex: *sex, label: label.to_string() })
                 .collect(),
             },
+        day_minutes: 24.0, start_hour: 8.0,
         },
         db: database(),
     };
     project.save_config().unwrap();
     project.save_defs().unwrap();
-    for map in [village(), house(), shop(), forest(), wilds()] {
+    for map in [village(), house(), shop(), forest(), wilds(), mine()] {
         project.save_map(&map).unwrap();
         println!("map {:<8} {}x{}", map.name, map.width, map.height);
     }
@@ -1263,10 +1383,12 @@ fn write_starter_pack(project: &Project) {
     // (The example project's own version wins when an id exists in both, e.g. "merchant_f".)
     let sheets: Vec<String> = b.db.sheets.iter().map(|d| d.id.clone()).collect();
     let chars: Vec<String> = b.db.characters.iter().map(|d| d.id.clone()).collect();
-    b.db.tilesets.extend(extra.db.tilesets);
+    let tilesets: Vec<String> = b.db.tilesets.iter().map(|d| d.id.clone()).collect();
+    b.db.tilesets.extend(extra.db.tilesets.into_iter().filter(|d| !tilesets.contains(&d.id)));
     b.db.sheets.extend(extra.db.sheets.into_iter().filter(|d| !sheets.contains(&d.id)));
     b.db.props.extend(extra.db.props);
     b.db.characters.extend(extra.db.characters.into_iter().filter(|d| !chars.contains(&d.id)));
+    b.db.structures.extend(structures::library_structures());
     for (path, bytes) in extra.files {
         b.files.entry(path).or_insert(bytes);
     }

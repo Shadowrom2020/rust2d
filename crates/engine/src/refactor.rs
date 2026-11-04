@@ -17,6 +17,8 @@ pub enum RefKind {
     Character,
     Sound,
     Map,
+    /// Multi-tile asset (`defs::StructureDef`).
+    Structure,
 }
 
 struct Renamer<'a> {
@@ -29,6 +31,33 @@ struct Renamer<'a> {
 }
 
 impl Renamer<'_> {
+    /// A placed entity (on a map or inside a structure).
+    fn entity(&mut self, e: &mut crate::entity::EntityInstance) {
+        let k = match e.kind {
+            EntityKind::Prop => RefKind::Prop,
+            EntityKind::Character => RefKind::Character,
+            EntityKind::Item => RefKind::Item,
+        };
+        self.fix(k, &mut e.def);
+        self.fix(RefKind::Sheet, &mut e.sheet);
+        self.triggers(&mut e.triggers);
+        self.container(&mut e.container);
+        self.lock(&mut e.lock);
+        self.shop(&mut e.shop);
+        if let Some(l) = &mut e.loot {
+            self.loot(l);
+        }
+    }
+
+    fn structure(&mut self, d: &mut crate::defs::StructureDef) {
+        for t in &mut d.tilesets {
+            self.fix(RefKind::Tileset, t);
+        }
+        for e in &mut d.entities {
+            self.entity(e);
+        }
+    }
+
     fn lock(&mut self, l: &mut Option<crate::defs::LockSpec>) {
         if let Some(l) = l {
             self.fix(RefKind::Item, &mut l.key);
@@ -142,6 +171,9 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.shop(&mut d.shop);
         r.loot(&mut d.loot);
     }
+    for d in &mut db.structures {
+        r.structure(d);
+    }
     r.fix(RefKind::Character, &mut config.player);
     for l in &mut config.creation.looks {
         r.fix(RefKind::Sheet, &mut l.sheet);
@@ -162,20 +194,7 @@ pub fn rename_in_map(map: &mut Map, kind: RefKind, old: &str, new: &str) -> usiz
     r.fix(RefKind::Sound, &mut map.music);
     r.triggers(&mut map.triggers);
     for e in &mut map.entities {
-        let k = match e.kind {
-            EntityKind::Prop => RefKind::Prop,
-            EntityKind::Character => RefKind::Character,
-            EntityKind::Item => RefKind::Item,
-        };
-        r.fix(k, &mut e.def);
-        r.fix(RefKind::Sheet, &mut e.sheet);
-        r.triggers(&mut e.triggers);
-        r.container(&mut e.container);
-        r.lock(&mut e.lock);
-        r.shop(&mut e.shop);
-        if let Some(l) = &mut e.loot {
-            r.loot(l);
-        }
+        r.entity(e);
     }
     for z in &mut map.zones {
         match &mut z.kind {
@@ -226,6 +245,15 @@ pub fn refs_of_prop(d: &crate::defs::PropDef) -> Vec<(RefKind, String)> {
     r.triggers(&mut d.triggers);
     r.container(&mut d.container);
     r.lock(&mut d.lock);
+    r.found.unwrap_or_default()
+}
+
+/// Everything a structure refers to (tilesets, and the definitions of its entities with what
+/// those need).
+pub fn refs_of_structure(d: &crate::defs::StructureDef) -> Vec<(RefKind, String)> {
+    let mut d = d.clone();
+    let mut r = collector();
+    r.structure(&mut d);
     r.found.unwrap_or_default()
 }
 
@@ -283,6 +311,23 @@ mod tests {
     }
 
     #[test]
+    fn renames_reach_structures() {
+        let mut db = Database::default();
+        let mut e = EntityInstance::new(0, EntityKind::Prop, "chest", 0.0, 0.0);
+        e.container = Some(crate::defs::ContainerSpec { items: vec![crate::inventory::ItemStack::new("key", 1)], ..Default::default() });
+        db.structures.push(crate::defs::StructureDef { id: "hut".into(), tilesets: vec!["terrain".into()], entities: vec![e], ..Default::default() });
+        let mut cfg = ProjectConfig::new("t");
+        assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Tileset, "terrain", "land"), 1);
+        assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Prop, "chest", "box"), 1);
+        assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Item, "key", "gate_key"), 1);
+        let d = &db.structures[0];
+        assert_eq!((d.tilesets[0].as_str(), d.entities[0].def.as_str()), ("land", "box"));
+        let mut refs = refs_of_structure(d);
+        refs.sort();
+        assert_eq!(refs, vec![(RefKind::Tileset, "land".to_string()), (RefKind::Item, "gate_key".to_string()), (RefKind::Prop, "box".to_string())]);
+    }
+
+    #[test]
     fn renames_maps_sheets_and_config() {
         let mut m = Map::new("forest", 4, 4);
         m.edges.west = Some(EdgeLink::new("village"));
@@ -312,6 +357,7 @@ mod tests {
             armor: None,
             max_stack: 99,
             value: 0,
+        light: None,
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),
@@ -323,6 +369,7 @@ mod tests {
             sfx: Default::default(),
             inventory_size: 24,
             creation: Default::default(),
+        day_minutes: 24.0, start_hour: 8.0,
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);

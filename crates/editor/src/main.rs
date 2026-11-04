@@ -1,6 +1,7 @@
 //! rust2d editor: maps, entities, zones, transitions, definitions and scripts.
 //!
 //! Usage: rust2d-editor [PROJECT_DIR]   (without a folder the welcome screen shows)
+//!        rust2d-editor --library [DIR]  (the Asset Library window; default: the shared library)
 
 mod app;
 mod canvas;
@@ -9,11 +10,14 @@ mod doc;
 mod export;
 mod files;
 mod library_ui;
+mod library_window;
 mod maps;
 mod models;
 mod new_project;
 mod pixel;
 mod script_editor;
+mod structures;
+mod ui;
 mod wizard;
 mod widgets;
 
@@ -22,10 +26,23 @@ use std::collections::VecDeque;
 use app::{Editor, Mode, Pending, Selection, Tool};
 use macroquad::prelude::*;
 
+thread_local! {
+    /// Scripted mouse position held by `hover X Y` (until the next `click`).
+    static HOVER: std::cell::Cell<Option<canvas::Mouse>> = const { std::cell::Cell::new(None) };
+}
+
+/// `--library [DIR]`: run as the Asset Library window (DIR defaults to the shared library).
+fn library_arg() -> Option<std::path::PathBuf> {
+    let args: Vec<String> = std::env::args().collect();
+    let i = args.iter().position(|a| a == "--library")?;
+    Some(args.get(i + 1).filter(|a| !a.starts_with("--")).map_or_else(rust2d_engine::library::library_dir, std::path::PathBuf::from))
+}
+
 fn window_conf() -> Conf {
+    let library = library_arg().is_some();
     Conf {
-        window_title: "rust2d editor".to_owned(),
-        window_width: 1600,
+        window_title: if library { "rust2d – Asset Library" } else { "rust2d editor" }.to_owned(),
+        window_width: if library { 1300 } else { 1600 },
         window_height: 900,
         high_dpi: true,
         window_resizable: true,
@@ -42,16 +59,24 @@ const WHEEL_POINTS_PER_NOTCH: f32 = 50.0;
 #[macroquad::main(window_conf)]
 async fn main() {
     // With a folder argument that project opens directly; otherwise the welcome screen shows.
-    let mut ed = match std::env::args().nth(1) {
-        Some(root) => Editor::new(root.clone().into()).unwrap_or_else(|e| {
+    let mut ed = match (library_arg(), std::env::args().nth(1)) {
+        (Some(dir), _) => Editor::library_window(dir.clone()).unwrap_or_else(|e| {
+            let mut ed = Editor::empty();
+            ed.set_status(format!("Cannot open the asset library at {}: {e:#}", dir.display()));
+            ed
+        }),
+        (None, Some(root)) => Editor::new(root.clone().into()).unwrap_or_else(|e| {
             let mut ed = Editor::empty();
             ed.set_status(format!("Cannot open project '{root}': {e:#}"));
             ed
         }),
-        None => Editor::empty(),
+        (None, None) => Editor::empty(),
     };
     prevent_quit();
-    egui_macroquad::cfg(|ctx| ctx.options_mut(|o| o.line_scroll_speed = WHEEL_POINTS_PER_NOTCH * EMQ_WHEEL_DIVISOR));
+    egui_macroquad::cfg(|ctx| {
+        ctx.options_mut(|o| o.line_scroll_speed = WHEEL_POINTS_PER_NOTCH * EMQ_WHEEL_DIVISOR);
+        ui::install_fonts(ctx);
+    });
     // Debug aid: RUST2D_EDITOR_SCRIPT="tool entity; select entity 3; wait 0.5; shot a.png; quit"
     let mut script: VecDeque<Vec<String>> = std::env::var("RUST2D_EDITOR_SCRIPT")
         .map(|s| s.split(';').map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>()).filter(|c| !c.is_empty()).collect())
@@ -70,7 +95,7 @@ async fn main() {
                 run_script_cmd(&mut ed, &cmd, &mut wait, &mut shot, &mut mouse_frames);
             }
         }
-        canvas::inject_mouse(mouse_frames.pop_front());
+        canvas::inject_mouse(mouse_frames.pop_front().or(HOVER.with(|h| h.get())));
         egui_macroquad::ui(|ctx| ed.ui(ctx));
         ed.update_canvas();
         ed.draw_canvas();
@@ -103,11 +128,17 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
     match arg(0) {
         // click X Y [right]  /  drag X0 Y0 X1 Y1   (tile coordinates)
         "click" => {
+            HOVER.with(|h| h.set(None));
             let b = if arg(3) == "right" { 1 } else { 0 };
             let p = at(ed, num(1), num(2));
             mouse.push_back(frame(p, b, true, true, false));
             mouse.push_back(frame(p, b, false, false, true));
             mouse.push_back(frame(p, b, false, false, false));
+        }
+        // hover X Y: keep the mouse over a tile for a while (tool previews)
+        "hover" => {
+            let p = at(ed, num(1), num(2));
+            HOVER.with(|h| h.set(Some(frame(p, 0, false, false, false))));
         }
         "drag" => {
             let (a, b) = (at(ed, num(1), num(2)), at(ed, num(3), num(4)));
@@ -262,7 +293,18 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 ed.settle_pending(p, c);
             }
         }
-        "status" => println!("[status] open={} project={} pending={} map={:?} dirty={} msg={}", ed.project_open, ed.project.root.display(), ed.pending.is_some(), ed.doc.as_ref().map(|d| d.map.name.clone()), ed.doc.as_ref().is_some_and(|d| d.is_dirty()), ed.status.0),
+        "status" => println!(
+            "[status] open={} project={} pending={} map={:?} dirty={} library_mode={} defs_dirty={} lib_dialog={} msg={}",
+            ed.project_open,
+            ed.project.root.display(),
+            ed.pending.is_some(),
+            ed.doc.as_ref().map(|d| d.map.name.clone()),
+            ed.doc.as_ref().is_some_and(|d| d.is_dirty()),
+            ed.library_mode,
+            ed.defs_dirty,
+            ed.lib.add.as_ref().map_or("closed".to_string(), |d| format!("{:?}:{}", d.kind, d.picked.len())),
+            ed.status.0
+        ),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),
         "rename" => {
             use rust2d_engine::refactor::RefKind;
@@ -308,7 +350,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "mode" => {
             ed.mode = match arg(1) {
                 "db" => Mode::Database,
-                "library" => Mode::Library,
+                "library" | "browse" => Mode::Library,
                 "pixel" => Mode::Pixel,
                 _ => Mode::Map,
             }
@@ -319,6 +361,91 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.lib.ensure_loaded();
             if let Some(k) = library_ui::parse_kind(arg(1)) {
                 ed.lib.selected.insert((k, arg(2).to_string()));
+            }
+        }
+        // libremove: the "Remove from library" button (opens the confirmation) · libconfirm yes|no
+        "libremove" => ed.lib.confirm_remove = Some(ed.lib.selected.iter().cloned().collect()),
+        "libconfirm" => {
+            if let Some(list) = ed.lib.confirm_remove.take() {
+                if arg(1) == "yes" {
+                    ed.remove_from_library(&list);
+                }
+            }
+            println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+        }
+        // Asset Library window / add dialog: libwindow · libdialog [KIND] · libpick KIND ID ·
+        // libdialogadd · libdialogclose · libedit KIND ID (library mode: edit that asset)
+        "libwindow" => ed.open_library_window(),
+        // lighting on|off [HOUR]: the map view's lighting preview
+        "lighting" => {
+            ed.view.lighting = arg(1) != "off";
+            if !arg(2).is_empty() {
+                ed.view.hour = num(2);
+            }
+        }
+        // Structures: structure ID (arm it) · stplace X Y (top-left corner) ·
+        // stcapture X Y W H ID [noground] · stinfo
+        "structure" => ed.arm_structure(arg(1)),
+        "stplace" => ed.place_structure_at((num(1) as i32, num(2) as i32)),
+        "stcapture" => {
+            let rect = (num(1) as u32, num(2) as u32, num(3) as u32, num(4) as u32);
+            let r = ed.create_structure(rect, arg(5), arg(5), "", arg(6) != "noground");
+            ed.show_result(r);
+            println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+        }
+        // stnew · stlayer N · sttool stamp|keep|clear|solid|walkable|auto|prop · ststamp TS X Y W H ·
+        // stprop ID · stpaint X Y (cell of the open structure in Database → Structures) · stsize W H
+        "stnew" => ed.new_structure(),
+        "stlayer" => ed.db.st_edit.layer = num(1) as usize,
+        "sttool" => {
+            use structures::StTool;
+            ed.db.st_edit.tool = match arg(1) {
+                "keep" => StTool::Keep,
+                "clear" => StTool::Clear,
+                "solid" => StTool::Collision(1),
+                "walkable" => StTool::Collision(2),
+                "auto" => StTool::Collision(rust2d_engine::defs::StructureDef::COLLISION_AUTO),
+                "prop" => StTool::Prop,
+                _ => StTool::Stamp,
+            }
+        }
+        "ststamp" => {
+            ed.db.st_edit.tileset = arg(1).to_string();
+            ed.db.st_edit.stamp = (num(2) as u32, num(3) as u32, (num(4) as u32).max(1), (num(5) as u32).max(1));
+        }
+        "stprop" => ed.db.st_edit.prop = arg(1).to_string(),
+        "stpaint" | "stsize" => {
+            let i = ed.db.sel;
+            let db = ed.project.db.clone();
+            if let Some(d) = ed.project.db.structures.get_mut(i) {
+                if arg(0) == "stsize" {
+                    d.resize(num(1) as u32, num(2) as u32);
+                    d.prune();
+                } else {
+                    ed.db.st_edit.apply(d, (num(1) as u32, num(2) as u32), &db, &ed.assets);
+                }
+                ed.defs_dirty = true;
+            }
+        }
+        "stinfo" => {
+            let ids: Vec<&str> = ed.project.db.structures.iter().map(|d| d.id.as_str()).collect();
+            let ents = ed.doc.as_ref().map_or(0, |d| d.map.entities.len());
+            println!("[structures] {} defined: {} | armed={:?} tool={:?} map_entities={ents}", ids.len(), ids.join(","), ed.place_structure, ed.tool);
+        }
+        "libdialog" => ed.open_add_dialog(library_ui::parse_kind(arg(1))),
+        "libpick" => {
+            if let (Some(d), Some(k)) = (&mut ed.lib.add, library_ui::parse_kind(arg(1))) {
+                d.picked.insert((k, arg(2).to_string()));
+            }
+        }
+        "libdialogadd" => {
+            ed.add_picked_from_library();
+            println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+        }
+        "libdialogclose" => ed.lib.add = None,
+        "libedit" => {
+            if let Some(k) = library_ui::parse_kind(arg(1)) {
+                ed.edit_library_asset(&(k, arg(2).to_string()));
             }
         }
         "libadd" => {
@@ -457,6 +584,9 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         "pxat" => ed.px.apply_at(if arg(3) == "right" { 1 } else { 0 }, (num(1) as i32, num(2) as i32)),
         "pxsave" => ed.save_pixel(),
+        // pxframe N: select frame N · pxclip copy|cut|paste|mirror (Ctrl+C / X / V)
+        "pxframe" => ed.px.sel_frame = num(1) as u32,
+        "pxclip" => ed.frame_clipboard(arg(1)),
         "tab" => {
             use database::Tab;
             ed.db.tab = match arg(1) {
@@ -467,6 +597,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "project" => Tab::Project,
                 "quests" => Tab::Quests,
                 "scripts" => Tab::Scripts,
+                "sounds" => Tab::Sounds,
+                "structures" => Tab::Structures,
                 _ => Tab::Items,
             };
             ed.db.sel = num(2) as usize;
@@ -480,6 +612,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "rect" => Tool::Rect,
                 "fill" => Tool::Fill,
                 "erase" => Tool::Erase,
+                "structure" => Tool::Structure,
                 _ => Tool::Brush,
             }
         }

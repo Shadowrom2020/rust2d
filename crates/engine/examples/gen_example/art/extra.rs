@@ -27,11 +27,34 @@ pub fn library_extras() -> Extras {
     for (id, canvas, solid, anims) in [desert(), mountains(), city(), dungeon()] {
         let image = format!("tilesets/{id}.png");
         x.files.insert(image.clone(), canvas.png());
-        x.db.tilesets.push(TilesetDef { id: id.into(), image, solid, animations: anims });
+        // Wall torches (dungeon) and wall lanterns (city) light up dark maps.
+        let lights = match id {
+            "dungeon" => vec![TileLight { tile: 10, light: LightSpec::torch(4.5) }],
+            "city" => vec![TileLight { tile: 15, light: LightSpec::new(4.0, [255, 226, 170], false) }],
+            _ => vec![],
+        };
+        x.db.tilesets.push(TilesetDef { id: id.into(), image, solid, animations: anims, lights });
     }
     props(&mut x);
+    // Props that give light in their default state ("lit"; their "off" / "out" states don't).
+    for p in &mut x.db.props {
+        p.light = match p.id.as_str() {
+            "street_lamp" => Some(LightSpec::new(5.0, [255, 226, 170], false)),
+            "campfire" => Some(LightSpec::torch(5.5)),
+            "wall_torch" => Some(LightSpec::torch(4.5)),
+            "crystal" => Some(LightSpec { intensity: 0.7, ..LightSpec::new(2.5, [150, 120, 255], false) }),
+            _ => None,
+        };
+    }
     characters(&mut x);
     x
+}
+
+/// The dungeon tileset (for the example project's mine).
+pub fn dungeon_tileset() -> (TilesetDef, Vec<u8>) {
+    let (id, canvas, solid, animations) = dungeon();
+    let lights = vec![TileLight { tile: 10, light: LightSpec::torch(4.5) }];
+    (TilesetDef { id: id.into(), image: format!("tilesets/{id}.png"), solid, animations, lights }, canvas.png())
 }
 
 // ------------------------------------------------------------------ shared tile helpers
@@ -1198,7 +1221,7 @@ fn props(x: &mut Extras) {
 
     let sp = |cell: u32| SpriteRef::new("props2", cell);
     let block = |cell: u32, w: u32, h: u32| SpriteRef::block("props2", cell, w, h);
-    let st = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid };
+    let st = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid, light: None };
     let prop = |id: &str, name: &str, sprite: SpriteRef, solid: bool, hitbox: [f32; 2]| PropDef {
         id: id.into(),
         name: name.into(),
@@ -1210,6 +1233,7 @@ fn props(x: &mut Extras) {
         lock: None,
         default_state: default_state_name(),
         states: vec![],
+        light: None,
     };
     let with = |mut d: PropDef, default: &str, states: Vec<PropState>| {
         d.default_state = default.into();
@@ -1380,6 +1404,7 @@ fn characters(x: &mut Extras) {
         triggers: vec![],
         shop: None,
         loot: vec![],
+        light: None,
     };
     let foe = |mut d: CharacterDef, hp: i32, damage: i32| {
         d.max_hp = hp;
