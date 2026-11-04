@@ -1379,6 +1379,7 @@ fn characters(x: &mut Extras) {
         defense: 0,
         triggers: vec![],
         shop: None,
+        loot: vec![],
     };
     let foe = |mut d: CharacterDef, hp: i32, damage: i32| {
         d.max_hp = hp;

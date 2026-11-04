@@ -119,7 +119,7 @@ pub fn create_project(dir: &Path) -> Result<()> {
     project.save_defs()?;
     let mut map = Map::new("start", 40, 30);
     let uid = map.alloc_uid();
-    map.zones.push(Zone { uid, name: "start".into(), x: 20, y: 15, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![] });
+    map.zones.push(Zone { uid, name: "start".into(), x: 20, y: 15, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![], loot: None });
     project.save_map(&map)?;
     std::fs::create_dir_all(project.scripts_dir())?;
     std::fs::write(

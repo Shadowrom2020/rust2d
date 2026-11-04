@@ -407,7 +407,7 @@ mod tests {
         }
         blocks.set_collision(3, 3, CollisionOverride::Solid);
         blocks.entities.push(EntityInstance::new(1, EntityKind::Prop, "p", 40.0, 47.0));
-        blocks.zones.push(crate::map::Zone { uid: 2, name: "z".into(), x: 2, y: 2, w: 2, h: 2, kind: crate::map::ZoneKind::Spawn, triggers: vec![] });
+        blocks.zones.push(crate::map::Zone { uid: 2, name: "z".into(), x: 2, y: 2, w: 2, h: 2, kind: crate::map::ZoneKind::Spawn, triggers: vec![], loot: None });
         p.save_map(&blocks).unwrap();
 
         let up = upgrade(&root, Some(&lib)).unwrap().unwrap();

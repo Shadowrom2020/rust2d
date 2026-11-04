@@ -67,12 +67,7 @@ fn shrine_touch() {
     emit("shrine_lit");
 }
 
-// Called by the slime's "Defeated" trigger.
-// Goblins drop a few arrows.
-fn goblin_defeated() {
-    give_item("arrows", 1 + random(3));
-}
-
+// Called by the slime's "Defeated" trigger (what slimes drop is set in their loot table).
 fn slime_defeated() {
     add_var("slimes_defeated", 1);
     // Tilda's quest counts slimes once it was accepted.
@@ -81,9 +76,6 @@ fn slime_defeated() {
         if get_var("pest_slimes") >= 5 {
             set_quest_stage("pest_control", 1);
         }
-    }
-    if random(2) == 0 {
-        give_item("coin", 1 + random(3));
     }
     if get_var("slimes_defeated") == 5 {
         say("You have defeated 5 slimes! You feel stronger... (not really)");

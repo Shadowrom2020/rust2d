@@ -878,6 +878,21 @@ impl Game {
         }
     }
 
+    /// Puts items on the ground at `pos` on the current map (joining a pile of the same item
+    /// close by). They are saved with the game until picked up.
+    pub(super) fn place_drop(&mut self, item: &str, n: u32, pos: Vec2) {
+        let map = self.loaded.map.name.clone();
+        let (uid, new) = self.world.add_dropped(&map, item, n, pos.x, pos.y, self.ts() * 0.5);
+        if new {
+            let mut rt = self.new_rt_entity(crate::entity::EntityKind::Item, item, uid, "", pos, crate::entity::Facing::Down, true, 0);
+            rt.count = n;
+            self.loaded.entities.push(rt);
+        } else if let Some(e) = self.loaded.entities.iter_mut().find(|e| e.uid == uid) {
+            e.count += n;
+            e.active = true;
+        }
+    }
+
     /// Drops `count` items (None = the whole stack) of inventory slot `i` on the ground.
     /// They stay on this map (also in save games) until picked up again.
     pub(super) fn drop_slot(&mut self, i: usize, count: Option<u32>) -> bool {
@@ -893,16 +908,7 @@ impl Game {
             }
         }
         let pos = self.drop_position();
-        let map = self.loaded.map.name.clone();
-        let (uid, new) = self.world.add_dropped(&map, &stack.item, n, pos.x, pos.y, self.ts() * 0.5);
-        if new {
-            let mut rt = self.new_rt_entity(crate::entity::EntityKind::Item, &stack.item, uid, "", pos, crate::entity::Facing::Down, true, 0);
-            rt.count = n;
-            self.loaded.entities.push(rt);
-        } else if let Some(e) = self.loaded.entities.iter_mut().find(|e| e.uid == uid) {
-            e.count += n;
-            e.active = true;
-        }
+        self.place_drop(&stack.item, n, pos);
         let name = self.item_name(&stack.item);
         self.ui.toast(if n > 1 { format!("Dropped {n} {name}") } else { format!("Dropped {name}") });
         self.audio.play(&self.project.config.sfx.pickup);

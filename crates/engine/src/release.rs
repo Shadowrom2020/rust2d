@@ -234,7 +234,7 @@ mod tests {
         let (_, c) = check(&p);
         assert!(!c.errors.is_empty(), "no maps yet");
         let mut map = Map::new("start", 8, 8);
-        map.zones.push(Zone { uid: 1, name: "start".into(), x: 1, y: 1, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![] });
+        map.zones.push(Zone { uid: 1, name: "start".into(), x: 1, y: 1, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![], loot: None });
         p.save_map(&map).unwrap();
         p.config.player = "nobody".into();
         let bin = tmp.join("rust2d-game");

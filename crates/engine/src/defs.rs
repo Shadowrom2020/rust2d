@@ -495,6 +495,48 @@ pub struct CharacterDef {
     /// Makes the character a merchant (placed instances can override it).
     #[serde(default)]
     pub shop: Option<ShopSpec>,
+    /// What the character can drop when defeated (placed instances and spawners can
+    /// override it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loot: Vec<LootEntry>,
+}
+
+/// One line of a loot table: `item` drops with `chance` percent, `min..=max` of them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LootEntry {
+    pub item: String,
+    /// Drop chance in percent (0-100).
+    pub chance: f32,
+    #[serde(default = "one")]
+    pub min: u32,
+    #[serde(default = "one")]
+    pub max: u32,
+}
+
+impl LootEntry {
+    pub fn new(item: &str, chance: f32, min: u32, max: u32) -> Self {
+        LootEntry { item: item.to_string(), chance, min, max }
+    }
+}
+
+/// Rolls a loot table: every entry independently drops with its chance. `rand01()` returns
+/// numbers in 0..1, `range(min, max)` an integer in min..=max.
+pub fn roll_loot(table: &[LootEntry], mut rand01: impl FnMut() -> f32, mut range: impl FnMut(u32, u32) -> u32) -> Vec<(String, u32)> {
+    let mut out: Vec<(String, u32)> = Vec::new();
+    for e in table.iter().filter(|e| !e.item.is_empty()) {
+        if rand01() * 100.0 < e.chance {
+            let (lo, hi) = (e.min.min(e.max), e.min.max(e.max));
+            let n = range(lo, hi);
+            if n == 0 {
+                continue;
+            }
+            match out.iter_mut().find(|(i, _)| *i == e.item) {
+                Some(x) => x.1 += n,
+                None => out.push((e.item.clone(), n)),
+            }
+        }
+    }
+    out
 }
 
 /// One line of a merchant's stock.
@@ -711,6 +753,24 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loot_rolls() {
+        let table = vec![
+            LootEntry::new("coin", 100.0, 1, 3),
+            LootEntry::new("gem", 0.0, 1, 1),
+            LootEntry::new("coin", 50.0, 2, 2),
+            LootEntry::new("", 100.0, 1, 1),
+        ];
+        // rand01 = 0.4: 100% and 50% entries drop, 0% never; amounts come from `range`.
+        let drops = roll_loot(&table, || 0.4, |lo, hi| hi.max(lo));
+        assert_eq!(drops, vec![("coin".to_string(), 5)]);
+        // rand01 = 0.6: only the 100% entry.
+        assert_eq!(roll_loot(&table, || 0.6, |lo, _| lo), vec![("coin".to_string(), 1)]);
+        // Old data without min / max: one item.
+        let e: LootEntry = ron::from_str("(item: \"apple\", chance: 25.0)").unwrap();
+        assert_eq!((e.min, e.max), (1, 1));
+    }
 
     #[test]
     fn shop_prices() {

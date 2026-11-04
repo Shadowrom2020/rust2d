@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui};
-use rust2d_engine::defs::{ContainerSpec, LockSpec, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
+use rust2d_engine::defs::{ContainerSpec, LockSpec, LootEntry, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::entity::Facing;
 use rust2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, TriggerOwner, VarOp};
@@ -289,6 +289,61 @@ pub fn container_ui(ui: &mut Ui, id: &str, spec: &mut ContainerSpec, refs: &Refs
     ui.horizontal(|ui| {
         ui.label("Locked message");
         ui.add(egui::TextEdit::singleline(&mut spec.locked_text).hint_text("It's locked.").desired_width(220.0));
+    });
+}
+
+/// Loot table editor: item, drop chance in percent and amount (min-max) per line.
+pub fn loot_ui(ui: &mut Ui, id: &str, table: &mut Vec<LootEntry>, refs: &Refs, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database) {
+    let mut remove = None;
+    if !table.is_empty() {
+        egui::Grid::new(format!("{id}/loot")).num_columns(5).striped(true).show(ui, |ui| {
+            ui.weak("");
+            ui.weak("Item");
+            ui.weak("Chance");
+            ui.weak("Amount");
+            ui.weak("");
+            ui.end_row();
+            for (k, e) in table.iter_mut().enumerate() {
+                let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                let def = db.item(&e.item);
+                if let Some(d) = def {
+                    paint_frame(ui, tex, assets, &d.icon.sheet, d.icon.frame, rect);
+                }
+                ui.horizontal(|ui| {
+                    suggest(ui, &format!("{id}/i{k}"), &mut e.item, &refs.items, 110.0);
+                    if !e.item.is_empty() && def.is_none() {
+                        ui.colored_label(Color32::LIGHT_RED, "unknown");
+                    }
+                });
+                ui.add(egui::DragValue::new(&mut e.chance).range(0.0..=100.0).speed(0.5).suffix(" %"));
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut e.min).range(1..=999));
+                    ui.label("–");
+                    ui.add(egui::DragValue::new(&mut e.max).range(1..=999));
+                });
+                if e.max < e.min {
+                    e.max = e.min;
+                }
+                if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                    remove = Some(k);
+                }
+                ui.end_row();
+            }
+        });
+    }
+    if let Some(k) = remove {
+        table.remove(k);
+    }
+    ui.horizontal(|ui| {
+        if ui.button("+ Item").clicked() {
+            let first = refs.items.iter().find(|i| i.contains("coin")).or(refs.items.first()).cloned().unwrap_or_default();
+            table.push(LootEntry::new(&first, 50.0, 1, 1));
+        }
+        if table.is_empty() {
+            ui.weak("Drops nothing.");
+        } else {
+            ui.weak("Each line rolls on its own; drops land where the character fell.");
+        }
     });
 }
 

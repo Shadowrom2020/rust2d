@@ -11,7 +11,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use super::{EdgeLinks, Map, TileLayer, Zone};
+use super::{EdgeLinks, Map, TileLayer, Zone, ZoneKind};
 use crate::entity::EntityInstance;
 use crate::events::Trigger;
 
@@ -95,6 +95,25 @@ impl From<EntityV1> for EntityInstance {
     }
 }
 
+/// Zone layout of format version 1 (frozen like [`EntityV1`]).
+#[derive(Serialize, Deserialize)]
+struct ZoneV1 {
+    uid: u32,
+    name: String,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    kind: ZoneKind,
+    triggers: Vec<Trigger>,
+}
+
+impl From<ZoneV1> for Zone {
+    fn from(z: ZoneV1) -> Self {
+        Zone { uid: z.uid, name: z.name, x: z.x, y: z.y, w: z.w, h: z.h, kind: z.kind, triggers: z.triggers, loot: None }
+    }
+}
+
 /// Layout of format version 1 (whole map via postcard).
 #[derive(Deserialize)]
 struct MapV1 {
@@ -105,7 +124,7 @@ struct MapV1 {
     layers: Vec<TileLayer>,
     collision: Vec<u8>,
     entities: Vec<EntityV1>,
-    zones: Vec<Zone>,
+    zones: Vec<ZoneV1>,
     edges: EdgeLinks,
     triggers: Vec<Trigger>,
     next_uid: u32,
@@ -158,7 +177,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map> {
                 layers: m.layers,
                 collision: m.collision,
                 entities: m.entities.into_iter().map(EntityInstance::from).collect(),
-                zones: m.zones,
+                zones: m.zones.into_iter().map(Zone::from).collect(),
                 edges: m.edges,
                 triggers: m.triggers,
                 next_uid: m.next_uid,
@@ -261,7 +280,7 @@ mod tests {
             layers: &'a [TileLayer],
             collision: &'a [u8],
             entities: &'a [EntityV1],
-            zones: &'a [Zone],
+            zones: &'a [ZoneV1],
             edges: &'a EdgeLinks,
             triggers: &'a [Trigger],
             next_uid: u32,
@@ -290,7 +309,11 @@ mod tests {
             layers: &m.layers,
             collision: &m.collision,
             entities: &old_entities,
-            zones: &m.zones,
+            zones: &m
+                .zones
+                .iter()
+                .map(|z| ZoneV1 { uid: z.uid, name: z.name.clone(), x: z.x, y: z.y, w: z.w, h: z.h, kind: z.kind.clone(), triggers: z.triggers.clone() })
+                .collect::<Vec<_>>(),
             edges: &m.edges,
             triggers: &m.triggers,
             next_uid: 5,
