@@ -478,6 +478,22 @@
         teaches: "spark",
     ),
     (
+        id: "tome_fireball",
+        name: "Tome of the Fireball",
+        description: "Teaches Fireball: aim it at a spot and it explodes there. Needs some arcane knowledge.",
+        icon: (
+            sheet: "items",
+            frame: 23,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 1,
+        value: 150,
+        teaches: "fireball",
+    ),
+    (
         id: "tome_fire",
         name: "Tome of Fire",
         description: "Fire Burst: flames around you. Needs a trained arcanist.",

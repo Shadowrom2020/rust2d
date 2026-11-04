@@ -93,7 +93,7 @@ fn song(melody: &[i32], bass: &[i32], step: f32) -> Vec<f32> {
 
 type SoundFn = fn() -> Vec<f32>;
 
-const SOUNDS: [(&str, SoundFn); 11] = [
+const SOUNDS: [(&str, SoundFn); 13] = [
     ("unlock", || concat(&[tone(1800.0, 1800.0, 0.03, Wave::Square, 0.25, 40.0), tone(900.0, 700.0, 0.06, Wave::Square, 0.25, 25.0), tone(2400.0, 2400.0, 0.04, Wave::Square, 0.2, 40.0)])),
     ("creak", || concat(&[tone(90.0, 160.0, 0.18, Wave::Square, 0.18, 4.0), tone(160.0, 120.0, 0.12, Wave::Triangle, 0.4, 6.0)])),
     ("pickup", || concat(&[tone(880.0, 880.0, 0.06, Wave::Square, 0.3, 10.0), tone(1320.0, 1320.0, 0.12, Wave::Square, 0.3, 12.0)])),
@@ -102,6 +102,9 @@ const SOUNDS: [(&str, SoundFn); 11] = [
     ("hurt", || tone(500.0, 120.0, 0.3, Wave::Square, 0.4, 6.0)),
     ("defeat", || concat(&[tone(400.0, 800.0, 0.08, Wave::Square, 0.3, 5.0), tone(4000.0, 300.0, 0.3, Wave::Noise, 0.35, 8.0)])),
     ("blip", || tone(1200.0, 1200.0, 0.03, Wave::Square, 0.15, 30.0)),
+    // Fireball: a whoosh when it leaves the hand, a rumbling blast when it lands.
+    ("fireball", || tone(500.0, 1600.0, 0.22, Wave::Noise, 0.35, 7.0)),
+    ("explosion", || concat(&[tone(2000.0, 200.0, 0.12, Wave::Noise, 0.55, 6.0), tone(400.0, 40.0, 0.5, Wave::Noise, 0.6, 3.0)])),
     ("door", || concat(&[tone(150.0, 110.0, 0.12, Wave::Triangle, 0.6, 8.0), tone(200.0, 140.0, 0.15, Wave::Triangle, 0.5, 8.0)])),
     ("music_village", || {
         let m = [72, 76, 79, 76, 77, 76, 74, 0, 71, 74, 77, 74, 76, 74, 72, 0, 72, 76, 79, 84, 81, 79, 77, 76, 74, 77, 76, 74, 72, 0, 0, 0];
@@ -247,6 +250,8 @@ fn spells() -> Vec<SpellDef> {
         SpellDef::new("light", "Light", "A glow around you for a minute - handy in the old mine.", icon(it::SPELL_LIGHT), 6, 1.0, E::Light { radius: 5.0, seconds: 60.0 }),
         SpellDef::new("spark", "Spark", "Hurls a bolt of lightning in the direction you face.", icon(it::SPELL_SPARK), 5, 0.6, E::Bolt { damage: 3, projectile: icon(it::SPARK_SHOT), speed: 320.0 * R, range: 7.0 }).requires("arcana", 1),
         SpellDef::new("fire_burst", "Fire Burst", "Flames burst out around you, hitting everything nearby.", icon(it::SPELL_BLAST), 15, 4.0, E::Blast { damage: 4, radius: 2.0 }).requires("arcana", 2),
+        // A scripted spell: cast_fireball() in main.rhai aims, throws and explodes it.
+        SpellDef::new("fireball", "Fireball", "Click a target: a ball of fire flies there and explodes, burning everything within 2 tiles.", SpriteRef::new("fireball", 0), 12, 1.5, E::Script { function: "cast_fireball".into() }).requires("arcana", 1),
     ]
 }
 
@@ -506,6 +511,7 @@ fn shop() -> Map {
             ShopEntry::new("wooden_shield", 1, 0),
             ShopEntry::new("scroll_heal", 2, 0),
             ShopEntry::new("scroll_light", 1, 0),
+            ShopEntry::new("tome_fireball", 1, 0),
             ShopEntry { unlimited: true, ..ShopEntry::new("mana_potion", 0, 0) },
         ],
         sell_rate: 50,
@@ -1001,6 +1007,9 @@ fn database() -> Database {
             SheetDef { id: "ov_chain".into(), image: "sprites/ov_chain.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "props".into(), image: "sprites/props.png".into(), frame_w: 32, frame_h: 32 },
             SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 32, frame_h: 32 },
+            // Spell effects (the Fireball script).
+            SheetDef { id: "fireball".into(), image: "sprites/fireball.png".into(), frame_w: 32, frame_h: 32 },
+            SheetDef { id: "explosion".into(), image: "sprites/explosion.png".into(), frame_w: 64, frame_h: 64 },
         ],
         items: vec![
             stack(item("key", "Gate Key", "An old iron key. Opens the east gate.", it::KEY, false, vec![]), 1),
@@ -1049,6 +1058,7 @@ fn database() -> Database {
             teach(stack(item("scroll_heal", "Scroll of Healing", "Reading it teaches the Heal spell. The scroll crumbles afterwards.", it::SCROLL, true, vec![]), 5), "heal"),
             teach(stack(item("scroll_light", "Scroll of Light", "Teaches the Light spell: a glow around you in dark places.", it::SCROLL, true, vec![]), 5), "light"),
             teach(stack(item("spellbook_spark", "Book of Sparks", "A worn spell book. Teaches Spark - but it takes some arcane knowledge to understand.", it::BOOK, false, vec![]), 1), "spark"),
+            teach(stack(item("tome_fireball", "Tome of the Fireball", "Teaches Fireball: aim it at a spot and it explodes there. Needs some arcane knowledge.", it::BOOK, false, vec![]), 1), "fireball"),
             teach(stack(item("tome_fire", "Tome of Fire", "Fire Burst: flames around you. Needs a trained arcanist.", it::BOOK, false, vec![]), 1), "fire_burst"),
             stack(item("mana_potion", "Blue Potion", "Restores 20 mana.", it::MANA_POTION, true, use_trig(vec![Action::AddMana { amount: 20 }])), 10),
             stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new() }), 1),
@@ -1167,6 +1177,7 @@ fn database() -> Database {
         ("scroll_light", 12),
         ("spellbook_spark", 60),
         ("tome_fire", 120),
+        ("tome_fireball", 150),
         ("mana_potion", 12),
     ] {
         db.items.iter_mut().find(|i| i.id == id).expect(id).value = v;
@@ -1271,8 +1282,13 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               text("...") fills in placeholders: {player} {sir|madam} {variable}
 // Skills/magic: skill(id) skill_points() knows_spell(id) mana(); queued: set_skill(id, level)
 //               give_skill_points(n) learn_spell(id) add_mana(n) damage_around(dmg, radius)
-//               player_light(radius, seconds)
-// Other:        player_hp() random(n) current_map()
+//               player_light(radius, seconds, #{ color: [r, g, b], flicker })
+//               heal_area(x, y, radius, n) light_at(x, y, radius, seconds, #{ ... })
+// Spell effects (queued; x, y in tiles): aim(fn) calls fn(x, y) with the player's target;
+//               fly(sheet, x, y, fn, #{ speed, frames: [a, b], fps, scale, light }) calls
+//               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
+// Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
+//               random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -1362,6 +1378,27 @@ fn guard_talk() {
 fn count_coins() {
     say("You have " + item_count("coin") + " coins.");
 }
+
+// Fireball, a scripted spell (Database > Spells > Fireball, effect "Script"). Casting it calls
+// cast_fireball(); aim() lets the player click a target and calls fireball_at(x, y) with it (in
+// tiles). The spell's mana is only spent once a target is chosen.
+fn cast_fireball() {
+    aim("fireball_at");
+}
+
+fn fireball_at(x, y) {
+    play_sound("fireball");
+    // An animated sprite (all frames of the "fireball" sheet) flies there and glows on the way.
+    fly("fireball", x, y, "fireball_hit", #{ speed: 9, fps: 14, light: 2.5 });
+}
+
+fn fireball_hit(x, y) {
+    play_sound("explosion");
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    damage_area(x, y, 2, 5);
+    // Embers glow on for a few seconds.
+    light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });
+}
 "#;
 
 fn main() {
@@ -1389,6 +1426,8 @@ fn main() {
     slime(&out);
     props(&out);
     items(&out);
+    fireball(&out);
+    explosion(&out);
     let (_, png) = art::extra::dungeon_tileset();
     std::fs::write(out.join("tilesets/dungeon.png"), png).unwrap();
     std::fs::create_dir_all(out.join("sounds")).unwrap();
@@ -1478,6 +1517,18 @@ fn write_starter_pack(project: &Project) {
     }
     for d in &mut b.db.characters {
         d.triggers.retain(|t| !scripted(t));
+    }
+    // Spells made of scripts (Fireball) can't work without them: leave them, the books that teach
+    // them and those books in merchants' stock out (their effect art stays in the library).
+    use rust2d_engine::skills::SpellEffect;
+    let script_spells: Vec<String> = b.db.spells.iter().filter(|d| matches!(d.effect, SpellEffect::Script { .. })).map(|d| d.id.clone()).collect();
+    b.db.spells.retain(|d| !script_spells.contains(&d.id));
+    let teaching: Vec<String> = b.db.items.iter().filter(|d| script_spells.contains(&d.teaches)).map(|d| d.id.clone()).collect();
+    b.db.items.retain(|d| !teaching.contains(&d.id));
+    for d in &mut b.db.characters {
+        if let Some(shop) = &mut d.shop {
+            shop.items.retain(|e| !teaching.contains(&e.item));
+        }
     }
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../editor/assets/starter.r2dpack");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

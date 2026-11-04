@@ -18,8 +18,13 @@
 //               text("...") fills in placeholders: {player} {sir|madam} {variable}
 // Skills/magic: skill(id) skill_points() knows_spell(id) mana(); queued: set_skill(id, level)
 //               give_skill_points(n) learn_spell(id) add_mana(n) damage_around(dmg, radius)
-//               player_light(radius, seconds)
-// Other:        player_hp() random(n) current_map()
+//               player_light(radius, seconds, #{ color: [r, g, b], flicker })
+//               heal_area(x, y, radius, n) light_at(x, y, radius, seconds, #{ ... })
+// Spell effects (queued; x, y in tiles): aim(fn) calls fn(x, y) with the player's target;
+//               fly(sheet, x, y, fn, #{ speed, frames: [a, b], fps, scale, light }) calls
+//               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
+// Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
+//               random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -108,4 +113,25 @@ fn guard_talk() {
 
 fn count_coins() {
     say("You have " + item_count("coin") + " coins.");
+}
+
+// Fireball, a scripted spell (Database > Spells > Fireball, effect "Script"). Casting it calls
+// cast_fireball(); aim() lets the player click a target and calls fireball_at(x, y) with it (in
+// tiles). The spell's mana is only spent once a target is chosen.
+fn cast_fireball() {
+    aim("fireball_at");
+}
+
+fn fireball_at(x, y) {
+    play_sound("fireball");
+    // An animated sprite (all frames of the "fireball" sheet) flies there and glows on the way.
+    fly("fireball", x, y, "fireball_hit", #{ speed: 9, fps: 14, light: 2.5 });
+}
+
+fn fireball_hit(x, y) {
+    play_sound("explosion");
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    damage_area(x, y, 2, 5);
+    // Embers glow on for a few seconds.
+    light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });
 }

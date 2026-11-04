@@ -3,6 +3,41 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Gameplay
+- **Scripted spell effects**: new script functions (also trigger actions) `aim(fn)` (magic
+  targeting; the click calls `fn(x, y)`, a spell's cost is paid only then), `fly(sheet, x, y, fn,
+  #{ speed, frames, fps, scale, light })` (an animated, glowing sprite flies to a point and calls
+  `fn(x, y)`), `effect(sheet, x, y, #{ ... })` (an animation played once, e.g. an explosion) and
+  `damage_area(x, y, radius, damage)`. Script ids of sprite sheets in `fly` / `effect` are checked
+  and renamed with the sheet.
+- **Script light and healing**: `light_at(x, y, radius, seconds, #{ color, flicker })` (a timed
+  light at a point), `heal_area(x, y, radius, amount)` (the player and friendly characters),
+  `player_light(radius, seconds, #{ color, flicker })`, and `player_x()`, `player_y()`,
+  `player_facing()`, `player_max_hp()`. `player_light` and `damage_around` accept integers and
+  decimals in any mix (before, `player_light(5, 30.5)` failed).
+
+### Documentation
+- `Documentation/scripting.md`: the complete scripting guide and API reference (how scripts
+  are run, immediate vs. queued functions, state, targets, units, every function, recipes,
+  limits, a Rhai primer). Tests keep it complete and its examples compiling.
+- `wait()` accepts whole numbers too (`wait(1)` used to be a script error).
+
+### Editor
+- Trigger actions *Aim (then run script)*, *Fly sprite to point*, *Play effect*, *Damage area*,
+  *Light at point*, *Heal area*; *Light around player* gained color and flicker. The script editor
+  completes all new functions (sprite sheets for `fly` / `effect`), and `queue_set_var`, which was
+  missing; a test now fails when an engine function is missing from the completion table.
+- Script editor: the parameter hint also works for the project's own script functions, and right
+  after `(` or `,` an id argument (item, map, spawn point, sheet, script function, ...) opens its
+  suggestions at once, inserted with quotes.
+
+### Example project
+- **Fireball** spell (Tome of the Fireball, sold by Tilda; needs Arcana 1): click a target, a
+  fireball flies there and explodes, damaging everything within 2 tiles; embers glow on briefly. New sprite sheets
+  `fireball` and `explosion` (also in the starter library) and sounds `fireball`, `explosion`.
+
 ## 0.0.8 — 2026-11-04
 
 ### Gameplay

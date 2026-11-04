@@ -1790,8 +1790,10 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let mut flags = ed.refs.all_flags.clone();
     let mut vars = ed.refs.vars.clone();
     let mut functions: Vec<String> = Vec::new();
+    let mut signatures: Vec<(String, Vec<String>)> = Vec::new();
     for (_, text) in &texts {
         functions.extend(crate::script_editor::defined_functions(text));
+        signatures.extend(crate::script_editor::defined_signatures(text));
         for a in rust2d_engine::script_refs::string_args(text) {
             match (a.func.as_str(), a.arg) {
                 ("flag" | "set_flag", 0) => flags.push(a.value),
@@ -1836,6 +1838,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
             flags: &flags,
             vars: &vars,
             functions: &functions,
+            signatures: &signatures,
         };
         let res = crate::script_editor::show(ui, &mut st.script_text, &mut st.script_ed, &known, &problem_spans);
         if res.changed {
