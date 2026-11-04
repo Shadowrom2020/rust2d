@@ -193,6 +193,9 @@ pub struct Editor {
     pub resize: Option<(u32, u32)>,
     pub pending: Option<Pending>,
     pub defs_dirty: bool,
+    /// Definitions and project settings as last loaded / saved: `defs_dirty` is cleared again
+    /// when the edits are reverted (e.g. undone in a text field, a checkbox toggled back).
+    defs_saved: Box<(rust2d_engine::defs::Database, rust2d_engine::project::ProjectConfig)>,
     pub db: DbState,
     pub refs: Refs,
     pub pointer_over_ui: bool,
@@ -296,6 +299,7 @@ impl Editor {
             resize: None,
             pending: None,
             defs_dirty: false,
+            defs_saved: Box::new((project.db.clone(), project.config.clone())),
             db: DbState::default(),
             lib: Default::default(),
             px: Default::default(),
@@ -394,7 +398,7 @@ impl Editor {
         doc.end_stroke();
         match self.project.save_map(&doc.map) {
             Ok(()) => {
-                doc.dirty = false;
+                doc.mark_saved();
                 let name = doc.map.name.clone();
                 if !self.maps.contains(&name) {
                     self.maps.push(name.clone());
@@ -411,6 +415,7 @@ impl Editor {
         match self.project.save_defs().and_then(|_| self.project.save_config()) {
             Ok(()) => {
                 self.defs_dirty = false;
+                *self.defs_saved = (self.project.db.clone(), self.project.config.clone());
                 self.set_status("Saved definitions");
             }
             Err(e) => self.set_status(format!("Saving definitions failed: {e:#}")),
@@ -418,7 +423,7 @@ impl Editor {
     }
 
     pub fn save_all(&mut self) {
-        if self.doc.as_ref().is_some_and(|d| d.dirty) {
+        if self.doc.as_ref().is_some_and(|d| d.is_dirty()) {
             self.save_map();
         }
         if self.defs_dirty {
@@ -553,11 +558,10 @@ impl Editor {
         let mut changed = 0;
         let open = self.doc.as_ref().map(|d| d.map.name.clone());
         if let Some(doc) = &mut self.doc {
-            for e in &mut doc.map.entities {
-                if fix(e) {
-                    changed += 1;
-                    doc.dirty = true;
-                }
+            let n = doc.map.entities.iter_mut().map(|e| fix(e) as usize).sum::<usize>();
+            if n > 0 {
+                changed += n;
+                doc.mark_changed();
             }
         }
         for m in self.maps.clone() {
@@ -648,6 +652,7 @@ impl Editor {
         if let Some(doc) = &mut self.doc {
             if refactor::rename_in_map(&mut doc.map, kind, old, new) > 0 {
                 // Old snapshots still contain the old id.
+                doc.mark_changed();
                 doc.clear_history();
             }
         }
@@ -690,6 +695,7 @@ impl Editor {
             if open {
                 let (buf, _) = rust2d_engine::script_refs::rename_in_script(&self.db.script_text, kind, old, new);
                 self.db.script_text = buf;
+                self.db.script_dirty = self.db.script_text != self.db.script_saved;
             }
             if lines.is_empty() {
                 continue;
@@ -700,6 +706,10 @@ impl Editor {
             if let Err(e) = res {
                 errors.push(format!("{}: {e}", f.display()));
                 continue;
+            }
+            if open {
+                self.db.script_saved = text;
+                self.db.script_dirty = self.db.script_text != self.db.script_saved;
             }
             let name = f.file_name().unwrap_or_default().to_string_lossy().to_string();
             let lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
@@ -1025,6 +1035,9 @@ impl Editor {
             println!("[probe] {p:?}: layer {layer:?} (pixels per point {ppp})");
         }
         self.poll_file_dialog();
+        if self.defs_dirty && self.defs_saved.0 == self.project.db && self.defs_saved.1 == self.project.config {
+            self.defs_dirty = false; // edited and changed back
+        }
         if self.tex_dirty {
             self.tex = Textures::build(ctx, &self.assets);
             self.tex_dirty = false;
@@ -1291,7 +1304,7 @@ impl Editor {
                     self.save_all();
                 } else {
                     if let Some(d) = &mut self.doc {
-                        d.dirty = false;
+                        d.mark_saved();
                     }
                     self.defs_dirty = false;
                     self.px.doc = None;
@@ -1309,7 +1322,7 @@ impl Editor {
     /// Whether anything `p` would throw away is still unsaved.
     fn unsaved_for(&self, p: &Pending) -> bool {
         let leaving_project = matches!(p, Pending::Quit | Pending::OpenProject(_) | Pending::NewProject(_) | Pending::CloseProject);
-        self.doc.as_ref().is_some_and(|d| d.dirty) || (leaving_project && (self.defs_dirty || self.px.is_dirty()))
+        self.doc.as_ref().is_some_and(|d| d.is_dirty()) || (leaving_project && (self.defs_dirty || self.px.is_dirty()))
     }
 
     pub fn request(&mut self, p: Pending) {
@@ -1356,13 +1369,13 @@ impl Editor {
         if let Some(p) = self.pending.take() {
             let mut choice = Choice::None;
             let mut what = Vec::new();
-            if let Some(d) = self.doc.as_ref().filter(|d| d.dirty) {
+            if let Some(d) = self.doc.as_ref().filter(|d| d.is_dirty()) {
                 what.push(format!("map '{}'", d.map.name));
             }
             if self.defs_dirty {
                 what.push("definitions".to_string());
             }
-            if let Some(d) = self.px.doc.as_ref().filter(|d| d.dirty) {
+            if let Some(d) = self.px.doc.as_ref().filter(|d| d.is_dirty()) {
                 what.push(format!("image {}", d.rel));
             }
             egui::Window::new("Unsaved changes").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
@@ -2232,7 +2245,7 @@ impl Editor {
         doc.record_objects(before, "inspector");
         if let Some((old, new)) = rename_map {
             self.map_rename = None;
-            if doc.dirty {
+            if doc.is_dirty() {
                 self.save_map();
             }
             self.rename_id(RefKind::Map, &old, &new);
