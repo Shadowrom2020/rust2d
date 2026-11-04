@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.0.8 — 2026-11-04
 
 ### Gameplay
 - **Skills and magic**, both optional per project (Database › Project › Skills & magic). Skills
