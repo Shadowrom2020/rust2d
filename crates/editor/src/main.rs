@@ -17,6 +17,7 @@ mod new_project;
 mod pixel;
 mod script_editor;
 mod structures;
+mod ui;
 mod wizard;
 mod widgets;
 
@@ -72,7 +73,10 @@ async fn main() {
         (None, None) => Editor::empty(),
     };
     prevent_quit();
-    egui_macroquad::cfg(|ctx| ctx.options_mut(|o| o.line_scroll_speed = WHEEL_POINTS_PER_NOTCH * EMQ_WHEEL_DIVISOR));
+    egui_macroquad::cfg(|ctx| {
+        ctx.options_mut(|o| o.line_scroll_speed = WHEEL_POINTS_PER_NOTCH * EMQ_WHEEL_DIVISOR);
+        ui::install_fonts(ctx);
+    });
     // Debug aid: RUST2D_EDITOR_SCRIPT="tool entity; select entity 3; wait 0.5; shot a.png; quit"
     let mut script: VecDeque<Vec<String>> = std::env::var("RUST2D_EDITOR_SCRIPT")
         .map(|s| s.split(';').map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>()).filter(|c| !c.is_empty()).collect())

@@ -6,6 +6,12 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 ## Unreleased
 
 ### Editor
+- **Icons, ribbon and grouped menus**: the editor uses the Phosphor icon font. Map mode has a
+  tool ribbon under the menu (Edit · Select · Paint · Collision · Objects · Layer · View · Play)
+  with icon buttons whose tooltips give name, shortcut and a one-line how-to; the status bar shows
+  the active tool's how-to; the left panel holds the tool's options with the layers underneath.
+  Menus are grouped by task (File, Edit, Map, Assets, View, Play). Database tabs, library kinds,
+  the pixel editor's tools and all action buttons have matching icons (no more box glyphs).
 - **Structures**: multi-tile assets placed with one click — houses, wall and fence segments,
   rooms, ponds, groves, a plaza and more. New *Structures* map tool (H) with a categorized
   palette, a preview that follows the mouse and one undo step per placement. A structure sets

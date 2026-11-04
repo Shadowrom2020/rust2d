@@ -8,6 +8,7 @@ use rust2d_engine::entity::{EntityInstance, EntityKind};
 use rust2d_engine::project::TILE_SIZE;
 
 use crate::app::{Editor, Tool};
+use crate::ui::{self, ph};
 
 /// Sprite an entity of a structure shows (its own model, else the definition's).
 pub fn entity_sprite(db: &Database, e: &EntityInstance) -> Option<SpriteRef> {
@@ -176,17 +177,17 @@ impl Editor {
         });
         ui.weak("Pick one, then click the map to place it (one undo step) · right-click / Esc: stop placing.");
         ui.horizontal(|ui| {
-            if ui.button("➕ New…").on_hover_text("An empty structure, painted from tileset stamps in Database → Structures").clicked() {
+            if ui.button(ui::t(ph::PLUS, "New…")).on_hover_text("An empty structure, painted from tileset stamps in Database › Structures").clicked() {
                 self.new_structure();
             }
-            let label = if self.capture.dragging { "📐 Drag an area on the map…" } else { "📐 New from map area…" };
+            let label = ui::t(ph::SELECTION_PLUS, if self.capture.dragging { "Drag an area on the map…" } else { "New from map area…" });
             if ui.selectable_label(self.capture.dragging, label).on_hover_text("Drag a rectangle on the map: its tiles (all layers), collision and entities become a new structure").clicked() {
                 self.capture.dragging = !self.capture.dragging;
                 self.place_structure.clear();
             }
         });
         ui.horizontal(|ui| {
-            ui.label("🔍");
+            ui.label(ph::MAGNIFYING_GLASS);
             ui.add(egui::TextEdit::singleline(&mut self.structure_filter).hint_text("search").desired_width(150.0));
         });
         let q = self.structure_filter.trim().to_lowercase();
@@ -254,7 +255,7 @@ impl Editor {
                     let mut cats: Vec<String> = self.project.db.structures.iter().map(|d| d.category.clone()).filter(|c| !c.is_empty()).collect();
                     cats.sort();
                     cats.dedup();
-                    egui::ComboBox::from_id_salt("st_cat_pick").selected_text("⏷").width(30.0).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("st_cat_pick").selected_text("").width(24.0).show_ui(ui, |ui| {
                         for c in cats {
                             if ui.selectable_label(self.capture.category == c, &c).clicked() {
                                 self.capture.category = c;
@@ -267,7 +268,7 @@ impl Editor {
             ui.checkbox(&mut self.capture.ground, "Include the ground layer").on_hover_text("Off for things that should stand on whatever ground the map has (trees, walls, furniture)");
             ui.weak("Tiles of all layers, collision overrides and the entities standing in the area are copied. Inside the structure, empty upper layers clear what the map has there when placed.");
             ui.horizontal(|ui| {
-                create = ui.add_enabled(!self.capture.id.trim().is_empty(), egui::Button::new("✔ Create")).clicked();
+                create = ui.add_enabled(!self.capture.id.trim().is_empty(), egui::Button::new(ui::t(ph::CHECK, "Create"))).clicked();
                 cancel = ui.button("Cancel").clicked();
             });
         });
@@ -463,6 +464,18 @@ impl StTool {
     fn uses_layers(self) -> bool {
         matches!(self, StTool::Stamp | StTool::Keep | StTool::Clear)
     }
+    fn icon(self) -> &'static str {
+        match self {
+            StTool::Stamp => ph::PAINT_BRUSH,
+            StTool::Keep => ph::ERASER,
+            StTool::Clear => ph::X_CIRCLE,
+            StTool::Collision(1) => ph::WALL,
+            StTool::Collision(2) => ph::FOOTPRINTS,
+            StTool::Collision(0) => ph::MINUS,
+            StTool::Collision(_) => ph::GRID_FOUR,
+            StTool::Prop => ph::TREASURE_CHEST,
+        }
+    }
     fn label(self) -> &'static str {
         match self {
             StTool::Stamp => "Paint tiles",
@@ -558,7 +571,7 @@ pub fn structure_editor(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut Struct
 fn sidebar(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit) {
     let w = ui.available_width();
     let tool = |ui: &mut egui::Ui, st: &mut StructEdit, t: StTool, tip: &str| {
-        let r = ui.add_sized([w, 24.0], egui::SelectableLabel::new(st.tool == t, t.label())).on_hover_text(tip);
+        let r = ui.add_sized([w, 24.0], egui::SelectableLabel::new(st.tool == t, ui::t(t.icon(), t.label()))).on_hover_text(tip);
         if r.clicked() {
             st.tool = t;
         }
@@ -638,10 +651,10 @@ fn sidebar(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit) {
     }
     section(ui, "HISTORY");
     ui.horizontal(|ui| {
-        if ui.add_enabled(!st.undo.is_empty(), egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() {
+        if ui::icon_button(ui, !st.undo.is_empty(), ph::ARROW_ARC_LEFT, "Undo", "Ctrl+Z", "").clicked() {
             st.undo_step(d);
         }
-        if ui.add_enabled(!st.redo.is_empty(), egui::Button::new("Redo")).on_hover_text("Ctrl+Y").clicked() {
+        if ui::icon_button(ui, !st.redo.is_empty(), ph::ARROW_ARC_RIGHT, "Redo", "Ctrl+Y", "").clicked() {
             st.redo_step(d);
         }
     });
@@ -655,7 +668,7 @@ fn canvas_column(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, d
                 ui.label(egui::RichText::new(text).color(Color32::WHITE));
             });
         };
-        chip(ui, st.tool.label().to_string(), Color32::from_gray(70));
+        chip(ui, ui::t(st.tool.icon(), st.tool.label()), Color32::from_gray(70));
         if st.tool.uses_layers() {
             ui.label("on");
             chip(ui, format!("{} layer", layer_name(st.layer)), ACCENT);
@@ -701,7 +714,7 @@ fn canvas_column(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, d
                             crate::widgets::paint_sprite(ui, tex, assets, &s, r);
                         }
                         ui.label(format!("{} ({}, {})", e.def, (e.x / ts).floor(), ((e.y - 1.0) / ts).floor()));
-                        if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                        if ui.small_button(ph::X).on_hover_text("Remove").clicked() {
                             remove = Some(i);
                         }
                     });
@@ -719,7 +732,7 @@ fn canvas_column(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, d
 fn prop_picker(ui: &mut egui::Ui, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rust2d_engine::render::Assets) {
     section(ui, "PROPS");
     ui.horizontal(|ui| {
-        ui.label("🔍");
+        ui.label(ph::MAGNIFYING_GLASS);
         ui.add(egui::TextEdit::singleline(&mut st.prop_filter).hint_text("search").desired_width(200.0));
     });
     let q = st.prop_filter.trim().to_lowercase();

@@ -189,7 +189,7 @@ impl Editor {
                         Some(ModelPick::Library(c)) => format!("Library: {} (copied into the project)", self.lib_char_name(c)),
                     });
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(st.pick.is_some(), egui::Button::new("✔ Use this model")).clicked() {
+                        if ui.add_enabled(st.pick.is_some(), egui::Button::new("\u{E182} Use this model")).clicked() {
                             done = Some(true);
                         }
                         if ui.button("Cancel").clicked() {
@@ -216,7 +216,7 @@ impl Editor {
                 ui.selectable_value(&mut st.library, false, "This project");
                 ui.selectable_value(&mut st.library, true, "Asset library");
                 ui.separator();
-                ui.add(egui::TextEdit::singleline(&mut st.search).hint_text("🔍 search").desired_width(160.0));
+                ui.add(egui::TextEdit::singleline(&mut st.search).hint_text("\u{E30C} search").desired_width(160.0));
                 if st.library {
                     ui.selectable_value(&mut st.gender, Gender::All, "All");
                     ui.selectable_value(&mut st.gender, Gender::Male, "Male");
@@ -294,7 +294,7 @@ impl Editor {
                     }
                 });
             });
-            ui.weak("Click to preview, double-click (or ✔) to use. Library models are copied into the project's sprite sheets.");
+            ui.weak("Click to preview, double-click (or \u{E182}) to use. Library models are copied into the project's sprite sheets.");
         });
         match done {
             Some(true) => {

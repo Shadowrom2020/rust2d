@@ -271,7 +271,7 @@ impl Editor {
                         let mut cats: Vec<String> = self.project.db.structures.iter().map(|d| d.category.clone()).filter(|c| !c.is_empty()).collect();
                         cats.sort();
                         cats.dedup();
-                        egui::ComboBox::from_id_salt("wiz_cat").selected_text("⏷").width(30.0).show_ui(ui, |ui| {
+                        egui::ComboBox::from_id_salt("wiz_cat").selected_text("").width(24.0).show_ui(ui, |ui| {
                             for c in cats {
                                 ui.selectable_value(&mut w.category, c.clone(), c);
                             }
@@ -402,7 +402,7 @@ impl Editor {
             let hint = match (w.kind, w.source) {
                 (_, Source::Existing) => "The definition uses the chosen frame; nothing new is drawn.".to_string(),
                 (WKind::Character, _) => format!("Characters use 4 walk frames per row and one row per facing (down, left, right, up). Tiles are {ts}px."),
-                (WKind::Tileset, _) => format!("A tileset image of {ts}px tiles; mark solid tiles in Database → Tilesets."),
+                (WKind::Tileset, _) => format!("A tileset image of {ts}px tiles; mark solid tiles in Database \u{E13A} Tilesets."),
                 _ => format!("Tiles are {ts}px. After creating, the image opens in the pixel editor."),
             };
             ui.weak(hint);
