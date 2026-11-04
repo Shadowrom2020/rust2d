@@ -238,6 +238,18 @@ pub enum Cond {
     Quest { quest: String, check: crate::quest::QuestCheck, stage: u32 },
     /// The player character is male / female.
     PlayerSex { sex: crate::state::Sex },
+    /// The time of day is between `from` and `to` hours (wraps around midnight, e.g. 20 to 6).
+    TimeBetween { from: f32, to: f32 },
+}
+
+/// Whether `hour` lies in `from..to` (hours 0..24; `from > to` wraps around midnight).
+pub fn hour_between(hour: f32, from: f32, to: f32) -> bool {
+    let h = hour.rem_euclid(24.0);
+    if from <= to {
+        h >= from && h < to
+    } else {
+        h >= from || h < to
+    }
 }
 
 impl Cond {
@@ -251,6 +263,7 @@ impl Cond {
             Cond::PropState { .. } => "Prop state",
             Cond::Quest { .. } => "Quest",
             Cond::PlayerSex { .. } => "Player sex",
+            Cond::TimeBetween { .. } => "Time of day",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -263,6 +276,7 @@ impl Cond {
             Cond::PropState { target: "self".into(), state: String::new() },
             Cond::Quest { quest: String::new(), check: crate::quest::QuestCheck::Active, stage: 0 },
             Cond::PlayerSex { sex: crate::state::Sex::Female },
+            Cond::TimeBetween { from: 20.0, to: 6.0 },
         ]
     }
 }
@@ -290,6 +304,7 @@ impl Condition {
             Cond::PropState { .. } => false,
             Cond::Quest { quest, check, stage } => world.check_quest(quest, *check, *stage),
             Cond::PlayerSex { sex } => world.player_sex == *sex,
+            Cond::TimeBetween { from, to } => hour_between(world.hour, *from, *to),
         };
         v != self.negate
     }
@@ -358,6 +373,8 @@ pub enum Action {
         #[serde(default)]
         points: Vec<(i32, i32)>,
     },
+    /// Sets the time of day (hours, 0..24).
+    SetTime { hour: f32 },
 }
 
 impl Action {
@@ -386,6 +403,7 @@ impl Action {
             Action::OpenShop { .. } => "Open shop",
             Action::Quest { .. } => "Quest",
             Action::Patrol { .. } => "Patrol",
+            Action::SetTime { .. } => "Set time of day",
         }
     }
 
@@ -415,6 +433,7 @@ impl Action {
             Action::OpenShop { target: "self".into() },
             Action::Quest { quest: s(), op: crate::quest::QuestOp::Start, stage: 0 },
             Action::Patrol { target: "self".into(), active: true, points: Vec::new() },
+            Action::SetTime { hour: 8.0 },
         ]
     }
 }
@@ -458,6 +477,18 @@ pub fn useless_triggers(project: &crate::project::Project) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn time_of_day_condition_wraps_midnight() {
+        use crate::state::WorldState;
+        assert!(hour_between(22.0, 20.0, 6.0) && hour_between(3.0, 20.0, 6.0) && !hour_between(12.0, 20.0, 6.0));
+        assert!(hour_between(9.0, 8.0, 18.0) && !hour_between(18.0, 8.0, 18.0));
+        let mut w = WorldState { hour: 23.5, ..Default::default() };
+        let night = Condition::new(Cond::TimeBetween { from: 20.0, to: 6.0 });
+        assert!(night.eval(&w, &mut |_| false));
+        w.hour = 10.0;
+        assert!(!night.eval(&w, &mut |_| false));
+    }
+
     use super::*;
 
     #[test]

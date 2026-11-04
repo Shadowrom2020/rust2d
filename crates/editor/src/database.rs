@@ -61,6 +61,8 @@ pub struct DbState {
     pub art_open: bool,
     /// What the embedded editor last focused (to select its frame once).
     pub art_focus: Option<(String, u32)>,
+    /// Tilesets tab: clicks on the tile grid toggle light tiles.
+    pub tile_light_pick: bool,
     /// The structure editor (Structures tab).
     pub st_edit: crate::structures::StructEdit,
 }
@@ -87,6 +89,7 @@ struct Cx<'a> {
     /// Art actions handled after the form (they need the whole editor).
     art: &'a mut Option<ArtAction>,
     st_edit: &'a mut crate::structures::StructEdit,
+    tile_light_pick: &'a mut bool,
 }
 
 /// An id not yet used in `ids`, based on `prefix`.
@@ -280,6 +283,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         armor: None,
                         max_stack: 99,
                         value: 0,
+        light: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -299,6 +303,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         lock: None,
                         default_state: default_state_name(),
                         states: vec![],
+        light: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -323,6 +328,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         triggers: vec![],
                         shop: None,
                         loot: vec![],
+        light: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -331,7 +337,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.tilesets,
                     sel,
                     |d| d.id.clone(),
-                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![] },
+                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![], lights: vec![] },
                     |d| &mut d.id,
                 ),
                 Tab::Sheets => list_ui(
@@ -402,6 +408,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     art_open: &mut ed.db.art_open,
                     art: &mut art,
                     st_edit: &mut ed.db.st_edit,
+                    tile_light_pick: &mut ed.db.tile_light_pick,
                 };
                 let i = ed.db.sel;
                 let db = &mut ed.project.db;
@@ -601,6 +608,11 @@ fn weapon_ui(ui: &mut egui::Ui, id: &str, w: &mut Option<Weapon>, cx: &mut Cx, c
         ui.label("Knockback");
         ui.add(egui::DragValue::new(&mut w.knockback).range(0.0..=5.0).speed(0.05)).on_hover_text("Multiplier");
         ui.end_row();
+        if !character {
+            ui.label("Hands");
+            ui.checkbox(&mut w.two_handed, "Two-handed").on_hover_text("Nothing can be held in the left hand (shield, lantern) while this weapon is equipped");
+            ui.end_row();
+        }
         if let Some(r) = &mut w.ranged {
             ui.label("Speed (px/s)");
             ui.add(egui::DragValue::new(&mut r.speed).range(10.0..=2000.0));
@@ -644,26 +656,32 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     let mut kind = match (&d.weapon, &d.armor) {
         (Some(_), _) => 1,
         (None, Some(a)) if a.slot == EquipSlot::Head => 2,
+        (None, Some(a)) if a.slot == EquipSlot::Offhand => 4,
         (None, Some(_)) => 3,
         _ => 0,
     };
     let old = kind;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.radio_value(&mut kind, 0, "None");
         ui.radio_value(&mut kind, 1, "Weapon");
         ui.radio_value(&mut kind, 2, "Helmet");
         ui.radio_value(&mut kind, 3, "Body armor");
+        ui.radio_value(&mut kind, 4, "Left hand").on_hover_text("A shield (defense) or a light (lantern, torch: set its light below). Not usable together with a two-handed weapon.");
     });
     if kind != old {
         d.weapon = (kind == 1).then(|| Weapon::melee(1, 0.4));
         d.armor = match kind {
-            2 | 3 => {
-                let slot = if kind == 2 { EquipSlot::Head } else { EquipSlot::Body };
+            2..=4 => {
+                let slot = match kind {
+                    2 => EquipSlot::Head,
+                    3 => EquipSlot::Body,
+                    _ => EquipSlot::Offhand,
+                };
                 Some(d.armor.take().map(|a| Armor { slot, ..a }).unwrap_or(Armor { slot, defense: 1, speed: 0.0, overlay: String::new() }))
             }
             _ => None,
         };
-        if kind != 0 {
+        if kind != 0 && kind != 4 {
             d.max_stack = 1;
         }
     }
@@ -701,6 +719,9 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         }
     }
     ui.separator();
+    ui.heading("Light");
+    widgets::light_ui(ui, "item_light", &mut d.light, "Gives light (while equipped, e.g. in the left hand, or lying on the ground)");
+    ui.separator();
     ui.heading("Icon");
     widgets::sprite_field(ui, "item_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
     art_buttons(ui, cx, "icon", (1, 1));
@@ -722,6 +743,16 @@ fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     hitbox(ui, &mut d.hitbox);
     ui.separator();
     prop_states_ui(ui, d, cx);
+    ui.separator();
+    ui.heading("Light");
+    ui.weak("Light per state, e.g. a lamp that is lit in its \"lit\" state and dark in \"off\". Placed props can have their own light (map inspector).");
+    let names = d.state_names();
+    for (i, name) in names.iter().enumerate() {
+        let slot = if i == 0 { &mut d.light } else { &mut d.states[i - 1].light };
+        ui.push_id(("prop_light", i), |ui| {
+            widgets::light_ui(ui, "prop_light", slot, &format!("'{name}' gives light"));
+        });
+    }
     ui.separator();
     let states = d.state_names();
     ui.heading("Container");
@@ -755,7 +786,7 @@ fn prop_states_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     ui.heading("States");
     ui.weak("A prop always shows one of its states. Placed props start in the default state (or the one chosen in the map inspector); a lock, a container, the 'Set prop state' action or set_state(target, \"name\") in scripts switch to another.");
     // All states as one list (index 0 = the default state).
-    let mut all: Vec<PropState> = std::iter::once(PropState { name: d.default_state.clone(), sprite: d.sprite.clone(), solid: d.solid }).chain(d.states.iter().cloned()).collect();
+    let mut all: Vec<PropState> = std::iter::once(PropState { name: d.default_state.clone(), sprite: d.sprite.clone(), solid: d.solid, light: None }).chain(d.states.iter().cloned()).collect();
     let used: Vec<String> = [
         d.lock.as_ref().and_then(|l| match &l.on_unlock {
             OnUnlock::ToState { state } => Some(state.clone()),
@@ -866,7 +897,7 @@ fn prop_states_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
             let sprite = SpriteRef { frame: last.sprite.frame + last.sprite.cells().0, ..last.sprite.clone() };
             let names: Vec<String> = all.iter().map(|s| s.name.clone()).collect();
             let name = (2..).map(|k| format!("state_{k}")).find(|c| !names.contains(c)).unwrap();
-            all.push(PropState { name: name.clone(), sprite, solid: all[0].solid });
+            all.push(PropState { name: name.clone(), sprite, solid: all[0].solid, light: None });
             *cx.state_sel = all.len() - 1;
             *cx.state_rename = Some((all.len() - 1, name));
         }
@@ -1044,6 +1075,10 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     }
     widgets::loot_ui(ui, "chr_loot", &mut d.loot, cx.refs, cx.tex, cx.assets, cx.db);
     ui.separator();
+    ui.heading("Light");
+    widgets::light_ui(ui, "chr_light", &mut d.light, "Carries a light (e.g. a lantern)");
+    ui.weak("Placed characters can carry their own light instead (map inspector).");
+    ui.separator();
     ui.heading("Merchant");
     let mut on = d.shop.is_some();
     if ui.checkbox(&mut on, "Merchant (trades items with the player)").changed() {
@@ -1182,11 +1217,43 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
     });
     ui.ctx().request_repaint();
 
+    // ---- light tiles
+    ui.separator();
+    ui.heading("Light tiles");
+    ui.weak("Tiles that give light wherever they are placed (wall torches, lamps, glowing windows). Lights only show on maps that are dark (Map › Lighting).");
+    let mut remove = None;
+    for (k, tl) in d.lights.iter_mut().enumerate() {
+        ui.push_id(("tile_light", k), |ui| {
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
+                ui.painter().image(t.id(), rect, uv_of(tl.tile), Color32::WHITE);
+                ui.label(format!("tile {}", tl.tile));
+                if ui.small_button(ui::ph::TRASH).on_hover_text("No light for this tile").clicked() {
+                    remove = Some(k);
+                }
+            });
+            let mut l = Some(tl.light.clone());
+            widgets::light_ui(ui, "tile_light", &mut l, "gives light");
+            match l {
+                Some(l) => tl.light = l,
+                None => remove = Some(k),
+            }
+        });
+    }
+    if let Some(k) = remove {
+        d.lights.remove(k);
+    }
+    if ui.selectable_label(*cx.tile_light_pick, ui::t(ui::ph::LIGHTBULB, "Pick light tiles in the grid")).on_hover_text("While on, clicking a tile below adds or removes its light").clicked() {
+        *cx.tile_light_pick = !*cx.tile_light_pick;
+        *cx.anim_target = None;
+    }
+
     // ---- tile grid
     ui.separator();
-    match *cx.anim_target {
-        Some(k) => ui.label(format!("Click tiles to append frames to animation #{} (the first click also sets its base tile).", k + 1)),
-        None => ui.label("Click tiles to toggle solidity (red = blocks movement)."),
+    match (*cx.anim_target, *cx.tile_light_pick) {
+        (Some(k), _) => ui.label(format!("Click tiles to append frames to animation #{} (the first click also sets its base tile).", k + 1)),
+        (None, true) => ui.label("Click tiles to add or remove their light (yellow bulb = gives light)."),
+        (None, false) => ui.label("Click tiles to toggle solidity (red = blocks movement)."),
     };
     let scale = 3.0;
     let size = vec2(ts.image.width as f32 * scale, ts.image.height as f32 * scale);
@@ -1206,6 +1273,9 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
             if animated.contains(&i) {
                 p.rect_stroke(r, 0.0, Stroke::new(2.0_f32, Color32::LIGHT_BLUE), StrokeKind::Inside);
             }
+            if d.lights.iter().any(|l| l.tile == i) {
+                p.text(r.right_top() + vec2(-3.0, 2.0), egui::Align2::RIGHT_TOP, ui::ph::LIGHTBULB, egui::FontId::proportional(16.0), Color32::YELLOW);
+            }
             p.text(r.left_top() + vec2(2.0, 1.0), egui::Align2::LEFT_TOP, i.to_string(), egui::FontId::monospace(9.0), Color32::from_white_alpha(120));
         }
         if resp.clicked() {
@@ -1220,6 +1290,12 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
                             }
                             a.frames.push(i);
                         }
+                        None if *cx.tile_light_pick => match d.lights.iter().position(|l| l.tile == i) {
+                            Some(k) => {
+                                d.lights.remove(k);
+                            }
+                            None => d.lights.push(rust2d_engine::defs::TileLight { tile: i, light: rust2d_engine::defs::LightSpec::torch(4.0) }),
+                        },
                         None => {
                             if let Some(k) = d.solid.iter().position(|&s| s == i) {
                                 d.solid.remove(k);
@@ -1388,6 +1464,13 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         ui.end_row();
         ui.label("Inventory slots");
         ui.add(egui::DragValue::new(&mut c.inventory_size).range(1..=200));
+        ui.end_row();
+        ui.label("Day length");
+        ui.add(egui::DragValue::new(&mut c.day_minutes).range(0.0..=1440.0).speed(0.5).suffix(" min"))
+            .on_hover_text("Real minutes one in-game day lasts on outdoor maps (0 = the clock stands still)");
+        ui.end_row();
+        ui.label("New games start at");
+        ui.add(egui::DragValue::new(&mut c.start_hour).range(0.0..=23.99).speed(0.25).suffix(" h"));
         ui.end_row();
         ui.label("Player character");
         let ids: Vec<String> = ed.project.db.characters.iter().map(|d| d.id.clone()).collect();

@@ -141,6 +141,9 @@ pub struct ViewOpts {
     pub zones: bool,
     pub dim_layers: bool,
     pub minimap: bool,
+    /// Shows the map's darkness and lights at `hour` (outdoor maps) in the editor.
+    pub lighting: bool,
+    pub hour: f32,
 }
 
 pub struct Cam {
@@ -244,6 +247,9 @@ pub struct Editor {
     pub(crate) defs_saved: Box<(rust2d_engine::defs::Database, rust2d_engine::project::ProjectConfig)>,
     /// This editor is the Asset Library window (`--library`): `project` is the library.
     pub library_mode: bool,
+    /// Lighting preview: renderer and the map's tile lights (refreshed twice a second).
+    pub light_pass: Option<rust2d_engine::render::lighting::LightPass>,
+    pub light_cache: (f64, String, Vec<rust2d_engine::render::lighting::Light>),
     /// Main editor: the Asset Library window it started.
     pub lib_window: crate::library_window::LibWindow,
     /// Library mode: modification time of the library's definitions as last loaded / saved,
@@ -351,7 +357,9 @@ impl Editor {
             capture: Default::default(),
             place_recent: Vec::new(),
             zone_template: ZoneTemplate::Spawn,
-            view: ViewOpts { grid: true, collision: false, zones: true, dim_layers: false, minimap: true },
+            view: ViewOpts { grid: true, collision: false, zones: true, dim_layers: false, minimap: true, lighting: false, hour: 22.0 },
+            light_pass: None,
+            light_cache: (-1.0, String::new(), Vec::new()),
             status: (String::new(), 0.0),
             new_map: None,
             resize: None,
@@ -1339,6 +1347,7 @@ impl Editor {
                     ui.checkbox(&mut self.view.zones, "Zones & edges");
                     ui.checkbox(&mut self.view.dim_layers, "Dim inactive layers");
                     ui.checkbox(&mut self.view.minimap, "Minimap");
+                    ui.checkbox(&mut self.view.lighting, "Lighting preview");
                 });
                 ui.menu_button("Play", |ui| {
                     if ui.button(ui::t(ph::PLAY, "Play here   F5")).clicked() {
@@ -1420,6 +1429,16 @@ impl Editor {
                     ui::toggle(ui, &mut self.view.zones, ph::BOUNDING_BOX, "Zones & edges", "", "Zone rectangles, labels and edge links");
                     ui::toggle(ui, &mut self.view.dim_layers, ph::STACK, "Dim inactive layers", "", "Fades every layer except the active one");
                     ui::toggle(ui, &mut self.view.minimap, ph::MAP_TRIFOLD, "Minimap", "", "Overview in the corner of the map");
+                    ui::toggle(ui, &mut self.view.lighting, ph::LIGHTBULB, "Lighting preview", "", "Shows the map's darkness and its lights as in the game (outdoor maps at the hour chosen next to it)");
+                    let outdoor = self.doc.as_ref().is_some_and(|d| d.map.lighting.mode == rust2d_engine::map::LightMode::Outdoor);
+                    if self.view.lighting && outdoor {
+                        let mut h = self.view.hour;
+                        let label = format!("{:02}:{:02}", h as u32, (h.fract() * 60.0) as u32);
+                        if ui.add(egui::Slider::new(&mut h, 0.0..=23.99).show_value(false)).on_hover_text(format!("Preview time of day: {label}")).changed() {
+                            self.view.hour = h;
+                        }
+                        ui.label(egui::RichText::new(label).small());
+                    }
                     if ui::icon_button(ui, self.doc.is_some(), ph::CORNERS_OUT, "Fit map to view", "Home", "").clicked() {
                         self.fit_view();
                     }
@@ -2104,6 +2123,21 @@ impl Editor {
                     duplicate = ui.button("Duplicate").clicked();
                     delete = ui.button("Delete").clicked();
                 });
+                {
+                    ui.separator();
+                    let def_light = match e.kind {
+                        EntityKind::Prop => db.prop(&e.def).and_then(|d| d.state_index(&e.state).and_then(|i| d.state_light(i)).cloned()),
+                        EntityKind::Character => db.character(&e.def).and_then(|d| d.light.clone()),
+                        EntityKind::Item => db.item(&e.def).and_then(|d| d.light.clone()),
+                    };
+                    let what = if def_light.is_some() { "Own light (instead of the definition's)" } else { "Gives light (just this one)" };
+                    egui::CollapsingHeader::new(ui::t(ph::LIGHTBULB, "Light")).default_open(e.light.is_some()).show(ui, |ui| {
+                        if def_light.is_some() && e.light.is_none() {
+                            ui.weak("Uses the definition's light.");
+                        }
+                        widgets::light_ui(ui, &format!("ent_light{}", e.uid), &mut e.light, what);
+                    });
+                }
                 if e.kind == EntityKind::Character {
                     ui.separator();
                     ui.heading("Merchant");
@@ -2378,6 +2412,27 @@ impl Editor {
                         }
                     }
                 });
+                ui.separator();
+                ui.heading("Lighting");
+                {
+                    use rust2d_engine::map::LightMode;
+                    let l = &mut map.lighting;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.radio_value(&mut l.mode, LightMode::Bright, "Always bright").on_hover_text("No darkness; lights are not drawn");
+                        ui.radio_value(&mut l.mode, LightMode::Outdoor, "Outdoor (day & night)").on_hover_text("Bright by day, darker at night (the game clock runs on)");
+                        ui.radio_value(&mut l.mode, LightMode::Dark, "Dark (dungeon, cave)").on_hover_text("Always dark: only light sources show anything");
+                    });
+                    if l.mode != LightMode::Bright {
+                        ui.horizontal(|ui| {
+                            ui.label(if l.mode == LightMode::Outdoor { "Night darkness" } else { "Darkness" });
+                            let mut pct = (l.darkness * 100.0).round();
+                            if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %")).changed() {
+                                l.darkness = pct / 100.0;
+                            }
+                        });
+                        ui.weak("Lights: tiles (Database › Tilesets › Light tiles), props per state, characters and items (Database), and the player's equipped light. Preview: View › Lighting preview.");
+                    }
+                }
                 ui.separator();
                 ui.heading("Edge transitions");
                 ui.weak("Walking into a linked edge moves the player to the target map, keeping the position along the edge (+offset).");

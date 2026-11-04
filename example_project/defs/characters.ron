@@ -136,6 +136,7 @@
             reach: 1.0,
             arc: 60.0,
             knockback: 1.0,
+            two_handed: false,
         )),
         defense: 0,
         triggers: [],

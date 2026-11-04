@@ -43,7 +43,7 @@ fn quick_rects() -> Vec<Rect> {
     (0..QUICK_SLOTS).map(|k| Rect::new(x0 + k as f32 * (QUICK_SLOT + GAP), sh - QUICK_SLOT - 12.0, QUICK_SLOT, QUICK_SLOT)).collect()
 }
 
-const EQUIP_SLOTS: [EquipSlot; 3] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon];
+const EQUIP_SLOTS: [EquipSlot; 4] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
 const SHEET_W: f32 = 270.0;
 
 #[derive(Default)]
@@ -111,7 +111,7 @@ fn grid_size(n: usize, cols: usize) -> Vec2 {
 }
 
 /// Height of the character sheet panel.
-const SHEET_H: f32 = 400.0;
+const SHEET_H: f32 = 470.0;
 
 /// Container panels are at least this wide (title + "Take all" button).
 const MIN_CONTAINER_W: f32 = 300.0;
@@ -195,7 +195,7 @@ impl Game {
                 let total = SHEET_W + 24.0 + size.x;
                 let top = ((sh - h - DETAIL_H) / 2.0).max(10.0).round();
                 let x0 = ((sw - total) / 2.0).round();
-                let slots = (0..3).map(|k| Rect::new(x0 + 134.0, top + 50.0 + k as f32 * 60.0, SLOT, SLOT)).collect();
+                let slots = (0..EQUIP_SLOTS.len()).map(|k| Rect::new(x0 + 134.0, top + 50.0 + k as f32 * 60.0, SLOT, SLOT)).collect();
                 grids.push(Grid { side: Side::Equip, title: "Character".into(), panel: Rect::new(x0, top, SHEET_W, h), slots, cols: 1 });
                 let mut g = make_grid(Side::Player, player_title, vec2(x0 + SHEET_W + 24.0, top), cap, cols);
                 g.panel.h = h;
@@ -531,7 +531,7 @@ impl Game {
                 let right = input::pressed(KeyCode::Right) || input::pressed(KeyCode::D);
                 // Hop between the character sheet and the inventory grid.
                 if side == Side::Player && left && i % g.cols == 0 && layout.grid(Side::Equip).is_some() {
-                    self.inv.sel = Some((Side::Equip, (i / g.cols).min(2)));
+                    self.inv.sel = Some((Side::Equip, (i / g.cols).min(EQUIP_SLOTS.len() - 1)));
                     return (true, true);
                 }
                 if side == Side::Equip && right {
@@ -792,7 +792,12 @@ impl Game {
                     }
                 }
                 None => {
-                    let hint = if slot == EquipSlot::Weapon { "bare hands" } else { "empty" };
+                    let hint = match slot {
+                        EquipSlot::Weapon => "bare hands",
+                        EquipSlot::Offhand if self.two_handed_equipped() => "(two-handed)",
+                        EquipSlot::Offhand => "shield / light",
+                        _ => "empty",
+                    };
                     draw_text(hint, r.x + r.w + 8.0, r.y + 38.0, 15.0, GRAY);
                 }
             }
@@ -808,7 +813,7 @@ impl Game {
             format!("Attack time {:.2}s", st.cooldown),
             reach,
         ];
-        let y0 = p.y + 50.0 + 3.0 * 60.0 + 20.0;
+        let y0 = p.y + 50.0 + EQUIP_SLOTS.len() as f32 * 60.0 + 20.0;
         draw_line(p.x + PAD, y0 - 12.0, p.x + p.w - PAD, y0 - 12.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
         for (n, l) in lines.iter().enumerate() {
             draw_text(l, p.x + PAD, y0 + 8.0 + n as f32 * 22.0, 19.0, WHITE);

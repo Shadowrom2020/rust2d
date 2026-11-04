@@ -182,6 +182,10 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         frame: f.max(0) as u32
     })));
     engine.register_fn("player_name", with!(ctx, |c| c.world.player_name.clone()));
+    engine.register_fn("hour", with!(ctx, |c| c.world.hour as f64));
+    engine.register_fn("is_night", with!(ctx, |c| crate::render::lighting::is_night(c.world.hour)));
+    engine.register_fn("set_hour", with!(ctx, |c, h: f64| c.actions.push(Action::SetTime { hour: h as f32 })));
+    engine.register_fn("set_hour", with!(ctx, |c, h: i64| c.actions.push(Action::SetTime { hour: h as f32 })));
     engine.register_fn("player_sex", with!(ctx, |c| c.world.player_sex.key().to_string()));
     engine.register_fn("is_female", with!(ctx, |c| c.world.player_sex == crate::state::Sex::Female));
     engine.register_fn("is_male", with!(ctx, |c| c.world.player_sex == crate::state::Sex::Male));

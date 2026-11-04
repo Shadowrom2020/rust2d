@@ -1,4 +1,5 @@
-//! Equipment (head, body, weapon): equipping from the inventory, derived stats, armor overlays.
+//! Equipment (head, body, weapon, left hand): equipping from the inventory, two-handed weapons,
+//! derived stats, armor overlays.
 
 use macroquad::prelude::*;
 
@@ -37,7 +38,7 @@ impl Game {
     }
 
     fn armor_pieces(&self) -> impl Iterator<Item = &crate::defs::Armor> {
-        [EquipSlot::Head, EquipSlot::Body]
+        [EquipSlot::Head, EquipSlot::Body, EquipSlot::Offhand]
             .into_iter()
             .filter_map(|s| self.world.equipment.item(s))
             .filter_map(|id| self.project.db.item(id)?.armor.as_ref())
@@ -77,6 +78,18 @@ impl Game {
     pub(super) fn equip_from_slot(&mut self, i: usize) -> bool {
         let Some(stack) = self.world.inventory.slots.get(i).cloned().flatten() else { return false };
         let Some(slot) = self.project.db.item(&stack.item).and_then(|d| d.equip_slot()) else { return false };
+        // A two-handed weapon and something in the left hand don't go together: the other one
+        // goes back into the inventory first.
+        if let Some(other) = self.hand_conflict(&stack.item, slot) {
+            let name = |g: &Self, id: &str| g.project.db.item(id).map_or(id.to_string(), |d| d.name.clone());
+            let (new, old) = (name(self, &stack.item), self.world.equipment.item(other).map(|id| name(self, id)).unwrap_or_default());
+            if !self.unequip(other, None) {
+                self.ui.toast(format!("No room to put the {old} away"));
+                return false;
+            }
+            let why = if slot == EquipSlot::Weapon { format!("The {new} needs both hands") } else { format!("Both hands were on the {old}") };
+            self.ui.toast(format!("{why}: {old} put away"));
+        }
         let one = self.world.inventory.take_from_slot(i, Some(1)).unwrap();
         let old = self.world.equipment.slot_mut(slot).replace(one);
         if let Some(old) = old {
@@ -94,6 +107,22 @@ impl Game {
         let name = self.project.db.item(&stack.item).map_or(stack.item.clone(), |d| d.name.clone());
         self.ui.toast(format!("Equipped {name}"));
         true
+    }
+
+    /// The equipped slot that has to be emptied before `item` goes into `slot`: the left hand
+    /// for a two-handed weapon, a two-handed weapon for a left-hand item.
+    fn hand_conflict(&self, item: &str, slot: EquipSlot) -> Option<EquipSlot> {
+        let two_handed = |id: &str| self.project.db.item(id).and_then(|d| d.weapon.as_ref()).is_some_and(|w| w.two_handed);
+        match slot {
+            EquipSlot::Weapon if two_handed(item) && self.world.equipment.offhand.is_some() => Some(EquipSlot::Offhand),
+            EquipSlot::Offhand if self.world.equipment.item(EquipSlot::Weapon).is_some_and(two_handed) => Some(EquipSlot::Weapon),
+            _ => None,
+        }
+    }
+
+    /// Whether the equipped weapon needs both hands.
+    pub(super) fn two_handed_equipped(&self) -> bool {
+        self.current_weapon().is_some_and(|w| w.two_handed)
     }
 
     /// Equips the first inventory stack of `item`.

@@ -44,9 +44,11 @@ crates/engine/src/      library: everything shared by game and editor
   script_refs.rs        ids inside scripts: string arguments of API calls (API_IDS), used for
                         renames (rename_in_script) and the editor's script check
   runtime/              Game: mod.rs (loop, actions, drawing), combat, equipment, locks,
-                        inventory_ui, shop_ui, journal, creator, patrol, menu (title/pause), mouse,
+                        inventory_ui, shop_ui, journal, creator, patrol, lights (light sources,
+                        clock), menu (title/pause), mouse,
                         spawner, ui (dialogs, toasts), input (+ injection for autoplay)
-  quest.rs, inventory.rs, entity.rs, path.rs (A*), render/ (Assets, chunked tile renderer)
+  quest.rs, inventory.rs, entity.rs, path.rs (A*), render/ (Assets, chunked tile renderer;
+                        lighting.rs = day/night ambient, LightPass light map, tile_lights)
   library.rs            asset library + .r2dpack bundles; refactor.rs = id renames / refs_of_*
   migrate.rs            converts old 16 px projects; release.rs = standalone game export
   examples/gen_example/ generates example_project/ and the editor's starter.r2dpack
@@ -132,7 +134,7 @@ there and test on the copy. Set `RUST2D_MUTE=1`, and for the editor
 
 - **Game:** `RUST2D_AUTOPLAY="wait 1; press e; hold right 0.5; rclick 6 3; type Name; shop buy 0; close; status; shot /path/a.png; quit" target/debug/rust2d-game <project> [--no-title] [--map M --spawn S | --pos X,Y]`.
   Commands: `wait`, `press` (`press shift+g` holds Shift), `hold`, `click`/`rclick X Y` (tiles), `clickenemy`, `slot`,
-  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `status`,
+  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `settime H`, `status`,
   `spawners`, `shot`, `quit`. `status` prints player, creator, quests, shop, map, tile, hp,
   vars, inventory, flags. Load a crafted save with `press f9` from `<project>/saves/quick.ron`
   (a minimal `WorldState` RON) to start in a specific situation.
@@ -142,7 +144,7 @@ there and test on the copy. Set `RUST2D_MUTE=1`, and for the editor
   `libdialogadd`, `libwindow`, `libedit`…), structures (`structure ID`, `stplace X Y`,
   `stcapture X Y W H ID`, `stinfo`; structure editor: `stnew`, `stsize W H`, `stlayer N`,
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
-  `stpaint X Y`), `hover X Y` (tool previews), pixel editor (`px…`),
+  `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), pixel editor (`px…`),
   models (`model def|inst|look`, `modelpick`, `modeluse`), wizard (`newwizard`, `wiz`,
   `wizcreate`), `scriptsel`, `probe X Y` (egui layer at a point), `status`, `dump`.
 - **Asset Library window:** run `rust2d-editor --library` (with `RUST2D_LIBRARY=<scratch>/lib`)
@@ -155,7 +157,8 @@ there and test on the copy. Set `RUST2D_MUTE=1`, and for the editor
   repository. Add `ekey NAME [ctrl]` (egui key events) the same way for keyboard tests; after
   a Ctrl combination send a Ctrl key-up, or egui keeps ignoring typed text. There is no xdotool / Xvfb on this machine, and XTest on XWayland may prompt the
   user, so don't use it.
-- Look at screenshots with the Read tool; crop with PIL when details matter.
+- Look at screenshots with the Read tool; crop with PIL when details matter. Lighting:
+  `RUST2D_LIGHTMAP_DEBUG=1` draws the raw light map instead of multiplying it.
 - Dialog text types out over time: wait ~2.5 s before reading a screenshot, and the first `E`
   only completes the text, the second closes it.
 

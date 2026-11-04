@@ -4,6 +4,7 @@ mod combat;
 mod equipment;
 mod inventory_ui;
 mod journal;
+mod lights;
 mod creator;
 mod patrol;
 mod shop_ui;
@@ -124,12 +125,16 @@ struct RtEntity {
     patrol: Option<patrol::Patrol>,
     /// What the character drops when defeated.
     loot: Vec<crate::defs::LootEntry>,
+    /// Light of this placed entity instead of its definition's.
+    light: Option<crate::defs::LightSpec>,
 }
 
 struct Loaded {
     map: Map,
     solid: Vec<bool>,
     entities: Vec<RtEntity>,
+    /// Lights of light-giving tiles (computed when the map is entered).
+    tile_lights: Vec<render::lighting::Light>,
 }
 
 enum Fade {
@@ -174,6 +179,8 @@ pub struct Game {
     pub world: WorldState,
     scripts: ScriptHost,
     runner: ActionRunner,
+    /// Darkness and light renderer (created on first use).
+    light_pass: Option<render::lighting::LightPass>,
     loaded: Loaded,
     cache: VecDeque<Map>,
     player: Body,
@@ -219,7 +226,8 @@ impl Game {
             move_target: None,
         };
         let mut game = Game {
-            loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![] },
+            light_pass: None,
+            loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![], tile_lights: vec![] },
             project,
             assets,
             audio,
@@ -258,6 +266,7 @@ impl Game {
             _ => Arrival::Spawn(game.project.config.start_spawn.clone()),
         };
         game.world.player_hp = Some(game.combat.max_hp);
+        game.world.hour = game.project.config.start_hour;
         game.prepare_world();
         if start.title {
             game.open_title();
@@ -348,6 +357,7 @@ impl Game {
                 (EntityKind::Character, Some(d)) => d.loot.clone(),
                 _ => Vec::new(),
             },
+            light: None,
         }
     }
 
@@ -398,6 +408,7 @@ impl Game {
                 );
                 rt.count = count;
                 rt.sheet = e.sheet.clone();
+                rt.light = e.light.clone();
                 if e.kind == EntityKind::Character {
                     if let Some(loot) = &e.loot {
                         rt.loot = loot.clone();
@@ -437,7 +448,8 @@ impl Game {
         let ts = self.ts();
         let solid = self.assets.compute_solid(&map);
         let entities = self.build_entities(&map);
-        let old = std::mem::replace(&mut self.loaded, Loaded { map, solid, entities });
+        let tile_lights = render::lighting::tile_lights(&map, &self.project.db, ts);
+        let old = std::mem::replace(&mut self.loaded, Loaded { map, solid, entities, tile_lights });
         self.restore_unlocked();
         if !old.map.name.is_empty() && old.map.name != self.loaded.map.name {
             self.cache.push_front(old.map);
@@ -737,6 +749,9 @@ impl Game {
             return;
         }
         self.world.play_time += dt as f64;
+        if !self.on_title() && self.project.config.day_minutes > 0.0 {
+            self.world.hour = (self.world.hour + dt * 24.0 / (self.project.config.day_minutes * 60.0)).rem_euclid(24.0);
+        }
         if input::pressed(KeyCode::F3) {
             self.debug = !self.debug;
         }
@@ -1157,7 +1172,10 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.clock_text(),
+            self.loaded.map.lighting.mode,
+            self.lights().len(),
             self.patrol_status(),
             {
                 let ts = self.ts();
@@ -1174,8 +1192,7 @@ impl Game {
             self.world.player_hp,
             self.world.vars,
             self.world.quickbar,
-            [crate::defs::EquipSlot::Head, crate::defs::EquipSlot::Body, crate::defs::EquipSlot::Weapon]
-                .map(|s| self.world.equipment.item(s).unwrap_or("-").to_string()),
+            crate::defs::EquipSlot::ALL.map(|s| self.world.equipment.item(s).unwrap_or("-").to_string()),
             self.enemies_alive(),
             self.runner.busy(),
             self.ui.dialog_open(),
@@ -1318,6 +1335,12 @@ impl Game {
             render::draw_layer(m, layer, &sets, ts, view, WHITE);
         }
 
+        if let Some(ambient) = render::lighting::ambient(self.loaded.map.lighting, self.world.hour) {
+            let lights = self.lights();
+            self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(&cam, ambient, &lights, ts, get_time());
+            set_camera(&cam);
+        }
+
         if self.debug {
             self.draw_debug(view);
         }
@@ -1333,6 +1356,7 @@ impl Game {
         }
         if !self.on_title() {
             self.draw_hud();
+            self.draw_clock();
             if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
@@ -1504,6 +1528,10 @@ impl ActionHost for Game {
             }
             Action::Quest { quest, op, stage } => {
                 self.quest_changed(quest, *op, *stage);
+                Step::Continue
+            }
+            Action::SetTime { hour } => {
+                self.world.hour = hour.rem_euclid(24.0);
                 Step::Continue
             }
             Action::OpenShop { target } => {
