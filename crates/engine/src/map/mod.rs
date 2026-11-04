@@ -175,6 +175,8 @@ pub struct Map {
     pub music: String,
     /// Darkness of the map: always bright, day / night, or dark (dungeons).
     pub lighting: MapLighting,
+    /// Fog of war: the map screen only shows what the player has explored.
+    pub fog: bool,
 }
 
 /// How dark a map is when nothing lights it.
@@ -230,6 +232,7 @@ impl Map {
             background: [20, 20, 28],
             music: String::new(),
             lighting: MapLighting::default(),
+            fog: false,
         }
     }
 

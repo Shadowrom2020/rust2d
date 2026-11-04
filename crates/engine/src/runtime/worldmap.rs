@@ -1,7 +1,8 @@
 //! The map screen (M or the map button in the HUD): a picture of the current map with the
 //! player and the exits to other maps. It pauses the game while open. Scroll with the arrow keys
 //! or WASD, by dragging the map or the scrollbars, or with the mouse wheel (Shift: sideways);
-//! the + and - keys zoom, Space centers on the player, M or Esc close.
+//! the + and - keys zoom, Space centers on the player, M or Esc close. On maps with fog of war
+//! only the explored tiles (`WorldState::explored`) are shown.
 
 use macroquad::prelude::*;
 
@@ -45,6 +46,8 @@ pub(super) struct WorldMap {
     /// Map position (in tiles) shown in the middle of the view.
     center: Vec2,
     drag: Option<Drag>,
+    /// Fog of war: one pixel per tile, opaque where unexplored (`None` on maps without fog).
+    fog: Option<Texture2D>,
 }
 
 /// Buttons in the map screen's header.
@@ -95,6 +98,7 @@ impl Game {
         let fit = (v.w / mw).min(v.h / mh);
         // Exactly fitting (+ / - then step through the zoom levels).
         let zoom = fit.floor().clamp(MIN_OPEN_ZOOM, MAX_OPEN_ZOOM);
+        self.reveal_fog();
         let center = self.player.pos / self.ts();
         let wm = &mut self.worldmap;
         wm.open = true;
@@ -104,6 +108,67 @@ impl Game {
         wm.center = center;
         self.clamp_map_center();
         self.audio.play(&self.project.config.sfx.open_container);
+    }
+
+    /// Fog of war: marks the tiles around the player as explored (every frame on fog maps).
+    pub(super) fn reveal_fog(&mut self) {
+        let m = &self.loaded.map;
+        if !m.fog || self.on_title() {
+            return;
+        }
+        let (w, h) = (m.width, m.height);
+        let p = self.player.pos / self.ts();
+        let e = self.world.explored.entry(m.name.clone()).or_insert_with(|| crate::fog::Explored::new(w, h));
+        if e.size() != (w, h) {
+            *e = e.resized(w, h);
+        }
+        e.reveal(p.x, p.y - 0.3, crate::fog::REVEAL_RADIUS);
+    }
+
+    /// Middle (in tiles) of the explored part of `r` (in tiles); `None` if none of it is
+    /// explored. On maps without fog of war: the middle of `r`.
+    fn explored_center(&self, r: Rect) -> Option<Vec2> {
+        if !self.loaded.map.fog {
+            return Some(r.center());
+        }
+        let e = self.world.explored.get(&self.loaded.map.name)?;
+        let (x0, y0) = (r.x.floor() as i32, r.y.floor() as i32);
+        let (x1, y1) = ((r.x + r.w).ceil() as i32, (r.y + r.h).ceil() as i32);
+        let (mut sum, mut n) = (Vec2::ZERO, 0.0);
+        for y in y0..y1.max(y0 + 1) {
+            for x in x0..x1.max(x0 + 1) {
+                if e.get(x, y) {
+                    sum += vec2(x as f32 + 0.5, y as f32 + 0.5);
+                    n += 1.0;
+                }
+            }
+        }
+        (n > 0.0).then(|| sum / n)
+    }
+
+    /// The fog texture of the current map (`None` without fog of war).
+    fn build_fog(&self) -> Option<Texture2D> {
+        let m = &self.loaded.map;
+        if !m.fog {
+            return None;
+        }
+        let explored = self.world.explored.get(&m.name);
+        let mut img = Image::gen_image_color(m.width as u16, m.height as u16, Color::new(0.0, 0.0, 0.0, 0.0));
+        for y in 0..m.height {
+            for x in 0..m.width {
+                if explored.is_some_and(|e| e.get(x as i32, y as i32)) {
+                    continue;
+                }
+                // Slightly mottled, like clouds on a map.
+                let n = ((x.wrapping_mul(73856093) ^ y.wrapping_mul(19349663)) % 1000) as f32 / 1000.0;
+                let v = 0.13 + n * 0.035;
+                img.set_pixel(x, y, Color::new(v, v, v + 0.03, 1.0));
+            }
+        }
+        let t = Texture2D::from_image(&img);
+        // Soft edges between explored and unexplored tiles.
+        t.set_filter(FilterMode::Linear);
+        Some(t)
     }
 
     /// Keeps the view on the map; an axis that fits completely is centered.
@@ -316,6 +381,7 @@ impl Game {
         }
         if self.worldmap.redraw || self.worldmap.picture.is_none() {
             self.render_map_picture();
+            self.worldmap.fog = self.build_fog();
             self.worldmap.redraw = false;
         }
         let (sw, sh) = (screen_width(), screen_height());
@@ -338,8 +404,8 @@ impl Game {
             rt.texture.set_filter(if zoom >= *ppt { FilterMode::Nearest } else { FilterMode::Linear });
             let src = Rect::new((vis.x - origin.x) / zoom * ppt, (vis.y - origin.y) / zoom * ppt, vis.w / zoom * ppt, vis.h / zoom * ppt);
             draw_texture_ex(&rt.texture, vis.x, vis.y, WHITE, DrawTextureParams { dest_size: Some(vis.size()), source: Some(src), ..Default::default() });
-            // Exits to other maps.
-            let exits: Vec<(Rect, String, Vec2)> = self.map_exits().into_iter().map(|(r, t)| (r, t, r.center())).collect();
+            // Exits to other maps (under the fog: only their explored part shows).
+            let exits: Vec<(Rect, String, Vec2)> = self.map_exits().into_iter().filter_map(|(r, t)| Some((r, t, self.explored_center(r)?))).collect();
             for (r, _, _) in &exits {
                 let a = self.map_to_screen(vec2(r.x, r.y));
                 let sr = Rect::new(a.x, a.y, (r.w * zoom).max(4.0), (r.h * zoom).max(4.0));
@@ -348,8 +414,12 @@ impl Game {
                     draw_rectangle_lines(on.x, on.y, on.w, on.h, 2.0, GOLD);
                 }
             }
+            if let Some(fog) = &self.worldmap.fog {
+                let src = Rect::new((vis.x - origin.x) / zoom, (vis.y - origin.y) / zoom, vis.w / zoom, vis.h / zoom);
+                draw_texture_ex(fog, vis.x, vis.y, WHITE, DrawTextureParams { dest_size: Some(vis.size()), source: Some(src), ..Default::default() });
+            }
             draw_rectangle_lines(vis.x, vis.y, vis.w, vis.h, 1.0, Color::new(0.85, 0.8, 0.6, 0.5));
-            // Their labels: the map they lead to.
+            // Their labels: the map they lead to, at the explored part.
             for (_, target, c) in exits {
                 let c = self.map_to_screen(c);
                 if !v.contains(c) {
@@ -458,6 +528,7 @@ impl Game {
         if !wm.open {
             return "closed".into();
         }
-        format!("open zoom={} center={:.1},{:.1}", wm.zoom, wm.center.x, wm.center.y)
+        let explored = self.world.explored.get(&self.loaded.map.name).map_or(0, |e| e.count());
+        format!("open zoom={} center={:.1},{:.1} fog={} explored={explored}", wm.zoom, wm.center.x, wm.center.y, self.loaded.map.fog)
     }
 }

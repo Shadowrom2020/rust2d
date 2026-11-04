@@ -727,6 +727,8 @@ fn forest() -> Map {
     b.m.background = [10, 25, 10];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.8 };
+    // Explored regions: the map screen reveals it as the player walks around.
+    b.m.fog = true;
     // The old mine: a second cave mouth in the cliff, west of the one to the wilds.
     for yy in 7..=9 {
         for xx in 52..=56 {
@@ -864,6 +866,8 @@ fn wilds() -> Map {
     b.m.background = [30, 60, 120];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.75 };
+    // Explored regions: the map screen reveals it as the player walks around.
+    b.m.fog = true;
     b.m
 }
 
@@ -1242,6 +1246,8 @@ fn mine() -> Map {
     chest.lock = Some(LockSpec { pick_difficulty: 2, locked_text: "An old lock with no keyhole worth the name. A skilled lockpick might manage.".into(), ..Default::default() });
     b.m.background = [0, 0, 0];
     b.m.lighting = MapLighting { mode: LightMode::Dark, darkness: 1.0 };
+    // Explored regions: the map screen reveals it as the player walks around.
+    b.m.fog = true;
     b.m
 }
 

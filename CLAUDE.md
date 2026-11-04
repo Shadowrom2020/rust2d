@@ -38,6 +38,7 @@ crates/engine/src/      library: everything shared by game and editor
                         TILE_SIZE = 32, CharacterCreation / PlayerLook / SexChoice
   settings.rs           player options (Options menu): ~/.config/rust2d/<game>/settings.ron,
                         RUST2D_SETTINGS_DIR overrides the folder (set it to a scratch dir in tests)
+  fog.rs                fog of war: Explored (tiles per map, saved as a compact string), REVEAL_RADIUS
   state.rs              WorldState = save game (flags, vars, inventory, quests, shops,
                         player name/sex/look), Sex, expand_text() placeholders
   map/                  Map, tile layers, zones (spawn, portal, trigger, spawner, transition),
@@ -149,7 +150,7 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
   `libdialogadd`, `libwindow`, `libedit`…), structures (`structure ID`, `stplace X Y`,
   `stcapture X Y W H ID`, `stinfo`; structure editor: `stnew`, `stsize W H`, `stlayer N`,
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
-  `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), pixel editor (`px…`),
+  `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), pixel editor (`px…`),
   models (`model def|inst|look`, `modelpick`, `modeluse`), wizard (`newwizard`, `wiz`,
   `wizcreate`), `scriptsel`, `probe X Y` (egui layer at a point), `status`, `dump`.
 - **Asset Library window:** run `rust2d-editor --library` (with `RUST2D_LIBRARY=<scratch>/lib`)

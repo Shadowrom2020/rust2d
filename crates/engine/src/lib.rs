@@ -4,6 +4,7 @@ pub mod audio;
 pub mod defs;
 pub mod entity;
 pub mod events;
+pub mod fog;
 pub mod imageio;
 pub mod inventory;
 pub mod library;
