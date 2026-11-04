@@ -1639,6 +1639,18 @@ pub mod it {
     pub const LANTERN: u32 = 19;
     pub const TORCH: u32 = 20;
     pub const SHIELD: u32 = 21;
+    /// Magic: scroll, spell book, mana potion, spell icons, the spark projectile, a star
+    /// (arcana skill icon) and a lockpick (lockpicking skill icon).
+    pub const SCROLL: u32 = 22;
+    pub const BOOK: u32 = 23;
+    pub const MANA_POTION: u32 = 24;
+    pub const SPELL_HEAL: u32 = 25;
+    pub const SPELL_SPARK: u32 = 26;
+    pub const SPELL_LIGHT: u32 = 27;
+    pub const SPELL_BLAST: u32 = 28;
+    pub const SPARK_SHOT: u32 = 29;
+    pub const STAR: u32 = 30;
+    pub const LOCKPICK: u32 = 31;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -1658,11 +1670,11 @@ fn arrow(c: &mut Canvas, x0: i32, y: i32, len: i32, feathers: bool) {
 }
 
 pub fn items(out: &Path) {
-    let mut c = Canvas::new(TS * 22, TS);
+    let mut c = Canvas::new(TS * 32, TS);
     let n = TS as i32;
     let steel = [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6];
     let string = hex(0xe8e0c8);
-    for i in 0..22u32 {
+    for i in 0..32u32 {
         c.at(i * TS, 0);
         match i {
             it::KEY | it::BRONZE_KEY => {
@@ -1828,6 +1840,93 @@ pub fn items(out: &Path) {
                 c.disc(20.5, 9.0, 2.5, hex(0xfff8e1));
                 c.px(21, 2, hex(0xffa726));
                 c.px(18, 3, hex(0xef6c00));
+            }
+            it::SCROLL => {
+                // Rolled parchment with a red ribbon.
+                c.shade_box(6, 9, 20, 15, [0x9e9580, 0xd8d0bc, 0xf5f0e1, 0xffffff]);
+                c.shade_cyl(4, 6, 24, 5, [0x8a8070, 0xc8c0a8, 0xe8e0cc, 0xfff8e8]);
+                c.shade_cyl(4, 22, 24, 5, [0x8a8070, 0xc8c0a8, 0xe8e0cc, 0xfff8e8]);
+                for k in 0..4 {
+                    c.hline(9, 12 + k * 3, 14 - k * 2, hex(0x6a6060));
+                }
+                c.rect(14, 8, 4, 18, hex(0xb71c1c));
+            }
+            it::BOOK => {
+                // Closed book with a clasp and a glowing rune.
+                c.shade_box(5, 5, 22, 24, [0x2a1a4a, 0x4a2a7a, 0x6a3aa0, 0x8a5ac0]);
+                c.rect(5, 5, 4, 24, hex(0x2a1a4a));
+                c.rect(24, 10, 3, 14, hex(GOLD[1]));
+                c.shade_disc(16.0, 17.0, 5.0, [0x4a8aa0, 0x6ab0c8, 0x9adcf0, 0xe0fbff]);
+                c.px(16, 14, hex(0xffffff));
+            }
+            it::MANA_POTION => {
+                c.shade_box(13, 3, 6, 4, WOOD); // cork
+                c.rect(14, 7, 4, 5, hex(0xcfe8ff));
+                c.shade_disc(16.0, 20.0, 10.0, [0x7fa8c8, 0xa8cbe8, 0xcfe8ff, 0xffffff]);
+                c.shade_disc(16.0, 21.0, 8.0, [0x1a237e, 0x283593, 0x3f51b5, 0x7986cb]);
+                c.hline(9, 17, 14, hex(0x7986cb));
+                c.rect(11, 14, 2, 4, hex(0xffffff));
+            }
+            it::SPELL_HEAL => {
+                // Soft green glow with a cross.
+                c.shade_disc(16.0, 16.0, 12.0, [0x1d5124, 0x2e7d32, 0x43a047, 0x7cc56f]);
+                c.rect(13, 7, 6, 18, hex(0xe8ffe8));
+                c.rect(7, 13, 18, 6, hex(0xe8ffe8));
+            }
+            it::SPELL_SPARK => {
+                // Yellow lightning bolt on a blue disc.
+                c.shade_disc(16.0, 16.0, 12.0, [0x0d2a5a, 0x1a4a8a, 0x2a6ab0, 0x5a9ad8]);
+                for (x0, y0, x1, y1) in [(18.0, 5.0, 12.0, 16.0), (12.0, 16.0, 18.0, 16.0), (18.0, 16.0, 12.0, 27.0)] {
+                    c.stroke(x0, y0, x1, y1, 2.2, hex(0xffe84a));
+                }
+                c.px(17, 6, hex(0xffffff));
+            }
+            it::SPELL_LIGHT => {
+                // A sun.
+                c.shade_disc(16.0, 16.0, 12.0, [0x3a2a0a, 0x6a4a10, 0x9a7a20, 0xc0a040]);
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::TAU / 8.0;
+                    c.stroke(16.0 + a.cos() * 7.0, 16.0 + a.sin() * 7.0, 16.0 + a.cos() * 11.5, 16.0 + a.sin() * 11.5, 1.6, hex(0xffe8a0));
+                }
+                c.shade_disc(16.0, 16.0, 5.5, [0xe0a020, 0xffd040, 0xffe88a, 0xfffff0]);
+            }
+            it::SPELL_BLAST => {
+                // A ring of fire.
+                c.shade_disc(16.0, 16.0, 12.0, [0x3a0a0a, 0x6a1a10, 0x9a2a10, 0xc04a20]);
+                for k in 0..10 {
+                    let a = k as f32 * std::f32::consts::TAU / 10.0;
+                    let (x, y) = (16.0 + a.cos() * 8.0, 16.0 + a.sin() * 8.0);
+                    c.shade_disc(x, y, 3.2, [0xc62828, 0xef6c00, 0xffa726, 0xffe082]);
+                }
+                c.shade_disc(16.0, 16.0, 4.0, [0x3a0a0a, 0x6a1a10, 0x9a2a10, 0xc04a20]);
+            }
+            it::SPARK_SHOT => {
+                // Small bolt flying right.
+                c.stroke(4.0, 16.0, 24.0, 16.0, 2.5, hex(0xffe84a));
+                c.stroke(4.0, 16.0, 24.0, 16.0, 1.0, hex(0xffffff));
+                c.shade_disc(25.0, 16.0, 4.0, [0xc08a10, 0xffd040, 0xffe88a, 0xffffff]);
+            }
+            it::STAR => {
+                // Five-pointed star (arcana).
+                let pts: Vec<(f32, f32)> = (0..10).map(|k| {
+                    let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 5.0;
+                    let r = if k % 2 == 0 { 13.0 } else { 5.5 };
+                    (16.0 + a.cos() * r, 17.0 + a.sin() * r)
+                }).collect();
+                for k in 0..10 {
+                    let (a, b) = (pts[k], pts[(k + 1) % 10]);
+                    c.stroke(a.0, a.1, b.0, b.1, 2.0, hex(GOLD[2]));
+                }
+                c.disc(16.0, 17.0, 5.0, hex(GOLD[2]));
+                c.disc(16.0, 17.0, 2.5, hex(GOLD[3]));
+            }
+            it::LOCKPICK => {
+                // Two bent wires.
+                c.stroke(5.0, 26.0, 20.0, 11.0, 1.6, hex(0xc5d0d6));
+                c.stroke(20.0, 11.0, 26.0, 8.0, 1.6, hex(0xc5d0d6));
+                c.stroke(26.0, 8.0, 27.0, 12.0, 1.6, hex(0xc5d0d6));
+                c.stroke(4.0, 20.0, 22.0, 20.0, 1.6, hex(0x90a4ae));
+                c.stroke(22.0, 20.0, 26.0, 24.0, 1.6, hex(0x90a4ae));
             }
             it::SHIELD => {
                 // Round wooden shield: planks, iron rim and boss.

@@ -1,0 +1,92 @@
+//! Player options (graphics, sound, text): chosen in the game's Options menu and kept between
+//! sessions per game in `$XDG_CONFIG_HOME/rust2d/<game>/settings.ron` (`~/.config/...`;
+//! `$RUST2D_SETTINGS_DIR` overrides the folder).
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    pub fullscreen: bool,
+    /// Zoom on top of the project's pixel scale (1 = as designed).
+    pub zoom: f32,
+    pub show_fps: bool,
+    /// Volumes 0..1.
+    pub master_volume: f32,
+    pub music_volume: f32,
+    pub effects_volume: f32,
+    /// Dialog text speed multiplier (0 = instant).
+    pub text_speed: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { fullscreen: false, zoom: 1.0, show_fps: false, master_volume: 1.0, music_volume: 0.8, effects_volume: 1.0, text_speed: 1.0 }
+    }
+}
+
+/// Zoom levels the Options menu cycles through.
+pub const ZOOMS: [f32; 6] = [0.75, 1.0, 1.25, 1.5, 2.0, 2.5];
+/// Text speeds: slow, normal, fast, instant.
+pub const TEXT_SPEEDS: [(f32, &str); 4] = [(0.5, "Slow"), (1.0, "Normal"), (2.0, "Fast"), (0.0, "Instant")];
+
+impl Settings {
+    /// Folder of a game's settings (by the game's name).
+    pub fn dir(game_name: &str) -> Option<PathBuf> {
+        if let Some(d) = std::env::var_os("RUST2D_SETTINGS_DIR") {
+            return Some(PathBuf::from(d).join(crate::release::slug(game_name)));
+        }
+        let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+        Some(base.join("rust2d").join(crate::release::slug(game_name)))
+    }
+
+    /// The saved settings of a game (defaults if there are none or they can't be read).
+    pub fn load(game_name: &str) -> Settings {
+        let Some(path) = Self::dir(game_name).map(|d| d.join("settings.ron")) else { return Settings::default() };
+        match std::fs::read_to_string(&path) {
+            Ok(s) => ron::from_str(&s).unwrap_or_else(|e| {
+                eprintln!("[settings] {}: {e}; using defaults", path.display());
+                Settings::default()
+            }),
+            Err(_) => Settings::default(),
+        }
+    }
+
+    pub fn save(&self, game_name: &str) -> anyhow::Result<PathBuf> {
+        let dir = Self::dir(game_name).ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+        let path = dir.join("settings.ron");
+        crate::project::write_ron(&path, self)?;
+        Ok(path)
+    }
+
+    /// Effective volumes of music and effects (master applied).
+    pub fn music(&self) -> f32 {
+        (self.master_volume * self.music_volume).clamp(0.0, 1.0)
+    }
+    pub fn effects(&self) -> f32 {
+        (self.master_volume * self.effects_volume).clamp(0.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_and_defaults() {
+        let dir = std::env::temp_dir().join(format!("rust2d_settings_{}", std::process::id()));
+        std::env::set_var("RUST2D_SETTINGS_DIR", &dir);
+        assert_eq!(Settings::load("My Game"), Settings::default());
+        let s = Settings { fullscreen: true, zoom: 2.0, music_volume: 0.3, ..Default::default() };
+        let path = s.save("My Game").unwrap();
+        assert!(path.ends_with("my-game/settings.ron"));
+        assert_eq!(Settings::load("My Game"), s);
+        // Partial / older files fill in defaults.
+        std::fs::write(&path, "(zoom: 1.5)").unwrap();
+        assert_eq!(Settings::load("My Game"), Settings { zoom: 1.5, ..Default::default() });
+        assert!((s.music() - 0.3).abs() < 1e-6);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

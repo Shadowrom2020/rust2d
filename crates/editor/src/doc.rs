@@ -17,6 +17,9 @@ pub struct Objects {
     pub triggers: Vec<Trigger>,
     pub next_uid: u32,
     pub background: [u8; 3],
+    pub music: String,
+    pub lighting: rust2d_engine::map::MapLighting,
+    pub fog: bool,
 }
 
 impl Objects {
@@ -28,6 +31,9 @@ impl Objects {
             triggers: map.triggers.clone(),
             next_uid: map.next_uid,
             background: map.background,
+            music: map.music.clone(),
+            lighting: map.lighting,
+            fog: map.fog,
         }
     }
     fn apply(&self, map: &mut Map) {
@@ -37,6 +43,9 @@ impl Objects {
         map.triggers = self.triggers.clone();
         map.next_uid = self.next_uid;
         map.background = self.background;
+        map.music = self.music.clone();
+        map.lighting = self.lighting;
+        map.fog = self.fog;
     }
 }
 

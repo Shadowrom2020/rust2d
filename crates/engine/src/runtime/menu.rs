@@ -1,11 +1,12 @@
 //! Pause menu (Esc): resume, save to a named slot, load / delete saves, save and quit,
-//! quit to the title screen; and the title screen (main menu) itself.
+//! quit to the title screen; options (graphics, sound, text); and the title screen (main menu).
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use macroquad::prelude::*;
 
 use super::{input, ui::panel, Arrival, Fade, Game, FADE_TIME};
+use crate::settings::{Settings, TEXT_SPEEDS, ZOOMS};
 
 const W: f32 = 520.0;
 const ROW_H: f32 = 40.0;
@@ -28,7 +29,25 @@ enum Page {
     /// The window's close button was clicked: save before exiting? Holds the page to go back
     /// to on Cancel (None = back to the game).
     ConfirmClose(Option<Box<Page>>),
+    /// Player options (graphics, sound, text).
+    Options,
 }
+
+/// An entry of the Options page.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Opt {
+    Fullscreen,
+    Zoom,
+    ShowFps,
+    Master,
+    Music,
+    Effects,
+    TextSpeed,
+    Reset,
+    Back,
+}
+
+const OPTS: [Opt; 9] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::TextSpeed, Opt::Reset, Opt::Back];
 
 struct SaveInfo {
     slot: String,
@@ -77,6 +96,8 @@ enum Row {
     SaveExit,
     /// Exit the program without saving.
     ExitNoSave,
+    OptionsMenu,
+    Opt(Opt),
 }
 
 pub(super) fn now_secs() -> u64 {
@@ -150,6 +171,7 @@ impl Game {
                     (Row::NewGame, "New game".into(), String::new()),
                     (Row::Continue, "Continue".into(), latest),
                     (Row::LoadMenu, "Load game".into(), String::new()),
+                    (Row::OptionsMenu, "Options".into(), String::new()),
                     (Row::Exit, "Exit".into(), String::new()),
                 ]
             }
@@ -157,6 +179,7 @@ impl Game {
                 (Row::Resume, "Resume".into(), String::new()),
                 (Row::SaveMenu, "Save game".into(), String::new()),
                 (Row::LoadMenu, "Load game".into(), String::new()),
+                (Row::OptionsMenu, "Options".into(), "Graphics, sound and text".into()),
                 (Row::SaveQuit, "Save and quit".into(), format!("Saves to \"{}\" and returns to the main menu", display_name(&self.save_quit_slot()))),
                 (Row::Quit, "Quit".into(), "Back to the main menu without saving".into()),
             ],
@@ -184,6 +207,7 @@ impl Game {
                 (Row::ExitNoSave, "Exit without saving".into(), "Progress since the last save is lost".into()),
                 (Row::No, "Cancel".into(), "Back to the game".into()),
             ],
+            Page::Options => OPTS.iter().map(|o| (Row::Opt(*o), Self::opt_label(*o).into(), self.opt_value(*o))).collect(),
             Page::ConfirmOverwrite(_) | Page::ConfirmDelete(_) => {
                 vec![(Row::Yes, "Yes".into(), String::new()), (Row::No, "No".into(), String::new())]
             }
@@ -201,6 +225,7 @@ impl Game {
             Page::ConfirmDelete(s) => format!("Delete \"{}\"?", display_name(s)),
             Page::ConfirmQuit => "Quit without saving?".into(),
             Page::ConfirmClose(_) => "Exit the game?".into(),
+            Page::Options => "Options".into(),
         }
     }
 
@@ -243,7 +268,11 @@ impl Game {
             Page::ConfirmDelete(_) => self.go(Page::Load),
             Page::ConfirmQuit => {
                 self.go(Page::Main);
-                self.menu.sel = 4; // back on "Quit"
+                self.menu.sel = 5; // back on "Quit"
+            }
+            Page::Options => {
+                self.go(if self.menu.title { Page::Title } else { Page::Main });
+                self.menu.sel = 3; // back on "Options"
             }
             Page::ConfirmClose(back) => match back {
                 Some(p) => self.go(*p),
@@ -308,6 +337,9 @@ impl Game {
                 }
             }
             (_, Row::LoadMenu) => self.go(Page::Load),
+            (_, Row::OptionsMenu) => self.go(Page::Options),
+            (_, Row::Opt(Opt::Back)) => self.back(),
+            (_, Row::Opt(o)) => self.change_opt(o, 1, true),
             (_, Row::SaveQuit) => {
                 let slot = self.save_quit_slot();
                 match self.save_game(&slot) {
@@ -350,6 +382,96 @@ impl Game {
             }
             (_, Row::No) => self.back(),
             _ => {}
+        }
+    }
+
+    fn opt_label(o: Opt) -> &'static str {
+        match o {
+            Opt::Fullscreen => "Fullscreen",
+            Opt::Zoom => "Zoom",
+            Opt::ShowFps => "Show FPS",
+            Opt::Master => "Master volume",
+            Opt::Music => "Music volume",
+            Opt::Effects => "Effects volume",
+            Opt::TextSpeed => "Text speed",
+            Opt::Reset => "Reset to defaults",
+            Opt::Back => "Back",
+        }
+    }
+
+    fn opt_value(&self, o: Opt) -> String {
+        let s = &self.settings;
+        let on = |b: bool| if b { "On" } else { "Off" }.to_string();
+        let pct = |v: f32| format!("{:.0}%", v * 100.0);
+        match o {
+            Opt::Fullscreen => on(s.fullscreen),
+            Opt::Zoom => pct(s.zoom),
+            Opt::ShowFps => on(s.show_fps),
+            Opt::Master => pct(s.master_volume),
+            Opt::Music => pct(s.music_volume),
+            Opt::Effects => pct(s.effects_volume),
+            Opt::TextSpeed => TEXT_SPEEDS.iter().find(|t| t.0 == s.text_speed).map_or("Normal", |t| t.1).to_string(),
+            Opt::Reset | Opt::Back => String::new(),
+        }
+    }
+
+    /// Changes an option by one step (`wrap`: past the end starts over), applies and saves it.
+    fn change_opt(&mut self, o: Opt, dir: i32, wrap: bool) {
+        let step = |list: &[f32], cur: f32| -> f32 {
+            let i = list.iter().position(|v| (*v - cur).abs() < 1e-3).unwrap_or(0) as i32;
+            let n = list.len() as i32;
+            let j = if wrap { (i + dir).rem_euclid(n) } else { (i + dir).clamp(0, n - 1) };
+            list[j as usize]
+        };
+        const VOLUMES: [f32; 11] = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+        let s = &mut self.settings;
+        match o {
+            Opt::Fullscreen => s.fullscreen = !s.fullscreen,
+            Opt::ShowFps => s.show_fps = !s.show_fps,
+            Opt::Zoom => s.zoom = step(&ZOOMS, s.zoom),
+            Opt::Master => s.master_volume = step(&VOLUMES, s.master_volume),
+            Opt::Music => s.music_volume = step(&VOLUMES, s.music_volume),
+            Opt::Effects => s.effects_volume = step(&VOLUMES, s.effects_volume),
+            Opt::TextSpeed => {
+                let speeds: Vec<f32> = TEXT_SPEEDS.iter().map(|t| t.0).collect();
+                s.text_speed = step(&speeds, s.text_speed);
+            }
+            Opt::Reset => *s = Settings::default(),
+            Opt::Back => return,
+        }
+        self.apply_settings();
+        if o == Opt::Effects || o == Opt::Master {
+            self.audio.play(&self.project.config.sfx.pickup); // hear the new volume
+        }
+        if let Err(e) = self.settings.save(&self.project.config.name) {
+            self.menu.message = Some(format!("Could not save the options: {e}"));
+        }
+    }
+
+    /// Applies the options: volumes, fullscreen (zoom, FPS and text speed are read where used).
+    pub(super) fn apply_settings(&mut self) {
+        let s = self.settings.clone();
+        self.audio.set_volumes(s.effects(), s.music());
+        if self.fullscreen != Some(s.fullscreen) {
+            // At startup only switch if the player wants fullscreen (the window starts windowed).
+            if self.fullscreen.is_some() || s.fullscreen {
+                set_fullscreen(s.fullscreen);
+            }
+            self.fullscreen = Some(s.fullscreen);
+        }
+    }
+
+    /// World pixels to screen pixels: the project's pixel scale times the player's zoom.
+    pub(super) fn view_scale(&self) -> f32 {
+        (self.project.config.scale.max(1.0) * self.settings.zoom.clamp(0.25, 4.0)).max(0.5)
+    }
+
+    /// FPS counter (top right, under the clock) if the player turned it on.
+    pub(super) fn draw_fps(&self) {
+        if self.settings.show_fps {
+            let t = format!("{} fps", get_fps());
+            let w = measure_text(&t, None, 16, 1.0).width;
+            draw_text(&t, screen_width() - w - 14.0, 58.0, 16.0, Color::new(1.0, 1.0, 1.0, 0.7));
         }
     }
 
@@ -447,7 +569,7 @@ impl Game {
             } else if self.menu.sel >= self.menu.scroll + MAX_ROWS {
                 self.menu.scroll = self.menu.sel + 1 - MAX_ROWS;
             }
-            let wheel = mouse_wheel().1;
+            let wheel = input::wheel();
             if wheel != 0.0 && panel_rect.contains(m) && n > MAX_ROWS {
                 self.menu.scroll = if wheel < 0.0 { (self.menu.scroll + 1).min(n - MAX_ROWS) } else { self.menu.scroll.saturating_sub(1) };
             }
@@ -457,10 +579,31 @@ impl Game {
                     self.menu.sel = k;
                 }
             }
+            if self.menu.page == Page::Options {
+                let opt = OPTS[self.menu.sel.min(n - 1)];
+                if input::any_pressed(&[KeyCode::Left, KeyCode::A]) {
+                    self.change_opt(opt, -1, false);
+                } else if input::any_pressed(&[KeyCode::Right, KeyCode::D]) {
+                    self.change_opt(opt, 1, false);
+                }
+            }
             if input::any_pressed(&[KeyCode::Enter, KeyCode::Space, KeyCode::E]) {
                 self.activate_row(rows[self.menu.sel.min(n - 1)].0.clone());
             } else if input::mouse_pressed(MouseButton::Left) {
                 match hovered {
+                    // Options: "<" goes to the previous value, ">" to the next one, a click
+                    // elsewhere on the row cycles forward.
+                    Some(k) if self.menu.page == Page::Options && !matches!(OPTS[k], Opt::Reset | Opt::Back) => {
+                        self.menu.sel = k;
+                        let (prev, next) = opt_arrows(rects[k - self.menu.scroll]);
+                        if prev.contains(m) {
+                            self.change_opt(OPTS[k], -1, false);
+                        } else if next.contains(m) {
+                            self.change_opt(OPTS[k], 1, false);
+                        } else {
+                            self.change_opt(OPTS[k], 1, true);
+                        }
+                    }
                     Some(k) => {
                         self.menu.sel = k;
                         self.activate_row(rows[k].0.clone());
@@ -479,6 +622,22 @@ impl Game {
             self.back();
         }
         true
+    }
+
+    /// Screen position of an Options row's "<" (`prev`), ">" (`next`) or the row itself
+    /// (automated play-throughs); `None` unless the Options page is open.
+    pub fn option_click_pos(&self, row: usize, part: &str) -> Option<Vec2> {
+        if !self.menu.open || self.menu.page != Page::Options || row >= OPTS.len() {
+            return None;
+        }
+        let (_, rects) = self.menu_layout(OPTS.len());
+        let r = *rects.get(row.checked_sub(self.menu.scroll)?)?;
+        let (prev, next) = opt_arrows(r);
+        Some(match part {
+            "prev" => prev.center(),
+            "next" => next.center(),
+            _ => vec2(r.x + 40.0, r.y + r.h / 2.0),
+        })
     }
 
     fn name_ok_rect(&self) -> Rect {
@@ -534,7 +693,24 @@ impl Game {
             }
             let disabled = self.menu.page == Page::Title && idx == 1 && self.menu.saves.is_empty();
             let c = if disabled { GRAY } else if selected { GOLD } else { WHITE };
-            if detail.is_empty() {
+            if self.menu.page == Page::Options {
+                draw_text(label, r.x + 14.0, r.y + 26.0, 24.0, c);
+                if !detail.is_empty() {
+                    let (prev, next) = opt_arrows(*r);
+                    let base = if selected { WHITE } else { LIGHTGRAY };
+                    for (a, txt) in [(prev, "<"), (next, ">")] {
+                        let hot = a.contains(m);
+                        if hot {
+                            draw_rectangle(a.x + 2.0, a.y + 4.0, a.w - 4.0, a.h - 8.0, Color::new(1.0, 0.85, 0.3, 0.25));
+                        }
+                        let aw = measure_text(txt, None, 24, 1.0).width;
+                        draw_text(txt, a.x + (a.w - aw) / 2.0, r.y + 26.0, 24.0, if hot { GOLD } else { base });
+                    }
+                    // The value centered between the arrows.
+                    let vw = measure_text(detail, None, 22, 1.0).width;
+                    draw_text(detail, (prev.right() + next.x - vw) / 2.0, r.y + 25.0, 22.0, base);
+                }
+            } else if detail.is_empty() {
                 draw_text(label, r.x + 14.0, r.y + 26.0, 26.0, c);
             } else {
                 draw_text(label, r.x + 14.0, r.y + 17.0, 22.0, c);
@@ -550,6 +726,7 @@ impl Game {
             Page::Save => "Pick a save to overwrite, or make a new one · Esc: back",
             Page::Load => "Enter / click: load · Del: delete · Esc: back",
             Page::Name => "Type a name · Enter: save · Esc: back",
+            Page::Options => "Left/Right or click < >: change · saved right away · Esc: back",
             _ => "Enter / click · Esc: back",
         };
         if let Some(msg) = &self.menu.message {
@@ -557,6 +734,15 @@ impl Game {
         }
         draw_text(hint, p.x + 16.0, p.y + p.h - 12.0, 16.0, GRAY);
     }
+}
+
+/// Click areas of the "<" (previous value) and ">" (next value) arrows of an Options row.
+fn opt_arrows(r: Rect) -> (Rect, Rect) {
+    const AW: f32 = 30.0; // arrow width
+    const VALUE_W: f32 = 100.0; // room for the value between the arrows
+    let next = Rect::new(r.x + r.w - AW - 6.0, r.y, AW, r.h);
+    let prev = Rect::new(next.x - VALUE_W - AW, r.y, AW, r.h);
+    (prev, next)
 }
 
 #[cfg(test)]

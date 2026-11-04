@@ -21,6 +21,8 @@ pub enum IdKind {
     Quest,
     /// A prop state name.
     State,
+    Skill,
+    Spell,
 }
 
 impl IdKind {
@@ -32,6 +34,8 @@ impl IdKind {
             IdKind::Sound => "sound",
             IdKind::Quest => "quest",
             IdKind::State => "prop state",
+            IdKind::Skill => "skill",
+            IdKind::Spell => "spell",
         }
     }
     /// The definition kind renamed together with this id kind.
@@ -64,6 +68,10 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("quest_active", 0, IdKind::Quest),
     ("quest_done", 0, IdKind::Quest),
     ("set_state", 1, IdKind::State),
+    ("skill", 0, IdKind::Skill),
+    ("set_skill", 0, IdKind::Skill),
+    ("knows_spell", 0, IdKind::Spell),
+    ("learn_spell", 0, IdKind::Spell),
 ];
 
 /// A string literal argument of a function call.
@@ -277,6 +285,8 @@ pub fn check_script(src: &str, db: &Database, maps: &[String], spawns: &HashMap<
             IdKind::Sound => db.sound(v).is_some(),
             IdKind::Quest => db.quest(v).is_some(),
             IdKind::State => states.iter().any(|s| s == v),
+            IdKind::Skill => db.skill(v).is_some(),
+            IdKind::Spell => db.spell(v).is_some(),
         };
         if !known {
             let extra = match kind {
@@ -366,6 +376,7 @@ fn reward() {
             max_stack: 99,
             value: 0,
         light: None,
+        teaches: String::new(),
         });
         let maps = vec!["village".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("village".to_string(), vec!["gate".to_string()])].into();

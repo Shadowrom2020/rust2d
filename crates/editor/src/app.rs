@@ -600,6 +600,8 @@ impl Editor {
             vars: all_vars,
             quests: self.project.db.quests.iter().map(|q| q.id.clone()).collect(),
             quest_stages: self.project.db.quests.iter().map(|q| (q.id.clone(), q.stages.clone())).collect(),
+            skills: self.project.db.skills.iter().map(|q| q.id.clone()).collect(),
+            spells: self.project.db.spells.iter().map(|q| q.id.clone()).collect(),
         };
     }
 
@@ -673,6 +675,8 @@ impl Editor {
             RefKind::Sound => db.sounds.iter().any(|d| d.id == new),
             RefKind::Map => self.maps.iter().any(|m| m == new),
             RefKind::Structure => db.structures.iter().any(|d| d.id == new),
+            RefKind::Skill => db.skills.iter().any(|d| d.id == new),
+            RefKind::Spell => db.spells.iter().any(|d| d.id == new),
         };
         if taken {
             self.set_status(format!("'{new}' is already used"));
@@ -694,6 +698,8 @@ impl Editor {
             RefKind::Character => rename_def!(db.characters),
             RefKind::Sound => rename_def!(db.sounds),
             RefKind::Structure => rename_def!(db.structures),
+            RefKind::Skill => rename_def!(db.skills),
+            RefKind::Spell => rename_def!(db.spells),
             RefKind::Map => {
                 if let Err(e) = self.project.rename_map_file(old, new) {
                     self.set_status(format!("Rename failed: {e:#}"));
@@ -2433,6 +2439,12 @@ impl Editor {
                         ui.weak("Lights: tiles (Database › Tilesets › Light tiles), props per state, characters and items (Database), and the player's equipped light. Preview: View › Lighting preview.");
                     }
                 }
+                ui.separator();
+                ui.heading("Map screen");
+                ui.checkbox(&mut map.fog, "Fog of war").on_hover_text(
+                    "The in-game map (M) only shows what the player has explored: about 6 tiles around everywhere they have been. Off: the whole map is shown right away.",
+                );
+                ui.weak(if map.fog { "Players uncover this map by exploring it." } else { "The map screen shows this whole map." });
                 ui.separator();
                 ui.heading("Edge transitions");
                 ui.weak("Walking into a linked edge moves the player to the target map, keeping the position along the edge (+offset).");

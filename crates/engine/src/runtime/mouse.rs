@@ -72,7 +72,7 @@ impl Game {
         ((e.body.pos.x / ts).floor() as i32, ((e.body.pos.y - 0.5) / ts).floor() as i32)
     }
 
-    fn mouse_world(&self) -> Vec2 {
+    pub(super) fn mouse_world(&self) -> Vec2 {
         self.camera().screen_to_world(input::mouse_pos())
     }
 
@@ -89,7 +89,7 @@ impl Game {
         Rect::new(e.body.pos.x - size.x / 2.0, e.body.pos.y - size.y, size.x, size.y)
     }
 
-    fn entity_under(&self, p: Vec2) -> Option<usize> {
+    pub(super) fn entity_under(&self, p: Vec2) -> Option<usize> {
         self.loaded
             .entities
             .iter()

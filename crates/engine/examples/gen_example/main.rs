@@ -12,6 +12,7 @@ use rust2d_engine::audio::wav_bytes;
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
 use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
+use rust2d_engine::skills::{SkillDef, SpellDef};
 use rust2d_engine::state::Sex;
 
 mod art;
@@ -215,6 +216,40 @@ fn light(mut d: ItemDef, l: LightSpec) -> ItemDef {
     d
 }
 
+/// A scroll or book that teaches a spell when used.
+fn teach(mut d: ItemDef, spell: &str) -> ItemDef {
+    d.teaches = spell.into();
+    d
+}
+
+/// The example's skills: combat, defense, lockpicking, haggling, arcana and a scripted one.
+fn skills() -> Vec<SkillDef> {
+    use rust2d_engine::skills::SkillEffect as E;
+    let icon = |f: u32| SpriteRef::new("items", f);
+    vec![
+        SkillDef::new("swordsmanship", "Swordsmanship", "Training with blades and fists: every level adds 10% to your melee damage.", icon(it::SWORD), 5, E::MeleeDamage { percent: 10.0 }),
+        SkillDef::new("archery", "Archery", "A steady hand with bow and crossbow: every level adds 10% to ranged weapon damage.", icon(it::BOW), 5, E::RangedDamage { percent: 10.0 }),
+        SkillDef::new("toughness", "Toughness", "Take hits like a stone wall: every level adds 1 defense.", icon(it::CHAIN), 3, E::Defense { points: 1 }),
+        SkillDef::new("lockpicking", "Lockpicking", "Opens locks without their key. Level 1 picks simple padlocks, level 2 old mine locks.", icon(it::LOCKPICK), 3, E::Lockpick),
+        SkillDef::new("haggling", "Haggling", "Merchants give you better prices: 5% per level when buying and selling.", icon(it::COIN), 4, E::Haggle { percent: 5.0 }),
+        SkillDef::new("arcana", "Arcana", "Understanding of magic. Each level adds 10 mana, and harder spells need it to be learned.", icon(it::STAR), 5, E::Mana { points: 10 }),
+        SkillDef::new("spellcraft", "Spellcraft", "Focus and precision: every level adds 15% to the damage of Spark and Fire Burst.", icon(it::SPELL_SPARK), 4, E::SpellDamage { percent: 15.0 }),
+        SkillDef::new("scavenging", "Scavenging", "An eye for what others leave behind: defeated slimes drop an extra coin per level (a scripted skill: see scavenging() in main.rhai).", icon(it::APPLE), 3, E::Script { function: "scavenging".into() }),
+    ]
+}
+
+/// The example's spells, learned from scrolls and books.
+fn spells() -> Vec<SpellDef> {
+    use rust2d_engine::skills::SpellEffect as E;
+    let icon = |f: u32| SpriteRef::new("items", f);
+    vec![
+        SpellDef::new("heal", "Heal", "Mends your wounds: restores 3 hearts.", icon(it::SPELL_HEAL), 10, 2.0, E::Heal { amount: 6 }),
+        SpellDef::new("light", "Light", "A glow around you for a minute - handy in the old mine.", icon(it::SPELL_LIGHT), 6, 1.0, E::Light { radius: 5.0, seconds: 60.0 }),
+        SpellDef::new("spark", "Spark", "Hurls a bolt of lightning in the direction you face.", icon(it::SPELL_SPARK), 5, 0.6, E::Bolt { damage: 3, projectile: icon(it::SPARK_SHOT), speed: 320.0 * R, range: 7.0 }).requires("arcana", 1),
+        SpellDef::new("fire_burst", "Fire Burst", "Flames burst out around you, hitting everything nearby.", icon(it::SPELL_BLAST), 15, 4.0, E::Blast { damage: 4, radius: 2.0 }).requires("arcana", 2),
+    ]
+}
+
 fn quest(id: &str, op: QuestOp, stage: u32) -> Action {
     Action::Quest { quest: id.into(), op, stage }
 }
@@ -374,6 +409,7 @@ fn village() -> Map {
                         quest("strange_lights", QuestOp::Complete, 0),
                         Action::GiveItem { item: "coin".into(), count: 25 },
                         dialog("", "Received 25 coins!"),
+                        Action::GiveSkillPoints { amount: 2 },
                     ],
                     otherwise: vec![],
                 },
@@ -468,6 +504,9 @@ fn shop() -> Map {
             ShopEntry::new("lantern", 1, 0),
             ShopEntry { unlimited: true, ..ShopEntry::new("torch", 0, 0) },
             ShopEntry::new("wooden_shield", 1, 0),
+            ShopEntry::new("scroll_heal", 2, 0),
+            ShopEntry::new("scroll_light", 1, 0),
+            ShopEntry { unlimited: true, ..ShopEntry::new("mana_potion", 0, 0) },
         ],
         sell_rate: 50,
         open_on_talk: true,
@@ -508,6 +547,7 @@ fn shop() -> Map {
                 dialog("Tilda", "Five slimes? My deliveries are safe again - thank you, {player}! Here, as promised."),
                 Action::GiveItem { item: "coin".into(), count: 30 },
                 Action::GiveItem { item: "potion".into(), count: 1 },
+                Action::GiveSkillPoints { amount: 1 },
                 quest("pest_control", QuestOp::Complete, 0),
             ],
         ),
@@ -547,7 +587,7 @@ fn house() -> Map {
     let chest = b.entity(EntityKind::Prop, "chest", 9, 3);
     chest.container = Some(ContainerSpec {
         size: 8,
-        items: vec![ItemStack::new("key", 1), ItemStack::new("sword", 1), ItemStack::new("coin", 10), ItemStack::new("potion", 2), ItemStack::new("letter", 1)],
+        items: vec![ItemStack::new("key", 1), ItemStack::new("sword", 1), ItemStack::new("coin", 10), ItemStack::new("potion", 2), ItemStack::new("letter", 1), ItemStack::new("spellbook_spark", 1)],
         conditions: vec![cond(flag("quest_accepted"))],
         locked_text: "It's the elder's chest. Better not open it without asking.".into(),
         open_state: "open".into(),
@@ -645,7 +685,8 @@ fn forest() -> Map {
     // A locked chest: needs the Bronze Key from the village.
     chest.lock = Some(LockSpec {
         key: "bronze_key".into(),
-        locked_text: "A sturdy padlock. You need a Bronze Key.".into(),
+        locked_text: "A sturdy padlock. You need a Bronze Key - or a steady hand with a lockpick.".into(),
+        pick_difficulty: 1,
         ..Default::default()
     });
     // Spawners (invisible in game): slimes come back whenever you re-enter the forest,
@@ -686,6 +727,8 @@ fn forest() -> Map {
     b.m.background = [10, 25, 10];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.8 };
+    // Explored regions: the map screen reveals it as the player walks around.
+    b.m.fog = true;
     // The old mine: a second cave mouth in the cliff, west of the one to the wilds.
     for yy in 7..=9 {
         for xx in 52..=56 {
@@ -823,6 +866,8 @@ fn wilds() -> Map {
     b.m.background = [30, 60, 120];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.75 };
+    // Explored regions: the map screen reveals it as the player walks around.
+    b.m.fog = true;
     b.m
 }
 
@@ -874,6 +919,7 @@ fn database() -> Database {
         max_stack: 99,
         value: 0,
         light: None,
+        teaches: String::new(),
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -999,6 +1045,12 @@ fn database() -> Database {
             // Left hand: lights and a shield (not together with a two-handed weapon).
             light(stack(armor(item("lantern", "Lantern", "A steady light for dark places. Hold it in your left hand.", it::LANTERN, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new() }), 1), LightSpec::new(5.5, [255, 220, 170], false)),
             light(stack(armor(item("torch", "Torch", "A flickering torch for the left hand. Cheap, but it lights less than a lantern.", it::TORCH, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new() }), 5), LightSpec::torch(4.0)),
+            // Magic: scrolls and books teach spells (scrolls are used up), mana potions.
+            teach(stack(item("scroll_heal", "Scroll of Healing", "Reading it teaches the Heal spell. The scroll crumbles afterwards.", it::SCROLL, true, vec![]), 5), "heal"),
+            teach(stack(item("scroll_light", "Scroll of Light", "Teaches the Light spell: a glow around you in dark places.", it::SCROLL, true, vec![]), 5), "light"),
+            teach(stack(item("spellbook_spark", "Book of Sparks", "A worn spell book. Teaches Spark - but it takes some arcane knowledge to understand.", it::BOOK, false, vec![]), 1), "spark"),
+            teach(stack(item("tome_fire", "Tome of Fire", "Fire Burst: flames around you. Needs a trained arcanist.", it::BOOK, false, vec![]), 1), "fire_burst"),
+            stack(item("mana_potion", "Blue Potion", "Restores 20 mana.", it::MANA_POTION, true, use_trig(vec![Action::AddMana { amount: 20 }])), 10),
             stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new() }), 1),
             stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
         ],
@@ -1089,6 +1141,8 @@ fn database() -> Database {
                 ..ch("merchant_f", "Merchant (female)", "merchant_f", 35.0, Behavior::Static)
             },
         ],
+        skills: skills(),
+        spells: spells(),
     };
     // Trade values (merchants use them unless their stock sets a price).
     for (id, v) in [
@@ -1109,6 +1163,11 @@ fn database() -> Database {
         ("lantern", 25),
         ("torch", 4),
         ("wooden_shield", 18),
+        ("scroll_heal", 20),
+        ("scroll_light", 12),
+        ("spellbook_spark", 60),
+        ("tome_fire", 120),
+        ("mana_potion", 12),
     ] {
         db.items.iter_mut().find(|i| i.id == id).expect(id).value = v;
     }
@@ -1179,12 +1238,16 @@ fn mine() -> Map {
     let chest = b.entity(EntityKind::Prop, "chest", 4, 12);
     chest.container = Some(ContainerSpec {
         size: 8,
-        items: vec![ItemStack::new("wooden_shield", 1), ItemStack::new("coin", 15), ItemStack::new("potion", 1)],
+        items: vec![ItemStack::new("wooden_shield", 1), ItemStack::new("coin", 15), ItemStack::new("potion", 1), ItemStack::new("tome_fire", 1), ItemStack::new("mana_potion", 2)],
         open_state: "open".into(),
         ..Default::default()
     });
+    // No key exists for it: only lockpicking 2 opens it.
+    chest.lock = Some(LockSpec { pick_difficulty: 2, locked_text: "An old lock with no keyhole worth the name. A skilled lockpick might manage.".into(), ..Default::default() });
     b.m.background = [0, 0, 0];
     b.m.lighting = MapLighting { mode: LightMode::Dark, darkness: 1.0 };
+    // Explored regions: the map screen reveals it as the player walks around.
+    b.m.fog = true;
     b.m
 }
 
@@ -1206,6 +1269,9 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               quest_done(id)
 // Player:       player_name() player_sex() ("male"/"female") is_female() is_male()
 //               text("...") fills in placeholders: {player} {sir|madam} {variable}
+// Skills/magic: skill(id) skill_points() knows_spell(id) mana(); queued: set_skill(id, level)
+//               give_skill_points(n) learn_spell(id) add_mana(n) damage_around(dmg, radius)
+//               player_light(radius, seconds)
 // Other:        player_hp() random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
@@ -1258,8 +1324,18 @@ fn shrine_touch() {
 }
 
 // Called by the slime's "Defeated" trigger (what slimes drop is set in their loot table).
+// A scripted skill effect (Database > Skills > Scavenging, effect "Script"): the engine calls
+// scavenging(level) whenever the level changes, and once when a game starts or loads.
+fn scavenging(level) {
+    set_var("scavenging", level);
+}
+
 fn slime_defeated() {
     add_var("slimes_defeated", 1);
+    // Scavenging (a scripted skill) adds a coin per level to every slime.
+    if get_var("scavenging") > 0 {
+        give_item("coin", get_var("scavenging"));
+    }
     // Tilda's quest counts slimes once it was accepted.
     if quest_active("pest_control") && quest_stage("pest_control") == 0 {
         add_var("pest_slimes", 1);
@@ -1358,6 +1434,7 @@ fn main() {
                 .collect(),
             },
         day_minutes: 24.0, start_hour: 8.0,
+        skills: rust2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
         },
         db: database(),
     };

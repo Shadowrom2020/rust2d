@@ -16,6 +16,9 @@
 //               quest_done(id)
 // Player:       player_name() player_sex() ("male"/"female") is_female() is_male()
 //               text("...") fills in placeholders: {player} {sir|madam} {variable}
+// Skills/magic: skill(id) skill_points() knows_spell(id) mana(); queued: set_skill(id, level)
+//               give_skill_points(n) learn_spell(id) add_mana(n) damage_around(dmg, radius)
+//               player_light(radius, seconds)
 // Other:        player_hp() random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
@@ -68,8 +71,18 @@ fn shrine_touch() {
 }
 
 // Called by the slime's "Defeated" trigger (what slimes drop is set in their loot table).
+// A scripted skill effect (Database > Skills > Scavenging, effect "Script"): the engine calls
+// scavenging(level) whenever the level changes, and once when a game starts or loads.
+fn scavenging(level) {
+    set_var("scavenging", level);
+}
+
 fn slime_defeated() {
     add_var("slimes_defeated", 1);
+    // Scavenging (a scripted skill) adds a coin per level to every slime.
+    if get_var("scavenging") > 0 {
+        give_item("coin", get_var("scavenging"));
+    }
     // Tilda's quest counts slimes once it was accepted.
     if quest_active("pest_control") && quest_stage("pest_control") == 0 {
         add_var("pest_slimes", 1);

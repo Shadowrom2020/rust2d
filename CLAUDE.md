@@ -31,10 +31,14 @@ before merging, commit messages — are in AGENTS.md and apply in full:
 crates/engine/src/      library: everything shared by game and editor
   defs.rs               Database: tilesets, sheets, items, props (+states, container, lock),
                         characters (+shop), sounds, quests, structures; serde formats of defs/*.ron
+  skills.rs             SkillSettings (project), SkillDef / SkillEffect, SpellDef / SpellEffect
   structure.rs          StructureDef::capture / place (multi-tile assets; editor-only, placing
                         writes ordinary tiles + entities)
   project.rs            ProjectConfig (project.ron), defs loading/saving (DEFS list),
                         TILE_SIZE = 32, CharacterCreation / PlayerLook / SexChoice
+  settings.rs           player options (Options menu): ~/.config/rust2d/<game>/settings.ron,
+                        RUST2D_SETTINGS_DIR overrides the folder (set it to a scratch dir in tests)
+  fog.rs                fog of war: Explored (tiles per map, saved as a compact string), REVEAL_RADIUS
   state.rs              WorldState = save game (flags, vars, inventory, quests, shops,
                         player name/sex/look), Sex, expand_text() placeholders
   map/                  Map, tile layers, zones (spawn, portal, trigger, spawner, transition),
@@ -45,7 +49,8 @@ crates/engine/src/      library: everything shared by game and editor
                         renames (rename_in_script) and the editor's script check
   runtime/              Game: mod.rs (loop, actions, drawing), combat, equipment, locks,
                         inventory_ui, shop_ui, journal, creator, patrol, lights (light sources,
-                        clock), menu (title/pause), mouse,
+                        clock), skills (skill bonuses, mana, spells, K screen), menu (title/pause/options),
+                        worldmap (M map screen), mouse,
                         spawner, ui (dialogs, toasts), input (+ injection for autoplay)
   quest.rs, inventory.rs, entity.rs, path.rs (A*), render/ (Assets, chunked tile renderer;
                         lighting.rs = day/night ambient, LightPass light map, tile_lights)
@@ -129,22 +134,23 @@ cargo build --release --workspace  # keep release binaries current too (export, 
 ```
 
 Use the session scratchpad for everything temporary: copy `example_project` (minus `saves/`)
-there and test on the copy. Set `RUST2D_MUTE=1`, and for the editor
+there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratch>/settings` (the game's Options menu saves there), and for the editor
 `RUST2D_EDITOR_CONFIG=<scratch>/cfg RUST2D_LIBRARY=<scratch>/lib`.
 
 - **Game:** `RUST2D_AUTOPLAY="wait 1; press e; hold right 0.5; rclick 6 3; type Name; shop buy 0; close; status; shot /path/a.png; quit" target/debug/rust2d-game <project> [--no-title] [--map M --spawn S | --pos X,Y]`.
   Commands: `wait`, `press` (`press shift+g` holds Shift), `hold`, `click`/`rclick X Y` (tiles), `clickenemy`, `slot`,
-  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `settime H`, `status`,
+  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `settime H`, `skillpoint|learn|cast ID`, `opt ROW prev|next|row` (Options page arrows), `hud bag|character|skills|map`, `mapbtn close|zoomin|zoomout|center`, `drag X1 Y1 X2 Y2` / `wheel DY` (screen pixels), `status`,
   `spawners`, `shot`, `quit`. `status` prints player, creator, quests, shop, map, tile, hp,
   vars, inventory, flags. Load a crafted save with `press f9` from `<project>/saves/quick.ron`
-  (a minimal `WorldState` RON) to start in a specific situation.
+  (a minimal `WorldState` RON) to start in a specific situation; loading never fires *Map enter*
+  triggers, so a crafted save starts quietly.
 - **Editor:** `RUST2D_EDITOR_SCRIPT="wait 1; open village; select named tilda; mode db; tab quests 1; shot /path/b.png; quit" target/debug/rust2d-editor <project>`.
   Many commands exist (`grep '=> {' crates/editor/src/main.rs`): tools, placing, zones,
   transitions (`linkarea`, `trdraw`…), library (`libadd`, `tolib`, `libdialog KIND`, `libpick`,
   `libdialogadd`, `libwindow`, `libedit`…), structures (`structure ID`, `stplace X Y`,
   `stcapture X Y W H ID`, `stinfo`; structure editor: `stnew`, `stsize W H`, `stlayer N`,
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
-  `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), pixel editor (`px…`),
+  `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), pixel editor (`px…`),
   models (`model def|inst|look`, `modelpick`, `modeluse`), wizard (`newwizard`, `wiz`,
   `wizcreate`), `scriptsel`, `probe X Y` (egui layer at a point), `status`, `dump`.
 - **Asset Library window:** run `rust2d-editor --library` (with `RUST2D_LIBRARY=<scratch>/lib`)

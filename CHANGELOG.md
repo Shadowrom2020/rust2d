@@ -3,6 +3,47 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.0.8 — 2026-11-04
+
+### Gameplay
+- **Skills and magic**, both optional per project (Database › Project › Skills & magic). Skills
+  (Database › Skills) have a max level and an effect per level: melee / ranged / spell damage, defense, speed, lockpicking
+  (locks get a pick difficulty), haggling, max mana, mana regeneration, none, or a script function
+  `name(level)`. Skill points come from the new *Give skill points* action / `give_skill_points()`
+  and are spent on the Skills screen (K). Magic adds mana (bar under the hearts, regenerates, mana
+  potions via *Add mana*) and spells (Database › Spells: cost, cooldown, required skill, effect:
+  heal, bolt, blast, light or script) learned from items that *teach* them (scrolls, books) or the
+  *Learn spell* action, cast from the Magic tab or the quick bar. New conditions *Skill level*,
+  *Knows spell*; actions *Set skill level*, *Learn spell*, *Damage around player*, *Light around
+  player*; script functions `skill`, `skill_points`, `knows_spell`, `mana`, `set_skill`,
+  `give_skill_points`, `learn_spell`, `add_mana`, `damage_around`, `player_light`.
+  Bolt spells are aimed with the mouse (magic crosshair; click an enemy to fire, X straight
+  ahead, right-click / Esc cancels).
+
+- **Options menu** on the title screen and in the pause menu: fullscreen, zoom, show FPS,
+  master / music / effects volume and dialog text speed (slow, normal, fast, instant), with a
+  reset to defaults. Settings apply immediately and are stored per game in
+  `~/.config/rust2d/<game>/settings.ron` (XDG config folder; `RUST2D_SETTINGS_DIR` overrides it).
+- **Map screen** (M or the new map button bottom right): the current map from above with the
+  player's position and facing and labelled exits to other maps; pauses the game while open.
+  Scroll with the arrow keys / WASD, by dragging the map or the scrollbars, or the mouse wheel;
+  zoom with + / -, Space centers on the player.
+- **Fog of war** per map (map inspector › Map screen): the map screen only shows the explored
+  area (about 6 tiles around everywhere the player has been); kept per map in the save game.
+
+### Fixes
+- Changing a map's music or lighting in the inspector now marks the map as changed and can
+  be undone (before, only saving together with another change kept it).
+- Loading a saved game no longer runs the map's *Map enter* triggers again (a load resumes the
+  game; the player didn't enter the map).
+
+### Example project
+- Fog of war on the forest, the wilds and the mine; the village and its buildings have none.
+- Eight skills (Swordsmanship, Archery, Toughness, Lockpicking, Haggling, Arcana, Spellcraft and the
+  scripted Scavenging),
+  four spells (Heal, Light, Spark, Fire Burst), scrolls, spell books and blue mana potions; quests
+  reward skill points; the forest chest can be picked, the mine's chest only picked.
+
 ## 0.0.7 — 2026-11-04
 
 ### Gameplay

@@ -129,6 +129,17 @@ async fn main() {
             if let Some(h) = a.hour.take() {
                 game.set_hour(h);
             }
+            for (cmd, id) in std::mem::take(&mut a.skill_cmds) {
+                match cmd.as_str() {
+                    "skillpoint" => game.spend_skill_point(&id),
+                    "cast" => {
+                        game.cast_spell(&id);
+                    }
+                    _ => {
+                        game.learn_spell(&id);
+                    }
+                }
+            }
         }
         if is_quit_requested() {
             game.request_close();
@@ -157,6 +168,7 @@ struct Autoplay {
     close: bool,
     /// `settime H`: applied by the main loop.
     hour: Option<f32>,
+    skill_cmds: Vec<(String, String)>,
 }
 
 impl Autoplay {
@@ -166,7 +178,7 @@ impl Autoplay {
             .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .filter(|c| !c.is_empty())
             .collect();
-        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None }
+        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new() }
     }
 
     /// Advances the script; returns false to quit.
@@ -182,8 +194,8 @@ impl Autoplay {
             inject_mouse(Some(MouseInject { pos: p, ..Default::default() }));
         }
         let click = |frames: &mut std::collections::VecDeque<MouseInject>, p: Vec2, b: MouseButton| {
-            frames.push_back(MouseInject { pos: p, pressed: vec![b], down: vec![b], released: vec![] });
-            frames.push_back(MouseInject { pos: p, pressed: vec![], down: vec![], released: vec![b] });
+            frames.push_back(MouseInject { pos: p, pressed: vec![b], down: vec![b], ..Default::default() });
+            frames.push_back(MouseInject { pos: p, released: vec![b], ..Default::default() });
             frames.push_back(MouseInject { pos: p, ..Default::default() });
         };
         if self.timer > 0.0 {
@@ -223,6 +235,21 @@ impl Autoplay {
                     return true;
                 }
                 // slot player|chest|equip IDX [right|double]: click a slot of the open inventory / loot window
+                // hud bag|character|skills|map: click a button in the bottom-right corner
+                "hud" => {
+                    let Some(p) = game.hud_button_pos(arg(1)) else { continue };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
+                // opt ROW prev|next|row: click the "<" / ">" arrows (or the label) of an Options row
+                "opt" => {
+                    let Some(p) = game.option_click_pos(secs(1) as usize, arg(2)) else {
+                        println!("[autoplay] opt: Options page not open");
+                        continue;
+                    };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
                 "slot" => {
                     let Some(p) = game.slot_screen_pos(arg(1), secs(2) as usize) else { continue };
                     let b = if arg(3) == "right" { MouseButton::Right } else { MouseButton::Left };
@@ -241,13 +268,41 @@ impl Autoplay {
                     click(&mut self.mouse_frames, p, MouseButton::Left);
                     return true;
                 }
+                // mapbtn close|zoomin|zoomout|center: click a button of the open map screen
+                "mapbtn" => {
+                    let Some(p) = game.world_map_button_pos(arg(1)) else {
+                        println!("[autoplay] mapbtn: map screen not open");
+                        continue;
+                    };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
+                // drag X1 Y1 X2 Y2: left-button drag in screen pixels
+                "drag" => {
+                    let (a, b) = (vec2(secs(1), secs(2)), vec2(secs(3), secs(4)));
+                    let l = MouseButton::Left;
+                    self.mouse_frames.push_back(MouseInject { pos: a, pressed: vec![l], down: vec![l], ..Default::default() });
+                    for k in 1..=8 {
+                        self.mouse_frames.push_back(MouseInject { pos: a.lerp(b, k as f32 / 8.0), down: vec![l], ..Default::default() });
+                    }
+                    self.mouse_frames.push_back(MouseInject { pos: b, released: vec![l], ..Default::default() });
+                    self.mouse_frames.push_back(MouseInject { pos: b, ..Default::default() });
+                    return true;
+                }
+                // wheel DY: one mouse wheel step (positive = up) at the current mouse position
+                "wheel" => {
+                    let pos = self.mouse.unwrap_or(vec2(screen_width() / 2.0, screen_height() / 2.0));
+                    self.mouse_frames.push_back(MouseInject { pos, wheel: secs(1), ..Default::default() });
+                    self.mouse_frames.push_back(MouseInject { pos, ..Default::default() });
+                    return true;
+                }
                 // slotdrag player|chest IDX player|chest IDX
                 "slotdrag" => {
                     // "slotdrag player 3 out" drags the stack out of the window (drops it).
                     let to = if arg(3) == "out" { Some(vec2(8.0, screen_height() / 2.0)) } else { game.slot_screen_pos(arg(3), secs(4) as usize) };
                     let (Some(a), Some(b)) = (game.slot_screen_pos(arg(1), secs(2) as usize), to) else { continue };
                     let l = MouseButton::Left;
-                    self.mouse_frames.push_back(MouseInject { pos: a, pressed: vec![l], down: vec![l], released: vec![] });
+                    self.mouse_frames.push_back(MouseInject { pos: a, pressed: vec![l], down: vec![l], ..Default::default() });
                     for k in 1..=8 {
                         self.mouse_frames.push_back(MouseInject { pos: a.lerp(b, k as f32 / 8.0), down: vec![l], ..Default::default() });
                     }
@@ -271,6 +326,8 @@ impl Autoplay {
                 "spawners" => println!("[autoplay] spawners: {}", game.spawner_status()),
                 // settime H: jump to a time of day (hours)
                 "settime" => self.hour = arg(1).parse().ok(),
+                // skillpoint ID: spend a skill point · cast ID: cast a spell · learn ID: learn a spell
+                "skillpoint" | "cast" | "learn" => self.skill_cmds.push((arg(0).to_string(), arg(1).to_string())),
                 "quit" => return false,
                 // close: as if the window's close button was clicked
                 "close" => {

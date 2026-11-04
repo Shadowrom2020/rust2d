@@ -14,6 +14,8 @@ pub struct MouseInject {
     pub pressed: Vec<MouseButton>,
     pub down: Vec<MouseButton>,
     pub released: Vec<MouseButton>,
+    /// Mouse wheel (vertical) this frame.
+    pub wheel: f32,
 }
 
 #[derive(Default)]
@@ -64,6 +66,11 @@ pub fn mouse_released(b: MouseButton) -> bool {
     injected(b, |m| &m.released).unwrap_or_else(|| is_mouse_button_released(b))
 }
 
+/// Vertical mouse wheel movement this frame (positive = up).
+pub fn wheel() -> f32 {
+    INJECTED.with(|i| i.borrow().mouse.as_ref().map(|m| m.wheel)).unwrap_or_else(|| macroquad::input::mouse_wheel().1)
+}
+
 /// Queues typed text (for automated play-throughs).
 pub fn inject_text(text: &str) {
     INJECTED.with(|i| i.borrow_mut().chars.extend(text.chars()));
@@ -102,6 +109,9 @@ pub fn key_from_name(name: &str) -> Option<KeyCode> {
         "t" => KeyCode::T,
         "g" => KeyCode::G,
         "c" => KeyCode::C,
+        "k" => KeyCode::K,
+        "m" => KeyCode::M,
+        "f" => KeyCode::F,
         "1" => KeyCode::Key1,
         "2" => KeyCode::Key2,
         "3" => KeyCode::Key3,

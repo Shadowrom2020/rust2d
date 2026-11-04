@@ -101,8 +101,99 @@ impl Layout {
     }
 }
 
-fn bag_rect() -> Rect {
-    Rect::new(screen_width() - 64.0, screen_height() - 64.0, 52.0, 52.0)
+/// Buttons in the bottom-right corner: inventory (bag), character sheet, skills & magic, map.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HudButton {
+    Bag,
+    Character,
+    Skills,
+    Map,
+}
+
+impl Game {
+    /// The HUD buttons with their screen rects, right to left.
+    fn hud_buttons(&self) -> Vec<(HudButton, Rect)> {
+        let (sw, sh) = (screen_width(), screen_height());
+        let mut out = vec![HudButton::Bag, HudButton::Character];
+        if self.skills_on() {
+            out.push(HudButton::Skills);
+        }
+        out.push(HudButton::Map);
+        out.into_iter().enumerate().map(|(k, b)| (b, Rect::new(sw - 64.0 - k as f32 * 60.0, sh - 64.0, 52.0, 52.0))).collect()
+    }
+
+    /// Screen position of a HUD button ("bag", "character", "skills", "map") for automated play-throughs.
+    pub fn hud_button_pos(&self, name: &str) -> Option<Vec2> {
+        let want = match name {
+            "character" => HudButton::Character,
+            "skills" => HudButton::Skills,
+            "map" => HudButton::Map,
+            _ => HudButton::Bag,
+        };
+        self.hud_buttons().into_iter().find(|(b, _)| *b == want).map(|(_, r)| r.center())
+    }
+
+    fn draw_hud_buttons(&self) {
+        let m = input::mouse_pos();
+        for (b, r) in self.hud_buttons() {
+            let hover = r.contains(m);
+            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.06, 0.06, 0.12, if hover { 0.95 } else { 0.7 }));
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, Color::new(0.85, 0.8, 0.6, 1.0));
+            let key = match b {
+                HudButton::Bag => {
+                    let c = Color::new(0.65, 0.45, 0.25, 1.0);
+                    draw_circle(r.x + 26.0, r.y + 31.0, 13.0, c);
+                    draw_rectangle(r.x + 19.0, r.y + 12.0, 14.0, 8.0, c);
+                    draw_line(r.x + 18.0, r.y + 20.0, r.x + 34.0, r.y + 20.0, 2.0, Color::new(0.35, 0.22, 0.1, 1.0));
+                    "I"
+                }
+                HudButton::Character => {
+                    // Head and shoulders.
+                    let c = Color::new(0.85, 0.8, 0.6, 1.0);
+                    draw_circle(r.x + 26.0, r.y + 18.0, 8.0, c);
+                    draw_circle(r.x + 26.0, r.y + 42.0, 15.0, c);
+                    draw_rectangle(r.x + 4.0, r.y + 42.0, 44.0, 10.0, Color::new(0.06, 0.06, 0.12, 1.0));
+                    "C"
+                }
+                HudButton::Skills => {
+                    // A star.
+                    let (cx, cy) = (r.x + 26.0, r.y + 28.0);
+                    let pts: Vec<Vec2> = (0..10)
+                        .map(|k| {
+                            let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 5.0;
+                            let rad = if k % 2 == 0 { 15.0 } else { 6.5 };
+                            vec2(cx + a.cos() * rad, cy + a.sin() * rad)
+                        })
+                        .collect();
+                    let c = Color::new(0.95, 0.8, 0.3, 1.0);
+                    for k in 0..10 {
+                        draw_triangle(vec2(cx, cy), pts[k], pts[(k + 1) % 10], c);
+                    }
+                    "K"
+                }
+                HudButton::Map => {
+                    // A folded parchment map with a red cross.
+                    let paper = Color::new(0.88, 0.8, 0.6, 1.0);
+                    let fold = Color::new(0.7, 0.6, 0.42, 1.0);
+                    let (x, y) = (r.x + 9.0, r.y + 12.0);
+                    for k in 0..3 {
+                        let fx = x + k as f32 * 11.0;
+                        let (top, bottom) = if k % 2 == 0 { (0.0, 3.0) } else { (3.0, 0.0) };
+                        draw_triangle(vec2(fx, y + top), vec2(fx + 11.0, y + bottom), vec2(fx, y + 26.0 + top), if k == 1 { fold } else { paper });
+                        draw_triangle(vec2(fx + 11.0, y + bottom), vec2(fx + 11.0, y + 26.0 + bottom), vec2(fx, y + 26.0 + top), if k == 1 { fold } else { paper });
+                    }
+                    let brown = Color::new(0.45, 0.3, 0.15, 1.0);
+                    draw_line(x + 4.0, y + 20.0, x + 14.0, y + 12.0, 1.5, brown);
+                    draw_line(x + 14.0, y + 12.0, x + 22.0, y + 16.0, 1.5, brown);
+                    let red = Color::new(0.85, 0.15, 0.1, 1.0);
+                    draw_line(x + 22.0, y + 6.0, x + 28.0, y + 12.0, 2.0, red);
+                    draw_line(x + 28.0, y + 6.0, x + 22.0, y + 12.0, 2.0, red);
+                    "M"
+                }
+            };
+            draw_text(key, r.x + 40.0, r.y + 48.0, 16.0, LIGHTGRAY);
+        }
+    }
 }
 
 fn grid_size(n: usize, cols: usize) -> Vec2 {
@@ -132,7 +223,7 @@ fn make_grid(side: Side, title: String, origin: Vec2, n: usize, cols: usize) -> 
 
 impl Game {
     pub(super) fn inventory_open(&self) -> bool {
-        self.inv.is_open() || self.shop.is_open() || self.journal.is_open()
+        self.inv.is_open() || self.shop.is_open() || self.journal.is_open() || self.skills_open()
     }
 
     fn container_name(&self, uid: u32) -> String {
@@ -267,7 +358,7 @@ impl Game {
             Side::Player => self.world.inventory.slots.get(i).cloned().flatten(),
             Side::Container => self.inv.loot.and_then(|u| self.world.containers.get(&self.loaded.map.name)?.get(&u)?.slots.get(i).cloned().flatten()),
             Side::Equip => EQUIP_SLOTS.get(i).and_then(|s| self.world.equipment.get(*s).cloned()),
-            Side::Quick => self.quick_item(i).map(|id| ItemStack::new(&id, self.world.item_count(&id))),
+            Side::Quick => self.quick_item(i).filter(|id| Self::quick_spell(id).is_none()).map(|id| ItemStack::new(&id, self.world.item_count(&id))),
         }
     }
 
@@ -275,8 +366,9 @@ impl Game {
         self.world.quickbar.get(k).filter(|id| !id.is_empty()).cloned()
     }
 
-    /// Puts an item type on quick bar slot `k` (moving it if it was on another slot).
-    fn assign_quick(&mut self, k: usize, item: &str) {
+    /// Puts an item type (or `spell:<id>`) on quick bar slot `k` (moving it if it was on
+    /// another slot).
+    pub(super) fn assign_quick(&mut self, k: usize, item: &str) {
         let bar = &mut self.world.quickbar;
         bar.resize(QUICK_SLOTS, String::new());
         for s in bar.iter_mut() {
@@ -296,6 +388,11 @@ impl Game {
     /// Uses the item on quick bar slot `k` (same as using it from the inventory).
     pub(super) fn use_quick(&mut self, k: usize) {
         let Some(id) = self.quick_item(k) else { return };
+        if let Some(spell) = Self::quick_spell(&id).map(str::to_string) {
+            self.inv.quick_flash = Some((k, get_time()));
+            self.cast_spell(&spell);
+            return;
+        }
         let name = self.project.db.item(&id).map_or(id.clone(), |d| d.name.clone());
         self.inv.quick_flash = Some((k, get_time()));
         if self.world.inventory.count(&id) == 0 {
@@ -479,10 +576,22 @@ impl Game {
             return (true, false);
         }
         if !self.inv.is_open() {
-            if click && bag_rect().contains(m) {
-                self.inv.open = true;
-                self.inv.sel = Some((Side::Player, 0));
-                return (false, true);
+            if click {
+                if let Some((b, _)) = self.hud_buttons().into_iter().find(|(_, r)| r.contains(m)) {
+                    match b {
+                        HudButton::Bag => {
+                            self.inv.open = true;
+                            self.inv.sel = Some((Side::Player, 0));
+                        }
+                        HudButton::Character => {
+                            self.inv.open = true;
+                            self.inv.sel = Some((Side::Equip, 0));
+                        }
+                        HudButton::Skills => self.open_skills(),
+                        HudButton::Map => self.open_world_map(),
+                    }
+                    return (false, true);
+                }
             }
             // Quick bar: keys 1-8 or a click use the item.
             if !key_consumed {
@@ -651,16 +760,8 @@ impl Game {
             self.draw_quickbar();
         }
         if !self.inv.is_open() {
-            if !self.ui.dialog_open() {
-                let b = bag_rect();
-                let hover = b.contains(m);
-                draw_rectangle(b.x, b.y, b.w, b.h, Color::new(0.06, 0.06, 0.12, if hover { 0.95 } else { 0.7 }));
-                draw_rectangle_lines(b.x, b.y, b.w, b.h, 2.0, Color::new(0.85, 0.8, 0.6, 1.0));
-                let c = Color::new(0.65, 0.45, 0.25, 1.0);
-                draw_circle(b.x + 26.0, b.y + 31.0, 13.0, c);
-                draw_rectangle(b.x + 19.0, b.y + 12.0, 14.0, 8.0, c);
-                draw_line(b.x + 18.0, b.y + 20.0, b.x + 34.0, b.y + 20.0, 2.0, Color::new(0.35, 0.22, 0.1, 1.0));
-                draw_text("I", b.x + 40.0, b.y + 48.0, 16.0, LIGHTGRAY);
+            if !self.ui.dialog_open() && !self.skills_open() {
+                self.draw_hud_buttons();
             }
             return;
         }
@@ -848,6 +949,17 @@ impl Game {
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, border);
             draw_text((k + 1).to_string(), r.x + 3.0, r.y + 13.0, 15.0, Color::new(1.0, 1.0, 1.0, 0.7));
             let Some(id) = self.quick_item(k) else { continue };
+            if let Some(spell) = Self::quick_spell(&id).and_then(|s| self.project.db.spell(s)) {
+                let ready = self.world.spells.contains(&spell.id) && self.world.mana >= spell.mana as f32;
+                let alpha = if ready { 1.0 } else { 0.4 };
+                if !spell.icon.sheet.is_empty() {
+                    self.assets.draw_frame_in(&spell.icon.sheet, spell.icon.frame, Rect::new(r.x + 8.0, r.y + 8.0, 28.0, 28.0), Color::new(1.0, 1.0, 1.0, alpha));
+                }
+                let t = spell.mana.to_string();
+                let w = measure_text(&t, None, 14, 1.0).width;
+                draw_text(&t, r.x + r.w - w - 3.0, r.y + r.h - 4.0, 14.0, Color::new(0.6, 0.7, 1.0, 1.0));
+                continue;
+            }
             let Some(def) = self.project.db.item(&id) else { continue };
             let owned = self.world.inventory.count(&id);
             let equipped = self.world.equipment.count(&id) > 0;
@@ -927,4 +1039,9 @@ impl Game {
             "Double-click / right-click / Enter: use or equip · Drag to slots or quick bar (or 1-8) · G / drag out: drop (Shift+G: one) · Esc: close"
         }
     }
+}
+
+/// The quick bar key (1-8) pressed this frame, if any.
+pub(super) fn quick_key_pressed() -> Option<usize> {
+    QUICK_KEYS.iter().position(|k| input::pressed(*k))
 }

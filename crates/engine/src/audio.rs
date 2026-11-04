@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use macroquad::audio::{load_sound_from_bytes, play_sound, stop_sound, PlaySoundParams, Sound};
+use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams, Sound};
 
 use crate::project::Project;
 
@@ -28,6 +28,9 @@ pub struct Audio {
     music: Option<String>,
     pub errors: Vec<String>,
     pub enabled: bool,
+    /// Player options (0..1): effects and music volume, master already applied.
+    effects: f32,
+    music_vol: f32,
 }
 
 impl Audio {
@@ -57,7 +60,7 @@ impl Audio {
         for e in &errors {
             eprintln!("[audio] {e}");
         }
-        Audio { sounds, music: None, errors, enabled: std::env::var_os("RUST2D_MUTE").is_none() }
+        Audio { sounds, music: None, errors, enabled: std::env::var_os("RUST2D_MUTE").is_none(), effects: 1.0, music_vol: 1.0 }
     }
 
     pub fn has(&self, id: &str) -> bool {
@@ -70,7 +73,16 @@ impl Audio {
             return;
         }
         if let Some((s, vol)) = self.sounds.get(id) {
-            play_sound(s, PlaySoundParams { looped: false, volume: *vol });
+            play_sound(s, PlaySoundParams { looped: false, volume: *vol * self.effects });
+        }
+    }
+
+    /// Applies the player's volume options (also to the music that is playing).
+    pub fn set_volumes(&mut self, effects: f32, music: f32) {
+        self.effects = effects.clamp(0.0, 1.0);
+        self.music_vol = music.clamp(0.0, 1.0);
+        if let Some((s, vol)) = self.music.as_ref().and_then(|id| self.sounds.get(id)) {
+            set_sound_volume(s, *vol * self.music_vol);
         }
     }
 
@@ -84,7 +96,7 @@ impl Audio {
             return;
         }
         if let Some((s, vol)) = self.sounds.get(id) {
-            play_sound(s, PlaySoundParams { looped: true, volume: *vol });
+            play_sound(s, PlaySoundParams { looped: true, volume: *vol * self.music_vol });
             self.music = Some(id.to_string());
         }
     }

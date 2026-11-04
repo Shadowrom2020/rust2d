@@ -294,11 +294,12 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] open={} project={} pending={} map={:?} dirty={} library_mode={} defs_dirty={} lib_dialog={} msg={}",
+            "[status] open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} msg={}",
             ed.project_open,
             ed.project.root.display(),
             ed.pending.is_some(),
             ed.doc.as_ref().map(|d| d.map.name.clone()),
+            ed.doc.as_ref().is_some_and(|d| d.map.fog),
             ed.doc.as_ref().is_some_and(|d| d.is_dirty()),
             ed.library_mode,
             ed.defs_dirty,
@@ -376,6 +377,14 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         // Asset Library window / add dialog: libwindow · libdialog [KIND] · libpick KIND ID ·
         // libdialogadd · libdialogclose · libedit KIND ID (library mode: edit that asset)
         "libwindow" => ed.open_library_window(),
+        // mapfog on|off: the open map's fog of war (like the inspector checkbox, one undo step)
+        "mapfog" => {
+            if let Some(doc) = &mut ed.doc {
+                let before = doc::Objects::of(&doc.map);
+                doc.map.fog = arg(1) != "off";
+                doc.record_objects(before, "inspector");
+            }
+        }
         // lighting on|off [HOUR]: the map view's lighting preview
         "lighting" => {
             ed.view.lighting = arg(1) != "off";
@@ -599,6 +608,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "scripts" => Tab::Scripts,
                 "sounds" => Tab::Sounds,
                 "structures" => Tab::Structures,
+                "skills" => Tab::Skills,
+                "spells" => Tab::Spells,
                 _ => Tab::Items,
             };
             ed.db.sel = num(2) as usize;

@@ -211,6 +211,7 @@ impl Editor {
                 max_stack: 99,
                 value: 0,
         light: None,
+        teaches: String::new(),
             }),
             WKind::Character => db.characters.push(CharacterDef {
                 id: id.clone(),
