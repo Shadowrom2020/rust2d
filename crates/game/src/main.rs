@@ -132,6 +132,7 @@ async fn main() {
             for (cmd, id) in std::mem::take(&mut a.skill_cmds) {
                 match cmd.as_str() {
                     "skillpoint" => game.spend_skill_point(&id),
+                    "call" => game.run_script(&id),
                     "cast" => {
                         game.cast_spell(&id);
                     }
@@ -327,7 +328,8 @@ impl Autoplay {
                 // settime H: jump to a time of day (hours)
                 "settime" => self.hour = arg(1).parse().ok(),
                 // skillpoint ID: spend a skill point · cast ID: cast a spell · learn ID: learn a spell
-                "skillpoint" | "cast" | "learn" => self.skill_cmds.push((arg(0).to_string(), arg(1).to_string())),
+                // call FN: runs a script function (its queued actions too)
+                "skillpoint" | "cast" | "learn" | "call" => self.skill_cmds.push((arg(0).to_string(), arg(1).to_string())),
                 "quit" => return false,
                 // close: as if the window's close button was clicked
                 "close" => {

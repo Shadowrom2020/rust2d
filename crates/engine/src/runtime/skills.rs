@@ -27,8 +27,19 @@ pub(super) struct Skills {
     cooldown: HashMap<String, f32>,
     /// A "Light" spell around the player: (light, seconds left).
     light: Option<(LightSpec, f32)>,
-    /// A bolt spell waiting for the player to click its target.
-    aiming: Option<String>,
+    /// Magic targeting: waiting for the player to click a target.
+    aiming: Option<Aim>,
+    /// A script spell being cast: its cost is paid when the script's aim gets a target.
+    casting: Option<String>,
+}
+
+/// What the player is aiming.
+#[derive(Debug)]
+struct Aim {
+    /// The spell paid for when the target is chosen ("" = none, e.g. aim() from a trigger).
+    spell: String,
+    /// Script function called with the target (tile coordinates); `None` = a bolt spell.
+    script: Option<String>,
 }
 
 fn rect() -> Rect {
@@ -283,28 +294,52 @@ impl Game {
         }
         // Bolts are aimed with the mouse first; mana and cooldown are taken when they fly.
         if matches!(d.effect, SpellEffect::Bolt { .. }) {
-            self.skills.aiming = Some(id.to_string());
+            self.skills.aiming = Some(Aim { spell: id.to_string(), script: None });
             show_mouse(false);
             self.ui.toast(format!("{}: click an enemy to aim  (right-click cancels, X: straight ahead)", d.name));
             return true;
         }
-        self.world.mana -= d.mana as f32;
-        if d.cooldown > 0.0 {
-            self.skills.cooldown.insert(id.to_string(), d.cooldown);
+        // A script that starts aiming (aim()) pays when the target is chosen.
+        if let SpellEffect::Script { function } = &d.effect {
+            let actions = self.scripts.call(&mut self.world, function, None);
+            if actions.iter().any(|a| matches!(a, crate::events::Action::Aim { .. })) {
+                self.skills.casting = Some(id.to_string());
+            } else {
+                self.pay_spell(&d);
+                self.ui.toast(d.name.to_string());
+            }
+            self.runner.push(&actions, &crate::events::runner::ActionCtx::default());
+            return true;
         }
-        self.audio.play(&self.project.config.sfx.attack);
+        self.pay_spell(&d);
         match &d.effect {
             SpellEffect::Heal { amount } => self.heal(*amount),
             SpellEffect::Bolt { .. } => {}
             SpellEffect::Blast { damage, radius } => self.damage_around(*damage, *radius),
-            SpellEffect::Light { radius, seconds } => self.player_light_for(*radius, *seconds),
-            SpellEffect::Script { function } => {
-                let actions = self.scripts.call(&mut self.world, function, None);
-                self.runner.push(&actions, &crate::events::runner::ActionCtx::default());
-            }
+            SpellEffect::Light { radius, seconds } => self.player_light_for(*radius, *seconds, crate::events::spell_light_color(), false),
+            SpellEffect::Script { .. } => {}
         }
         self.ui.toast(d.name.to_string());
         true
+    }
+
+    /// Spends a spell's mana, starts its cooldown and plays the cast sound.
+    fn pay_spell(&mut self, d: &crate::skills::SpellDef) {
+        self.world.mana -= d.mana as f32;
+        if d.cooldown > 0.0 {
+            self.skills.cooldown.insert(d.id.clone(), d.cooldown);
+        }
+        self.audio.play(&self.project.config.sfx.attack);
+    }
+
+    /// Starts magic targeting for a script (the Aim action / `aim()`): the chosen target goes
+    /// to `function(x, y)`. Inside a spell's script the spell is paid for then.
+    pub(super) fn start_aim(&mut self, function: &str) {
+        let spell = self.skills.casting.take().unwrap_or_default();
+        let name = self.project.db.spell(&spell).map_or("Magic".to_string(), |d| d.name.clone());
+        self.skills.aiming = Some(Aim { spell, script: Some(function.to_string()) });
+        show_mouse(false);
+        self.ui.toast(format!("{name}: click a target  (right-click cancels, X: straight ahead)"));
     }
 
     pub(super) fn aiming(&self) -> bool {
@@ -317,30 +352,46 @@ impl Game {
         }
     }
 
-    /// Fires the bolt spell being aimed towards `aim` (world point; `None` = facing direction).
-    fn fire_bolt(&mut self, aim: Option<Vec2>) {
-        let Some(id) = self.skills.aiming.take() else { return };
+    /// Fires what is being aimed towards `aim` (world point; `None` = straight ahead).
+    fn fire_aim(&mut self, aim: Option<Vec2>) {
+        let Some(Aim { spell, script }) = self.skills.aiming.take() else { return };
         show_mouse(true);
-        let Some(d) = self.project.db.spell(&id).cloned() else { return };
-        let SpellEffect::Bolt { damage, projectile, speed, range } = &d.effect else { return };
-        if self.world.mana < d.mana as f32 {
-            self.ui.toast("Not enough mana".into());
+        let def = self.project.db.spell(&spell).cloned();
+        if let Some(d) = &def {
+            if self.world.mana < d.mana as f32 {
+                self.ui.toast("Not enough mana".into());
+                return;
+            }
+        }
+        let origin = self.cast_origin();
+        let ts = self.ts();
+        let Some(function) = script else {
+            // A bolt spell.
+            let Some(d) = def else { return };
+            let SpellEffect::Bolt { damage, projectile, speed, range } = &d.effect else { return };
+            self.pay_spell(&d);
+            let dir = aim.and_then(|t| (t - origin).try_normalize()).unwrap_or_else(|| Vec2::from(self.player.facing.dir()));
+            if let Some(f) = crate::entity::Facing::from_vec(dir.x, dir.y) {
+                self.player.facing = f;
+            }
+            let r = crate::defs::Ranged { projectile: projectile.clone(), speed: *speed, range: *range, ammo: String::new() };
+            let dmg = (*damage as f32 * self.spell_damage_factor()).round() as i32;
+            self.shoot(origin, dir, &r, dmg, true, None);
+            self.ui.toast(d.name);
             return;
+        };
+        if let Some(d) = &def {
+            self.pay_spell(d);
+            self.ui.toast(d.name.clone());
         }
-        self.world.mana -= d.mana as f32;
-        if d.cooldown > 0.0 {
-            self.skills.cooldown.insert(id.clone(), d.cooldown);
-        }
-        let origin = self.player.pos - vec2(0.0, self.player.hitbox.y / 2.0 + 2.0);
-        let dir = aim.and_then(|t| (t - origin).try_normalize()).unwrap_or_else(|| Vec2::from(self.player.facing.dir()));
-        if let Some(f) = crate::entity::Facing::from_vec(dir.x, dir.y) {
+        // Straight ahead: five tiles in the facing direction.
+        let target = aim.unwrap_or_else(|| origin + Vec2::from(self.player.facing.dir()) * 5.0 * ts);
+        if let Some(f) = crate::entity::Facing::from_vec(target.x - origin.x, target.y - origin.y) {
             self.player.facing = f;
         }
-        let r = crate::defs::Ranged { projectile: projectile.clone(), speed: *speed, range: *range, ammo: String::new() };
-        let dmg = (*damage as f32 * self.spell_damage_factor()).round() as i32;
-        self.audio.play(&self.project.config.sfx.attack);
-        self.shoot(origin, dir, &r, dmg, true, None);
-        self.ui.toast(d.name);
+        let args = vec![rhai::Dynamic::from((target.x / ts) as f64), rhai::Dynamic::from((target.y / ts) as f64)];
+        let actions = self.scripts.call_args(&mut self.world, &function, args, None);
+        self.runner.push(&actions, &crate::events::runner::ActionCtx::default());
     }
 
     /// Center of the enemy under the mouse while aiming.
@@ -366,7 +417,7 @@ impl Game {
             return (true, false);
         }
         if !key_consumed && input::pressed(KeyCode::X) {
-            self.fire_bolt(None);
+            self.fire_aim(None);
             return (true, false);
         }
         if mouse_consumed {
@@ -379,7 +430,7 @@ impl Game {
         }
         if input::mouse_pressed(MouseButton::Left) {
             let aim = self.aim_target().unwrap_or_else(|| self.mouse_world());
-            self.fire_bolt(Some(aim));
+            self.fire_aim(Some(aim));
             return (false, true);
         }
         (false, false)
@@ -413,8 +464,13 @@ impl Game {
 
     /// Damages every character within `radius` tiles of the player.
     pub(super) fn damage_around(&mut self, damage: i32, radius: f32) {
+        self.damage_at(self.player.pos, damage, radius);
+    }
+
+    /// Damages every character within `radius` tiles of `center` (world pixels), scaled by the
+    /// spell damage skills.
+    pub(super) fn damage_at(&mut self, center: Vec2, damage: i32, radius: f32) {
         let ts = self.ts();
-        let center = self.player.pos;
         let dmg = (damage as f32 * self.spell_damage_factor()).round() as i32;
         let targets: Vec<usize> = (0..self.loaded.entities.len())
             .filter(|&i| {
@@ -428,8 +484,8 @@ impl Game {
         self.effects.push((center, 0.0));
     }
 
-    pub(super) fn player_light_for(&mut self, radius: f32, seconds: f32) {
-        self.skills.light = Some((LightSpec { intensity: 0.9, ..LightSpec::new(radius, [190, 210, 255], false) }, seconds.max(0.1)));
+    pub(super) fn player_light_for(&mut self, radius: f32, seconds: f32, color: [u8; 3], flicker: bool) {
+        self.skills.light = Some((LightSpec { intensity: 0.9, ..LightSpec::new(radius, color, flicker) }, seconds.max(0.1)));
     }
 
     /// Whether a quick bar entry is a spell (and its id).

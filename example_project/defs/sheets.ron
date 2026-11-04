@@ -107,4 +107,16 @@
         frame_w: 32,
         frame_h: 32,
     ),
+    (
+        id: "fireball",
+        image: "sprites/fireball.png",
+        frame_w: 32,
+        frame_h: 32,
+    ),
+    (
+        id: "explosion",
+        image: "sprites/explosion.png",
+        frame_w: 64,
+        frame_h: 64,
+    ),
 ]

@@ -146,6 +146,7 @@ impl Renamer<'_> {
                 Action::GiveItem { item, .. } | Action::TakeItem { item, .. } => self.fix(RefKind::Item, item),
                 Action::Teleport { map, .. } => self.fix(RefKind::Map, map),
                 Action::PlaySound { sound } | Action::PlayMusic { sound } => self.fix(RefKind::Sound, sound),
+                Action::Fly { sprite, .. } | Action::Effect { sprite, .. } => self.fix(RefKind::Sheet, &mut sprite.sheet),
                 Action::If { conditions, then, otherwise } => {
                     self.conditions(conditions);
                     self.actions(then);

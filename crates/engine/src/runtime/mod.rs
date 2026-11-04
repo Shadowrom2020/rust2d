@@ -2,6 +2,7 @@
 
 mod combat;
 mod equipment;
+mod fx;
 mod inventory_ui;
 mod journal;
 mod skills;
@@ -166,6 +167,10 @@ pub struct Game {
     /// Short-lived visual effects: (position, age).
     effects: Vec<(Vec2, f32)>,
     projectiles: Vec<Projectile>,
+    /// Scripted effects (Fly / Effect actions).
+    fx: Vec<fx::Fx>,
+    /// Lights at a point for a while (Light at point action).
+    timed_lights: Vec<fx::TimedLight>,
     /// Click-to-move / click-to-act order.
     order: Option<Order>,
     /// Where the last click landed (marker, age).
@@ -249,6 +254,8 @@ impl Game {
             game_over: None,
             effects: Vec::new(),
             projectiles: Vec::new(),
+            fx: Vec::new(),
+            timed_lights: Vec::new(),
             order: None,
             click_marker: None,
             spawners: Vec::new(),
@@ -503,6 +510,8 @@ impl Game {
         self.zones_inside = self.zones_at(self.player.pos);
         self.effects.clear();
         self.projectiles.clear();
+        self.fx.clear();
+        self.timed_lights.clear();
         self.order = None;
         self.setup_spawners();
         let music = self.loaded.map.music.clone();
@@ -754,6 +763,7 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32) {
+        self.sync_script_player();
         // Esc opens the pause menu (unless a window or dialog uses Esc); it pauses everything.
         // (While a bolt spell is being aimed, Esc cancels the spell instead.)
         let can_open = !self.inventory_open() && !self.ui.dialog_open() && self.game_over.is_none() && matches!(self.fade, Fade::None) && !self.aiming() && !self.world_map_open();
@@ -854,6 +864,7 @@ impl Game {
         self.update_combat(dt, frozen, consumed);
         if !frozen {
             self.update_projectiles(dt);
+            self.update_fx(dt);
             self.update_spawners(dt);
         }
         if let Some(m) = &mut self.click_marker {
@@ -1216,7 +1227,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.fx_status(),
             self.world_map_status(),
             self.skills_status(),
             self.clock_text(),
@@ -1373,6 +1385,7 @@ impl Game {
         }
 
         self.draw_combat_world();
+        self.draw_fx();
         if !self.on_title() {
             self.draw_mouse_world();
             self.draw_padlocks();
@@ -1609,8 +1622,35 @@ impl ActionHost for Game {
                 self.damage_around(*damage, *radius);
                 Step::Continue
             }
-            Action::PlayerLight { radius, seconds } => {
-                self.player_light_for(*radius, *seconds);
+            Action::PlayerLight { radius, seconds, color, flicker } => {
+                self.player_light_for(*radius, *seconds, *color, *flicker);
+                Step::Continue
+            }
+            Action::Aim { function } => {
+                self.start_aim(function);
+                Step::Continue
+            }
+            Action::Fly { sprite, x, y, speed, function } => {
+                self.spawn_fly(sprite.clone(), vec2(*x, *y), *speed, function.clone());
+                Step::Continue
+            }
+            Action::Effect { sprite, x, y } => {
+                self.spawn_effect(sprite.clone(), vec2(*x, *y));
+                Step::Continue
+            }
+            Action::DamageArea { x, y, radius, damage } => {
+                let ts = self.ts();
+                self.damage_at(vec2(*x, *y) * ts, *damage, *radius);
+                Step::Continue
+            }
+            Action::LightAt { x, y, radius, seconds, color, flicker } => {
+                let ts = self.ts();
+                self.light_at(vec2(*x, *y) * ts, *radius, *seconds, *color, *flicker);
+                Step::Continue
+            }
+            Action::HealArea { x, y, radius, amount } => {
+                let ts = self.ts();
+                self.heal_area(vec2(*x, *y) * ts, *radius, *amount);
                 Step::Continue
             }
             Action::OpenShop { target } => {

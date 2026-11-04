@@ -642,6 +642,24 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.cam.center = vec2(num(1), num(2));
             ed.cam.zoom = num(3).max(0.01);
         }
+        // addaction LABEL...: appends the action template with that label (e.g. "Play effect") to
+        // the selected entity's first trigger (testing the action editors)
+        "addaction" => {
+            let label = cmd[1..].join(" ");
+            let tpl = rust2d_engine::events::Action::templates().into_iter().find(|a| a.label() == label);
+            if let (Some(tpl), Selection::Entity(uid), Some(doc)) = (tpl, ed.sel, ed.doc.as_mut()) {
+                let before = doc::Objects::of(&doc.map);
+                if let Some(e) = doc.map.entities.iter_mut().find(|e| e.uid == uid) {
+                    if e.triggers.is_empty() {
+                        e.triggers.push(rust2d_engine::events::Trigger::new(rust2d_engine::events::TriggerOn::Interact));
+                    }
+                    e.triggers[0].actions.push(tpl);
+                }
+                doc.record_objects(before, "inspector");
+            } else {
+                eprintln!("[editor script] addaction: no template '{label}' or no entity selected");
+            }
+        }
         "fit" => ed.fit_view(),
         "collision" => ed.view.collision = arg(1) != "off",
         other => eprintln!("[editor script] unknown command '{other}'"),

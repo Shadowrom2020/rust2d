@@ -20,6 +20,10 @@ pub enum Arg {
     State,
     Skill,
     Spell,
+    /// A sprite sheet id.
+    Sheet,
+    /// An options map: #{ key: value, ... }.
+    Opts,
     /// "self", "player" or an entity name.
     Target,
     Flag,
@@ -54,6 +58,7 @@ pub const API: &[ApiFn] = api! {
     "set_flag"(name: Flag, value: Bool) "Sets or clears a flag (immediately)";
     "get_var"(name: Var) "Value of a variable (0 if unset)";
     "set_var"(name: Var, value: Num) "Sets a variable (immediately)";
+    "queue_set_var"(name: Var, value: Num) "Sets a variable after the actions queued before it (e.g. after a dialog) (queued)";
     "add_var"(name: Var, amount: Num) "Adds to a variable (immediately)";
     "item_count"(item: Item) "How many of an item the player has";
     "has_item"(item: Item) "Whether the player has the item";
@@ -78,6 +83,20 @@ pub const API: &[ApiFn] = api! {
     "add_mana"(amount: Num) "Adds mana (negative drains) (queued)";
     "damage_around"(damage: Num, radius: Num) "Damages every character within radius tiles of the player (queued)";
     "player_light"(radius: Num, seconds: Num) "Lights the player's surroundings for a while (queued)";
+    "player_light"(radius: Num, seconds: Num, options: Opts) "Like player_light(); options #{ color: [r, g, b], flicker: true } (queued)";
+    "light_at"(x: Num, y: Num, radius: Num, seconds: Num) "A light at tile x, y for a while, fading out at the end (queued)";
+    "light_at"(x: Num, y: Num, radius: Num, seconds: Num, options: Opts) "Like light_at(); options #{ color: [r, g, b], flicker: true } (queued)";
+    "heal_area"(x: Num, y: Num, radius: Num, amount: Num) "Heals the player and friendly characters within radius tiles of tile x, y (queued)";
+    "player_x"() "The player's x position in tiles (fractional; the feet)";
+    "player_y"() "The player's y position in tiles (fractional; the feet)";
+    "player_max_hp"() "The player's maximum hit points";
+    "player_facing"() "Where the player looks: \"up\", \"down\", \"left\" or \"right\"";
+    "aim"(function: Func) "Magic targeting: the player's next click calls function(x, y) with the target in tiles; in a spell's script the spell is paid then (queued)";
+    "fly"(sheet: Sheet, x: Num, y: Num, function: Func) "An animated sprite flies from the player to tile x, y, then calls function(x, y) (queued)";
+    "fly"(sheet: Sheet, x: Num, y: Num, function: Func, options: Opts) "Like fly(); options #{ speed: tiles/s, frames: [first, last], fps, scale, light: radius } (queued)";
+    "effect"(sheet: Sheet, x: Num, y: Num) "Plays a sprite sheet's frames once, centered on tile x, y (explosions) (queued)";
+    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius } (queued)";
+    "damage_area"(x: Num, y: Num, radius: Num, damage: Num) "Damages every character within radius tiles of tile x, y (spell damage skills apply) (queued)";
     "text"(text: Text) "Fills in {player}, {sir|madam} and {variable} placeholders";
     "random"(n: Num) "Random integer from 0 to n-1";
     "say"(text: Text) "Shows a dialog (queued)";
@@ -205,6 +224,20 @@ fn lex(src: &str) -> Vec<(Tk, usize, usize)> {
 pub fn defined_functions(src: &str) -> Vec<String> {
     let toks: Vec<_> = lex(src).into_iter().filter(|t| t.0 != Tk::Space && t.0 != Tk::Comment).collect();
     toks.windows(2).filter(|w| w[0].0 == Tk::Ident && &src[w[0].1..w[0].2] == "fn" && w[1].0 == Tk::Ident).map(|w| src[w[1].1..w[1].2].to_string()).collect()
+}
+
+/// Functions defined in a source with their parameter names: `fn name(a, b)`.
+pub fn defined_signatures(src: &str) -> Vec<(String, Vec<String>)> {
+    let toks: Vec<_> = lex(src).into_iter().filter(|t| t.0 != Tk::Space && t.0 != Tk::Comment).collect();
+    let text = |k: usize| &src[toks[k].1..toks[k].2];
+    let mut out = Vec::new();
+    for k in 0..toks.len().saturating_sub(2) {
+        if toks[k].0 == Tk::Ident && text(k) == "fn" && toks[k + 1].0 == Tk::Ident && text(k + 2) == "(" {
+            let params = toks[k + 3..].iter().take_while(|t| &src[t.1..t.2] != ")").filter(|t| t.0 == Tk::Ident).map(|t| src[t.1..t.2].to_string()).collect();
+            out.push((text(k + 1).to_string(), params));
+        }
+    }
+    out
 }
 
 /// `let` / `const` names in a source.
@@ -351,6 +384,15 @@ pub struct Known<'a> {
     pub flags: &'a [String],
     pub vars: &'a [String],
     pub functions: &'a [String],
+    /// The project's script functions with their parameter names (signature hints).
+    pub signatures: &'a [(String, Vec<String>)],
+}
+
+impl Arg {
+    /// Ids of the project (or fixed words): offered as soon as the argument starts.
+    fn is_id(self) -> bool {
+        !matches!(self, Arg::Text | Arg::Num | Arg::Bool | Arg::List | Arg::Opts)
+    }
 }
 
 /// The kind of the argument a call expects at `arg`.
@@ -382,6 +424,7 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                 Some(Arg::Quest) => db.quests.iter().map(|q| c(&q.id, &q.title)).collect(),
                 Some(Arg::Skill) => db.skills.iter().map(|q| c(&q.id, &q.name)).collect(),
                 Some(Arg::Spell) => db.spells.iter().map(|q| c(&q.id, &q.name)).collect(),
+                Some(Arg::Sheet) => db.sheets.iter().map(|q| c(&q.id, &q.image)).collect(),
                 Some(Arg::State) => {
                     let mut v: Vec<Cand> = db.props.iter().flat_map(|p| p.state_names().into_iter().map(|s| (s, p.name.clone()))).map(|(s, p)| c(&s, &p)).collect();
                     v.sort_by(|a, b| a.insert.cmp(&b.insert));
@@ -436,20 +479,27 @@ pub fn signature(f: &ApiFn) -> String {
 
 /// Signature line for a call: the overload that has the current argument, with that
 /// parameter highlighted.
-fn signature_job(call: &CallAt, font: FontId) -> Option<LayoutJob> {
-    let f = API.iter().filter(|f| f.name == call.name).find(|f| f.params.len() > call.arg).or_else(|| API.iter().find(|f| f.name == call.name))?;
+/// Engine functions first, then the project's own script functions (`signatures`).
+fn signature_job(call: &CallAt, font: FontId, signatures: &[(String, Vec<String>)]) -> Option<LayoutJob> {
+    let (params, doc): (Vec<&str>, &str) = match API.iter().filter(|f| f.name == call.name).find(|f| f.params.len() > call.arg).or_else(|| API.iter().find(|f| f.name == call.name)) {
+        Some(f) => (f.params.iter().map(|p| p.0).collect(), f.doc),
+        None => {
+            let (_, ps) = signatures.iter().find(|(n, _)| *n == call.name)?;
+            (ps.iter().map(String::as_str).collect(), "script function")
+        }
+    };
     let mut job = LayoutJob::default();
     let normal = TextFormat { font_id: font.clone(), color: Color32::LIGHT_GRAY, ..Default::default() };
     let strong = TextFormat { font_id: font.clone(), color: Color32::YELLOW, underline: Stroke::new(1.0_f32, Color32::YELLOW), ..Default::default() };
-    job.append(&format!("{}(", f.name), 0.0, normal.clone());
-    for (k, p) in f.params.iter().enumerate() {
+    job.append(&format!("{}(", call.name), 0.0, normal.clone());
+    for (k, p) in params.iter().enumerate() {
         if k > 0 {
             job.append(", ", 0.0, normal.clone());
         }
-        job.append(p.0, 0.0, if k == call.arg { strong.clone() } else { normal.clone() });
+        job.append(p, 0.0, if k == call.arg { strong.clone() } else { normal.clone() });
     }
     job.append(")", 0.0, normal.clone());
-    job.append(&format!("   {}", f.doc), 0.0, TextFormat { font_id: font, color: Color32::GRAY, ..Default::default() });
+    job.append(&format!("   {doc}"), 0.0, TextFormat { font_id: font, color: Color32::GRAY, ..Default::default() });
     Some(job)
 }
 
@@ -562,7 +612,7 @@ pub fn show(ui: &mut egui::Ui, text: &mut String, st: &mut EditorState, known: &
 
     // Signature hint of the call around the cursor (from the last frame's cursor).
     let cursor_before = egui::text_edit::TextEditState::load(ui.ctx(), id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index);
-    let hint = cursor_before.and_then(|ci| analyze(&text[..byte_of(text, ci)]).1).and_then(|c| signature_job(&c, font.clone()));
+    let hint = cursor_before.and_then(|ci| analyze(&text[..byte_of(text, ci)]).1).and_then(|c| signature_job(&c, font.clone(), known.signatures));
     ui.horizontal(|ui| {
         ui.set_min_height(18.0);
         match hint {
@@ -668,6 +718,11 @@ pub fn show(ui: &mut egui::Ui, text: &mut String, st: &mut EditorState, known: &
         if typed_now || force || st.comp.is_some() {
             let b = byte_of(text, ci);
             let (place, call) = analyze(&text[..b]);
+            // Right after "(" or "," an id argument (item, map, sheet, function, ...) offers its
+            // ids at once, inserted with their quotes.
+            let id_arg = matches!(&place, Place::Code { partial, .. } if partial.is_empty())
+                && text[..b].trim_end().ends_with(['(', ','])
+                && call.as_ref().and_then(|c| arg_kind(&c.name, c.arg)).is_some_and(Arg::is_id);
             let start_b = match &place {
                 Place::Code { start, .. } | Place::Str { start, .. } => *start,
                 Place::Comment => b,
@@ -677,7 +732,14 @@ pub fn show(ui: &mut egui::Ui, text: &mut String, st: &mut EditorState, known: &
                 Place::Code { partial, .. } => !partial.is_empty() || force,
                 Place::Comment => false,
             };
-            let cands = if show { candidates(&place, call.as_ref(), known, text, force) } else { Vec::new() };
+            let cands = if id_arg && (typed_now || force || st.comp.is_some()) {
+                let ids = candidates(&Place::Str { partial: String::new(), start: b }, call.as_ref(), known, text, force);
+                ids.into_iter().map(|c| Cand { insert: format!("\"{}\"", c.insert), ..c }).collect()
+            } else if show {
+                candidates(&place, call.as_ref(), known, text, force)
+            } else {
+                Vec::new()
+            };
             let moved = st.comp.as_ref().is_some_and(|c| c.cursor != ci) && !typed_now;
             st.comp = if cands.is_empty() || moved {
                 None
@@ -779,7 +841,8 @@ mod tests {
         let spawns: HashMap<String, Vec<String>> = [("forest".to_string(), vec!["west".to_string(), "cave".to_string()])].into();
         let none: Vec<String> = Vec::new();
         let funcs = vec!["guard_talk".to_string()];
-        let known = Known { db: &db, maps: &maps, spawns: &spawns, targets: &none, flags: &none, vars: &none, functions: &funcs };
+        let sigs = vec![("guard_talk".to_string(), vec!["who".to_string(), "times".to_string()])];
+        let known = Known { db: &db, maps: &maps, spawns: &spawns, targets: &none, flags: &none, vars: &none, functions: &funcs, signatures: &sigs };
         let get = |src: &str| {
             let (p, c) = analyze(src);
             candidates(&p, c.as_ref(), &known, src, false).into_iter().map(|c| c.insert).collect::<Vec<_>>()
@@ -788,10 +851,45 @@ mod tests {
         assert_eq!(get("teleport(\"f"), vec!["forest"]);
         assert_eq!(get("start_quest(\"pe"), vec!["pest_control"]);
         assert_eq!(get("then_call(\""), vec!["guard_talk"]);
+        // Spell effects: callbacks complete script functions, sprites the sheets.
+        assert_eq!(get("aim(\""), vec!["guard_talk"]);
+        assert_eq!(get("fly(\"fireball\", x, y, \""), vec!["guard_talk"]);
+        assert!(get("light_").contains(&"light_at".to_string()));
+        assert!(get("heal_a").contains(&"heal_area".to_string()));
+        assert!(get("player_").contains(&"player_max_hp".to_string()));
+        // Signature hints after every comma, also for the project's own functions.
+        let hint = |src: &str| analyze(src).1.and_then(|c| signature_job(&c, FontId::monospace(12.0), &sigs)).map(|j| j.text);
+        for (src, want) in [
+            ("light_at(player_x() + 1, ", "light_at(x, y, radius, seconds)"),
+            ("fly(\"fireball\", x, y, \"f\", ", "fly(sheet, x, y, function, options)"),
+            ("say(\"Mira\", ", "say(speaker, text)"),
+            ("guard_talk(1, ", "guard_talk(who, times)"),
+            ("patrol(\"guard\", [[1, 2], ", "patrol(target, points)"),
+        ] {
+            assert!(hint(src).is_some_and(|h| h.starts_with(want)), "{src}: {:?}", hint(src));
+        }
+        assert_eq!(defined_signatures("fn a() {}\nfn guard_talk(who, times) { a(); }"), vec![("a".to_string(), vec![]), ("guard_talk".to_string(), vec!["who".to_string(), "times".to_string()])]);
         let code = get("let total = 1; tot");
         assert_eq!(code, vec!["total"]);
         assert!(get("stop_pa").starts_with(&["stop_patrol".to_string()]));
         assert!(get("guard").contains(&"guard_talk".to_string()));
+    }
+
+    /// Every function the engine registers for scripts is in the completion table.
+    #[test]
+    fn api_table_is_complete() {
+        let src = include_str!("../../engine/src/script.rs");
+        let registered: std::collections::BTreeSet<&str> = src.split("register_fn(\"").skip(1).filter_map(|s| s.split('"').next()).collect();
+        assert!(registered.len() > 60, "{registered:?}");
+        let missing: Vec<&&str> = registered.iter().filter(|n| !API.iter().any(|f| f.name == **n)).collect();
+        assert!(missing.is_empty(), "not in the completion table: {missing:?}");
+        // ... and the table has nothing the engine doesn't know.
+        let unknown: Vec<&str> = API.iter().map(|f| f.name).filter(|n| !registered.contains(n)).collect();
+        assert!(unknown.is_empty(), "not registered in the engine: {unknown:?}");
+        // ... and Documentation/scripting.md describes every one.
+        let doc = include_str!("../../../Documentation/scripting.md");
+        let undocumented: Vec<&&str> = registered.iter().filter(|n| !doc.contains(&format!("`{n}("))).collect();
+        assert!(undocumented.is_empty(), "missing in Documentation/scripting.md: {undocumented:?}");
     }
 
     #[test]
@@ -808,3 +906,4 @@ mod tests {
         assert!(bad.format.underline.width > 0.0);
     }
 }
+

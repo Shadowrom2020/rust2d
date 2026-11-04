@@ -71,4 +71,20 @@
             radius: 2.0,
         ),
     ),
+    (
+        id: "fireball",
+        name: "Fireball",
+        description: "Click a target: a ball of fire flies there and explodes, burning everything within 2 tiles.",
+        icon: (
+            sheet: "fireball",
+            frame: 0,
+        ),
+        mana: 12,
+        cooldown: 1.5,
+        skill: "arcana",
+        level: 1,
+        effect: Script(
+            function: "cast_fireball",
+        ),
+    ),
 ]

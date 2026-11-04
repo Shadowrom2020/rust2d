@@ -23,6 +23,8 @@ pub enum IdKind {
     State,
     Skill,
     Spell,
+    /// A sprite sheet (animated effects).
+    Sheet,
 }
 
 impl IdKind {
@@ -36,6 +38,7 @@ impl IdKind {
             IdKind::State => "prop state",
             IdKind::Skill => "skill",
             IdKind::Spell => "spell",
+            IdKind::Sheet => "sprite sheet",
         }
     }
     /// The definition kind renamed together with this id kind.
@@ -44,6 +47,7 @@ impl IdKind {
             IdKind::Item => Some(RefKind::Item),
             IdKind::Map => Some(RefKind::Map),
             IdKind::Sound => Some(RefKind::Sound),
+            IdKind::Sheet => Some(RefKind::Sheet),
             _ => None,
         }
     }
@@ -72,6 +76,8 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("set_skill", 0, IdKind::Skill),
     ("knows_spell", 0, IdKind::Spell),
     ("learn_spell", 0, IdKind::Spell),
+    ("fly", 0, IdKind::Sheet),
+    ("effect", 0, IdKind::Sheet),
 ];
 
 /// A string literal argument of a function call.
@@ -287,6 +293,7 @@ pub fn check_script(src: &str, db: &Database, maps: &[String], spawns: &HashMap<
             IdKind::State => states.iter().any(|s| s == v),
             IdKind::Skill => db.skill(v).is_some(),
             IdKind::Spell => db.spell(v).is_some(),
+            IdKind::Sheet => db.sheet(v).is_some(),
         };
         if !known {
             let extra = match kind {

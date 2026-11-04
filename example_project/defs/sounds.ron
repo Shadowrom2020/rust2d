@@ -40,6 +40,16 @@
         volume: 0.6,
     ),
     (
+        id: "fireball",
+        file: "sounds/fireball.wav",
+        volume: 0.6,
+    ),
+    (
+        id: "explosion",
+        file: "sounds/explosion.wav",
+        volume: 0.6,
+    ),
+    (
         id: "door",
         file: "sounds/door.wav",
         volume: 0.6,

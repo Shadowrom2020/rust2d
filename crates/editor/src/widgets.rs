@@ -559,6 +559,8 @@ pub struct Refs {
     pub quest_stages: HashMap<String, Vec<String>>,
     pub skills: Vec<String>,
     pub spells: Vec<String>,
+    /// Sprite sheet ids (effects).
+    pub sheets: Vec<String>,
 }
 
 /// Placeholders understood in dialog / choice texts (and quest texts).
@@ -631,6 +633,31 @@ pub fn suggest_described(ui: &mut Ui, id: &str, value: &mut String, options: &[(
 fn speaker_field(ui: &mut Ui, id: &str, speaker: &mut String, refs: &Refs) {
     labeled(ui, "speaker", |ui| {
         suggest_described(ui, &format!("{id}/speaker"), speaker, &refs.speakers, 160.0);
+    });
+}
+
+/// The animated sprite of the Fly / Effect actions.
+fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs) {
+    labeled(ui, "sheet", |ui| suggest(ui, &format!("{id}/sheet"), &mut s.sheet, &refs.sheets, 120.0));
+    labeled(ui, "frames", |ui| {
+        ui.add(egui::DragValue::new(&mut s.first).range(0..=999));
+        ui.label("to");
+        ui.add(egui::DragValue::new(&mut s.last).range(0..=999)).on_hover_text("0 to 0 = every frame of the sheet");
+        ui.add(egui::DragValue::new(&mut s.fps).range(0.5..=60.0).speed(0.2).suffix(" fps"));
+    });
+    labeled(ui, "size", |ui| {
+        ui.add(egui::DragValue::new(&mut s.scale).range(0.1..=10.0).speed(0.05).prefix("x "));
+        ui.label("light");
+        ui.add(egui::DragValue::new(&mut s.light).range(0.0..=16.0).speed(0.1).suffix(" tiles")).on_hover_text("0 = no glow");
+    });
+}
+
+/// A point in tile coordinates (10.5 = the middle of tile 10).
+fn tile_point_ui(ui: &mut Ui, label: &str, x: &mut f32, y: &mut f32) {
+    labeled(ui, label, |ui| {
+        ui.add(egui::DragValue::new(x).speed(0.1).prefix("x "));
+        ui.add(egui::DragValue::new(y).speed(0.1).prefix("y "));
+        ui.weak("tiles");
     });
 }
 
@@ -973,12 +1000,63 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
             });
         }
-        Action::PlayerLight { radius, seconds } => {
+        Action::Aim { function } => {
+            labeled(ui, "then call", |ui| suggest(ui, id, function, &refs.functions, 130.0));
+            ui.weak("The player clicks a target; the script function gets it as (x, y) in tiles.");
+        }
+        Action::Fly { sprite, x, y, speed, function } => {
+            fx_sprite_ui(ui, id, sprite, refs);
+            tile_point_ui(ui, "to", x, y);
+            labeled(ui, "speed", |ui| {
+                ui.add(egui::DragValue::new(speed).range(0.5..=60.0).speed(0.1).suffix(" tiles/s"));
+            });
+            labeled(ui, "then call", |ui| suggest(ui, &format!("{id}/fn"), function, &refs.functions, 130.0));
+        }
+        Action::Effect { sprite, x, y } => {
+            fx_sprite_ui(ui, id, sprite, refs);
+            tile_point_ui(ui, "at", x, y);
+        }
+        Action::DamageArea { x, y, radius, damage } => {
+            tile_point_ui(ui, "at", x, y);
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+            labeled(ui, "damage", |ui| {
+                ui.add(egui::DragValue::new(damage).range(0..=999));
+            });
+        }
+        Action::PlayerLight { radius, seconds, color, flicker } => {
             labeled(ui, "radius", |ui| {
                 ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
             });
             labeled(ui, "for", |ui| {
                 ui.add(egui::DragValue::new(seconds).range(0.5..=3600.0).speed(0.5).suffix(" s"));
+            });
+            labeled(ui, "color", |ui| {
+                ui.color_edit_button_srgb(color);
+                ui.checkbox(flicker, "flicker");
+            });
+        }
+        Action::LightAt { x, y, radius, seconds, color, flicker } => {
+            tile_point_ui(ui, "at", x, y);
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+            labeled(ui, "for", |ui| {
+                ui.add(egui::DragValue::new(seconds).range(0.1..=3600.0).speed(0.2).suffix(" s")).on_hover_text("Fades out during the last second");
+            });
+            labeled(ui, "color", |ui| {
+                ui.color_edit_button_srgb(color);
+                ui.checkbox(flicker, "flicker");
+            });
+        }
+        Action::HealArea { x, y, radius, amount } => {
+            tile_point_ui(ui, "at", x, y);
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+            labeled(ui, "heal", |ui| {
+                ui.add(egui::DragValue::new(amount).range(1..=999).suffix(" HP")).on_hover_text("The player and friendly characters in range");
             });
         }
         Action::SetTime { hour } => {

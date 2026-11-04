@@ -257,6 +257,20 @@ impl Assets {
         true
     }
 
+    /// Draws a frame centered at `center`, rotated by `angle` radians and scaled by `scale`.
+    pub fn draw_frame_scaled(&self, sheet: &str, frame: u32, center: Vec2, angle: f32, scale: f32, tint: Color) -> bool {
+        let Some(s) = self.sheets.get(sheet) else { return false };
+        let size = vec2(s.frame_w, s.frame_h) * scale;
+        draw_texture_ex(
+            &s.texture,
+            center.x - size.x / 2.0,
+            center.y - size.y / 2.0,
+            tint,
+            DrawTextureParams { source: Some(s.src_rect(frame)), dest_size: Some(size), rotation: angle, ..Default::default() },
+        );
+        true
+    }
+
     /// Draws a frame scaled into `dest` (screen UI, icons).
     pub fn draw_frame_in(&self, sheet: &str, frame: u32, dest: Rect, tint: Color) -> bool {
         let Some(s) = self.sheets.get(sheet) else { return false };

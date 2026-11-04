@@ -1943,3 +1943,94 @@ pub fn items(out: &Path) {
     }
     c.save(&out.join("sprites/items.png"));
 }
+
+// ------------------------------------------------------------------ spell effects
+
+/// Fire colors from dark red to white-hot.
+const FIRE: [u32; 5] = [0x7a1606, 0xc8380c, 0xf07818, 0xffc430, 0xfff4c0];
+
+/// A stable noise value 0..1 per pixel (so flames don't jump around between frames).
+fn noise(x: i32, y: i32, seed: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(374761393) ^ (y as u32).wrapping_mul(668265263) ^ seed.wrapping_mul(2246822519);
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    ((h ^ (h >> 16)) % 1000) as f32 / 1000.0
+}
+
+/// `sprites/fireball.png`: 4 frames (32 x 32) of a fireball flying to the right, with a
+/// flickering tail (the game rotates it into its direction).
+pub fn fireball(out: &Path) {
+    let mut c = Canvas::new(32 * 4, 32);
+    for f in 0..4u32 {
+        c.at(f * 32, 0);
+        // Tail: puffs trailing to the left, shrinking and cooling.
+        for k in 0..7 {
+            let k = k as f32;
+            let wob = ((f as f32 * 1.7 + k * 1.3).sin()) * (0.6 + k * 0.35);
+            let (x, y, r) = (18.0 - k * 2.6, 16.0 + wob, 5.2 - k * 0.6);
+            if r <= 0.5 {
+                break;
+            }
+            c.disc(x, y, r, hex(FIRE[if k < 2.0 { 1 } else { 0 }]));
+            c.disc(x + 0.5, y, r * 0.55, hex(FIRE[if k < 3.0 { 2 } else { 1 }]));
+        }
+        // Flickering sparks behind it.
+        for s in 0..5 {
+            let n = noise(s, f as i32, 7);
+            let x = 2 + (n * 10.0) as i32;
+            let y = 10 + (noise(s, f as i32, 9) * 12.0) as i32;
+            c.px(x, y, hex(FIRE[3]));
+        }
+        // Head.
+        let pulse = [0.0, 0.5, 0.2, 0.7][f as usize];
+        c.disc(21.0, 16.0, 7.0 + pulse, hex(FIRE[1]));
+        c.disc(21.5, 16.0, 5.4 + pulse * 0.6, hex(FIRE[2]));
+        c.disc(22.0, 15.5, 3.6, hex(FIRE[3]));
+        c.disc(22.5, 15.0, 1.8, hex(FIRE[4]));
+    }
+    c.save(&out.join("sprites/fireball.png"));
+}
+
+/// `sprites/explosion.png`: 8 frames (64 x 64): a burst of fire that swells, cools to smoke
+/// and dissolves.
+pub fn explosion(out: &Path) {
+    let mut c = Canvas::new(64 * 8, 64);
+    const RADIUS: [f32; 8] = [8.0, 15.0, 21.0, 25.0, 28.0, 29.5, 30.5, 31.0];
+    for f in 0..8i32 {
+        c.at(f as u32 * 64, 0);
+        let r = RADIUS[f as usize];
+        let cool = (f as f32 - 2.0).max(0.0) * 0.17;
+        for y in 0..64 {
+            for x in 0..64 {
+                let (dx, dy) = (x as f32 + 0.5 - 32.0, y as f32 + 0.5 - 32.0);
+                // Ragged edge: noise in the radius.
+                let n = noise(x / 3, y / 3, 1) * 0.35 + noise(x, y, 2) * 0.15;
+                let d = (dx * dx + dy * dy).sqrt() / (r * (0.8 + n));
+                if d > 1.0 {
+                    continue;
+                }
+                // Later frames dissolve from the inside out (an expanding smoke ring).
+                if f >= 5 && bayer(x, y) < (f - 4) as f32 * 0.28 * (1.2 - d) {
+                    continue;
+                }
+                let heat = (1.0 - d) * 1.25 + noise(x, y, f as u32 + 3) * 0.2 - cool;
+                let col = if heat > 0.95 {
+                    hex(FIRE[4])
+                } else if heat > 0.7 {
+                    hex(FIRE[3])
+                } else if heat > 0.45 {
+                    hex(FIRE[2])
+                } else if heat > 0.22 {
+                    hex(FIRE[1])
+                } else if heat > 0.0 || f < 3 {
+                    hex(FIRE[0])
+                } else {
+                    // Smoke.
+                    let g = 0.22 + noise(x / 2, y / 2, 5) * 0.12;
+                    Color::new(g, g * 0.95, g * 0.92, 0.9)
+                };
+                c.px(x, y, col);
+            }
+        }
+    }
+    c.save(&out.join("sprites/explosion.png"));
+}

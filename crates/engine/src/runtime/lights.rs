@@ -54,6 +54,7 @@ impl Game {
             };
             out.push(Light::new(e.body.pos - vec2(0.0, lift), &l));
         }
+        out.extend(self.fx_lights());
         out
     }
 
