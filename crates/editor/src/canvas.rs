@@ -662,6 +662,7 @@ impl Editor {
                     h: (y1 - y0) as u32,
                     kind,
                     triggers: Vec::new(),
+                    loot: None,
                 });
                 doc.record_objects(before, "zone");
                 self.sel = Selection::Zone(uid);

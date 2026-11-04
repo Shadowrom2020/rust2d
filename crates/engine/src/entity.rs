@@ -96,6 +96,9 @@ pub struct EntityInstance {
     /// Overrides the prop definition's key lock.
     #[serde(default)]
     pub lock: Option<crate::defs::LockSpec>,
+    /// Characters: loot table used instead of the definition's (None = definition's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loot: Option<Vec<crate::defs::LootEntry>>,
     /// Characters: a route the NPC walks along (instead of its definition's behaviour).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patrol: Option<PatrolRoute>,
@@ -196,6 +199,7 @@ impl EntityInstance {
             shop: None,
             sheet: String::new(),
             patrol: None,
+            loot: None,
         }
     }
 

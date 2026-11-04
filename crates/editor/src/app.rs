@@ -1934,6 +1934,31 @@ impl Editor {
                         e.shop = v;
                     }
 
+                    // Loot of this character (its own table, or the definition's).
+                    if db.character(&e.def).is_some_and(|d| d.max_hp > 0) {
+                        ui.separator();
+                        ui.heading("Loot");
+                        let def_loot = db.character(&e.def).map(|d| d.loot.clone()).unwrap_or_default();
+                        let mut set: Option<Option<Vec<rust2d_engine::defs::LootEntry>>> = None;
+                        match &mut e.loot {
+                            Some(table) => {
+                                widgets::loot_ui(ui, &format!("loot{uid}"), table, refs, &self.tex, &self.assets, db);
+                                if ui.button("Use the definition's loot").clicked() {
+                                    set = Some(None);
+                                }
+                            }
+                            None => {
+                                ui.weak(loot_summary(&def_loot, db, "Uses the definition's loot"));
+                                if ui.button("Customize loot").on_hover_text("Give this character its own loot table").clicked() {
+                                    set = Some(Some(def_loot.clone()));
+                                }
+                            }
+                        }
+                        if let Some(v) = set {
+                            e.loot = v;
+                        }
+                    }
+
                     ui.separator();
                     ui.heading("Patrol route");
                     let tile = ((e.x / ts).floor() as i32, ((e.y - 1.0) / ts).floor() as i32);
@@ -2078,6 +2103,31 @@ impl Editor {
                 };
                 ui.heading(format!("{} zone #{}", z.kind.label(), z.uid));
                 zone_fields(ui, z, refs, doc.map.width, doc.map.height);
+                // Spawners pass their loot table on to the characters they spawn.
+                if let ZoneKind::Spawner { character, .. } = &z.kind {
+                    let db = &self.project.db;
+                    let def_loot = db.character(character).map(|d| d.loot.clone()).unwrap_or_default();
+                    ui.separator();
+                    ui.heading("Loot of spawned characters");
+                    let mut set: Option<Option<Vec<rust2d_engine::defs::LootEntry>>> = None;
+                    match &mut z.loot {
+                        Some(table) => {
+                            widgets::loot_ui(ui, &format!("zloot{uid}"), table, refs, &self.tex, &self.assets, db);
+                            if ui.button("Use the character's loot").clicked() {
+                                set = Some(None);
+                            }
+                        }
+                        None => {
+                            ui.weak(loot_summary(&def_loot, db, &format!("Uses {character}'s loot")));
+                            if ui.button("Customize loot").on_hover_text("Every character from this spawner drops from this table").clicked() {
+                                set = Some(Some(def_loot.clone()));
+                            }
+                        }
+                    }
+                    if let Some(v) = set {
+                        z.loot = v;
+                    }
+                }
                 ui.horizontal(|ui| {
                     duplicate = ui.button("Duplicate").clicked();
                     delete = ui.button("Delete").clicked();
@@ -2369,6 +2419,22 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
         }
         _ => {}
     }
+}
+
+/// "Uses …: Coin 50% (1-3), Apple 10%" for a loot table that isn't customized here.
+fn loot_summary(table: &[rust2d_engine::defs::LootEntry], db: &rust2d_engine::defs::Database, prefix: &str) -> String {
+    if table.is_empty() {
+        return format!("{prefix}: nothing.");
+    }
+    let parts: Vec<String> = table
+        .iter()
+        .map(|l| {
+            let name = db.item(&l.item).map_or(l.item.clone(), |d| d.name.clone());
+            let amount = if l.min == l.max { if l.min > 1 { format!(" ×{}", l.min) } else { String::new() } } else { format!(" ({}–{})", l.min, l.max) };
+            format!("{name} {}%{amount}", l.chance)
+        })
+        .collect();
+    format!("{prefix}: {}.", parts.join(", "))
 }
 
 pub fn default_spawner(refs: &Refs) -> ZoneKind {

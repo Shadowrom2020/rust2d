@@ -200,6 +200,7 @@ impl Editor {
                 defense: 0,
                 triggers: vec![],
                 shop: None,
+                loot: vec![],
             }),
             WKind::Tileset | WKind::Sheet => {}
         }

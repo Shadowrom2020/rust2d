@@ -81,6 +81,7 @@ fn add_transition(map: &mut Map, rect: (u32, u32, u32, u32), target_map: &str, t
         h: rect.3,
         kind: ZoneKind::Transition { target_map: target_map.into(), target_zone: target_zone.into() },
         triggers: vec![],
+        loot: None,
     });
     name
 }

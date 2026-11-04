@@ -168,7 +168,7 @@ impl B {
     }
     fn zone(&mut self, name: &str, x: u32, y: u32, w: u32, h: u32, kind: ZoneKind) -> u32 {
         let uid = self.m.alloc_uid();
-        self.m.zones.push(Zone { uid, name: name.into(), x, y, w, h, kind, triggers: vec![] });
+        self.m.zones.push(Zone { uid, name: name.into(), x, y, w, h, kind, triggers: vec![], loot: None });
         uid
     }
     fn spawn(&mut self, name: &str, x: u32, y: u32) {
@@ -637,8 +637,23 @@ fn forest() -> Map {
     });
     // Spawners (invisible in game): slimes come back whenever you re-enter the forest,
     // goblin archers return 20 s after being defeated.
-    b.zone("slime_den", 8, 28, 14, 10, ZoneKind::Spawner { character: "slime".into(), count: 4, respawn: Respawn::OnEnter });
-    b.zone("goblin_camp", 32, 30, 8, 8, ZoneKind::Spawner { character: "goblin".into(), count: 2, respawn: Respawn::After { seconds: 20.0 } });
+    let den = b.zone("slime_den", 8, 28, 14, 10, ZoneKind::Spawner { character: "slime".into(), count: 4, respawn: Respawn::OnEnter });
+    // Slimes from the den have their own loot table: the slime's coins and apples plus a potion.
+    b.m.zones.iter_mut().find(|z| z.uid == den).unwrap().loot = Some(vec![
+        LootEntry::new("coin", 50.0, 1, 3),
+        LootEntry::new("apple", 10.0, 1, 1),
+        LootEntry::new("potion", 10.0, 1, 1),
+    ]);
+    let camp = b.zone("goblin_camp", 32, 30, 8, 8, ZoneKind::Spawner { character: "goblin".into(), count: 2, respawn: Respawn::After { seconds: 20.0 } });
+    // The goblin camp's archers carry more than a lone goblin: arrows, coins, bolts, now and
+    // then a leather cap, and rarely a crossbow (the spawner's table replaces the goblin's own).
+    b.m.zones.iter_mut().find(|z| z.uid == camp).unwrap().loot = Some(vec![
+        LootEntry::new("arrows", 80.0, 2, 5),
+        LootEntry::new("coin", 40.0, 2, 5),
+        LootEntry::new("bolts", 25.0, 2, 4),
+        LootEntry::new("leather_cap", 10.0, 1, 1),
+        LootEntry::new("crossbow", 5.0, 1, 1),
+    ]);
     // Placed slimes stay dead once defeated.
     for (x, y) in [(36, 30), (15, 12), (50, 40)] {
         // Move off trees / mushrooms if needed.
@@ -813,6 +828,7 @@ fn database() -> Database {
         defense: 0,
         triggers: vec![],
         shop: None,
+        loot: vec![],
     };
     let item = |id: &str, name: &str, desc: &str, frame: u32, consumable: bool, on_use: Vec<Trigger>| ItemDef {
         id: id.into(),
@@ -845,12 +861,14 @@ fn database() -> Database {
     slime.damage = 2;
     slime.hostile = true;
     slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
+    slime.loot = vec![LootEntry::new("coin", 50.0, 1, 3), LootEntry::new("apple", 10.0, 1, 1)];
     let mut goblin = ch("goblin", "Goblin Archer", "goblin", 38.0, Behavior::Chase { sight: 7.0 });
     goblin.max_hp = 2;
     goblin.damage = 1;
     goblin.hostile = true;
     goblin.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 150.0 * R, range: 6.0, ammo: String::new() }));
-    goblin.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "goblin_defeated".into() }])];
+    // Goblin archers drop arrows (and sometimes coins) from their loot table.
+    goblin.loot = vec![LootEntry::new("arrows", 70.0, 2, 4), LootEntry::new("coin", 25.0, 1, 2)];
     let mut hero = ch("hero", "Hero", "hero", 70.0, Behavior::Static);
     hero.max_hp = 12; // 6 hearts
     hero.damage = 1;
@@ -1122,12 +1140,7 @@ fn shrine_touch() {
     emit("shrine_lit");
 }
 
-// Called by the slime's "Defeated" trigger.
-// Goblins drop a few arrows.
-fn goblin_defeated() {
-    give_item("arrows", 1 + random(3));
-}
-
+// Called by the slime's "Defeated" trigger (what slimes drop is set in their loot table).
 fn slime_defeated() {
     add_var("slimes_defeated", 1);
     // Tilda's quest counts slimes once it was accepted.
@@ -1136,9 +1149,6 @@ fn slime_defeated() {
         if get_var("pest_slimes") >= 5 {
             set_quest_stage("pest_control", 1);
         }
-    }
-    if random(2) == 0 {
-        give_item("coin", 1 + random(3));
     }
     if get_var("slimes_defeated") == 5 {
         say("You have defeated 5 slimes! You feel stronger... (not really)");

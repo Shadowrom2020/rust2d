@@ -261,6 +261,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         defense: 0,
                         triggers: vec![],
                         shop: None,
+                        loot: vec![],
                     },
                     |d| &mut d.id,
                 ),
@@ -953,6 +954,14 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     ui.weak("1 heart = 2 HP. For the player character, Damage is the bare-handed attack strength. Defeated characters fire 'Defeated' triggers.");
     ui.label("Ranged attack (hostile characters shoot at the player when in range and in sight):");
     weapon_ui(ui, "chr_weapon", &mut d.weapon, cx, true);
+    ui.separator();
+    ui.heading("Loot");
+    if d.max_hp <= 0 {
+        ui.weak("This character can't be defeated (Max HP 0), so its loot never drops.");
+    } else {
+        ui.weak("What the character can drop when defeated. Placed characters and spawners can use their own table instead.");
+    }
+    widgets::loot_ui(ui, "chr_loot", &mut d.loot, cx.refs, cx.tex, cx.assets, cx.db);
     ui.separator();
     ui.heading("Merchant");
     let mut on = d.shop.is_some();

@@ -215,7 +215,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "zones" => {
             if let Some(d) = &ed.doc {
                 for z in &d.map.zones {
-                    println!("[zones] {}: {} {:?} at {},{} {}x{}", d.map.name, z.name, z.kind, z.x, z.y, z.w, z.h);
+                    println!("[zones] {}: #{} {} {:?} at {},{} {}x{}", d.map.name, z.uid, z.name, z.kind, z.x, z.y, z.w, z.h);
                 }
             }
         }
@@ -482,6 +482,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "zone" => Selection::Zone(num(2) as u32),
                 // select named NAME: the entity with that instance name
                 "named" => ed.doc.as_ref().and_then(|d| d.map.entities.iter().find(|e| e.name == arg(2))).map_or(Selection::None, |e| Selection::Entity(e.uid)),
+                // select zonenamed NAME: the zone with that name
+                "zonenamed" => ed.doc.as_ref().and_then(|d| d.map.zones.iter().find(|z| z.name == arg(2))).map_or(Selection::None, |z| Selection::Zone(z.uid)),
                 _ => Selection::None,
             }
         }
