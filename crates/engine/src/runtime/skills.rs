@@ -406,7 +406,7 @@ impl Game {
         if let Some(target) = self.aim_target() {
             // The enemy about to be hit gets a glowing ring in world space.
             let p = self.camera().world_to_screen(target);
-            let scale = self.project.config.scale.max(1.0);
+            let scale = self.view_scale();
             draw_circle_lines(p.x, p.y, 18.0 * scale, 2.5, Color::new(1.0, 0.85, 0.3, 0.6 + 0.3 * (t * 8.0).sin()));
         }
     }

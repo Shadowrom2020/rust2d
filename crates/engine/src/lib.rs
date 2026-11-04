@@ -18,6 +18,7 @@ pub mod render;
 pub mod runtime;
 pub mod script;
 pub mod script_refs;
+pub mod settings;
 pub mod skills;
 pub mod state;
 pub mod structure;

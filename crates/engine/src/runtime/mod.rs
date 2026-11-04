@@ -185,6 +185,10 @@ pub struct Game {
     skills: skills::Skills,
     /// Set while a saved game is being loaded (see `enter_map`).
     resuming: bool,
+    /// The player's options (Options menu), saved per game in the user's config folder.
+    pub settings: crate::settings::Settings,
+    /// Fullscreen state last applied (None = not yet).
+    fullscreen: Option<bool>,
     loaded: Loaded,
     cache: VecDeque<Map>,
     player: Body,
@@ -233,6 +237,8 @@ impl Game {
             light_pass: None,
             skills: Default::default(),
             resuming: false,
+            settings: crate::settings::Settings::default(),
+            fullscreen: None,
             loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![], tile_lights: vec![] },
             project,
             assets,
@@ -271,6 +277,8 @@ impl Game {
             (None, None) if start.map.is_some() => Arrival::Spawn(String::new()),
             _ => Arrival::Spawn(game.project.config.start_spawn.clone()),
         };
+        game.settings = crate::settings::Settings::load(&game.project.config.name);
+        game.apply_settings();
         game.world.player_hp = Some(game.combat.max_hp);
         game.world.hour = game.project.config.start_hour;
         game.prepare_world();
@@ -809,6 +817,7 @@ impl Game {
 
         // UI gets input first; a key that closes a dialog must not also interact.
         let allow_inventory = !self.runner.busy() && matches!(self.fade, Fade::None);
+        self.ui.text_speed = self.settings.text_speed;
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
         let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
@@ -1284,7 +1293,7 @@ impl Game {
     fn camera(&self) -> Camera2D {
         let ts = self.ts();
         let m = &self.loaded.map;
-        let scale = self.project.config.scale.max(1.0);
+        let scale = self.view_scale();
         let (vw, vh) = (screen_width() / scale, screen_height() / scale);
         let (mw, mh) = (m.width as f32 * ts, m.height as f32 * ts);
         let clamp_axis = |p: f32, view: f32, size: f32| {
@@ -1400,6 +1409,7 @@ impl Game {
         if !self.on_title() {
             self.draw_aim_cursor();
         }
+        self.draw_fps();
         self.ui.draw_toasts();
         self.ui.draw_dialog();
         self.draw_game_over();

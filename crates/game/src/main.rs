@@ -241,6 +241,15 @@ impl Autoplay {
                     click(&mut self.mouse_frames, p, MouseButton::Left);
                     return true;
                 }
+                // opt ROW prev|next|row: click the "<" / ">" arrows (or the label) of an Options row
+                "opt" => {
+                    let Some(p) = game.option_click_pos(secs(1) as usize, arg(2)) else {
+                        println!("[autoplay] opt: Options page not open");
+                        continue;
+                    };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
                 "slot" => {
                     let Some(p) = game.slot_screen_pos(arg(1), secs(2) as usize) else { continue };
                     let b = if arg(3) == "right" { MouseButton::Right } else { MouseButton::Left };

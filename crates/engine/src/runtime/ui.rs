@@ -19,6 +19,8 @@ pub struct Ui {
     toasts: Vec<(String, f32)>,
     /// Choice option areas, recorded while drawing the previous frame.
     choice_rects: Vec<Rect>,
+    /// Dialog text speed from the player's options (set every frame; 0 = instant).
+    pub text_speed: f32,
 }
 
 pub struct UiInput {
@@ -70,7 +72,7 @@ impl Ui {
             out.consumed = true;
             out.mouse_consumed = true;
             let len = d.text.chars().count() as f32;
-            d.revealed = (d.revealed + dt * CHARS_PER_SEC).min(len);
+            d.revealed = if self.text_speed <= 0.0 { len } else { (d.revealed + dt * CHARS_PER_SEC * self.text_speed).min(len) };
             if let Some((opts, _, sel)) = &mut d.choice {
                 let n = opts.len().max(1);
                 if input::pressed(KeyCode::Up) || input::pressed(KeyCode::W) {
