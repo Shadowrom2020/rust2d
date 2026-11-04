@@ -12,6 +12,7 @@ use rust2d_engine::audio::wav_bytes;
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
 use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
+use rust2d_engine::state::Sex;
 
 mod art;
 use art::*;
@@ -331,7 +332,7 @@ fn village() -> Map {
             TriggerOn::Interact,
             vec![not(flag("quest_accepted"))],
             vec![
-                dialog("Elder Rowan", "Ah, a traveller! Strange lights have been seen in Whisperwood, east of here."),
+                dialog("Elder Rowan", "Ah, a traveller! Welcome to Emberbrook, {player}. Strange lights have been seen in Whisperwood, east of here."),
                 Action::Choice {
                     speaker: "Elder Rowan".into(),
                     text: "Would you investigate the old shrine for us?".into(),
@@ -358,7 +359,7 @@ fn village() -> Map {
             TriggerOn::Interact,
             vec![cond(flag("shrine_lit"))],
             vec![
-                dialog("Elder Rowan", "The lights have calmed! You have my thanks, hero."),
+                dialog("Elder Rowan", "The lights have calmed! You have my thanks, brave {lad|lass}."),
                 Action::If {
                     conditions: vec![not(flag("rewarded"))],
                     then: vec![
@@ -376,7 +377,7 @@ fn village() -> Map {
     v.name = "mira".into();
     v.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "mira_talk".into() }])];
     let v2 = b.entity(EntityKind::Character, "villager", 34, 14);
-    v2.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Villager", "Lovely weather today, isn't it?")])];
+    v2.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Villager", "Lovely weather today, isn't it, {sir|miss}?")])];
     b.entity(EntityKind::Item, "apple", 8, 12);
     b.entity(EntityKind::Item, "apple", 37, 21);
 
@@ -390,6 +391,17 @@ fn village() -> Map {
     }
     let shop_sign = b.entity(EntityKind::Prop, "sign", door2.0 - 1, door2.1 + 1);
     shop_sign.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Sign", "TILDA'S WARES - Potions, arrows, armor. Fair prices, we buy too!")])];
+
+    // A town guard patrolling the main road (back and forth, pausing at each point).
+    let guard = b.entity(EntityKind::Character, "guard", 8, 18);
+    guard.name = "guard".into();
+    guard.patrol = Some(rust2d_engine::entity::PatrolRoute {
+        points: vec![(8, 18), (20, 18), (30, 18), (38, 18)],
+        mode: rust2d_engine::entity::PatrolMode::PingPong,
+        pause: 1.5,
+        speed: 0.0,
+    });
+    guard.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "guard_talk".into() }])];
 
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
     b.m.triggers = vec![Trigger {
@@ -455,7 +467,7 @@ fn shop() -> Map {
             vec![not(flag("met_tilda"))],
             vec![
                 Action::SetFlag { name: "met_tilda".into(), value: true },
-                dialog("Tilda", "Welcome, welcome! Potions, arrows, armor - and I pay fair coin for whatever you find out there."),
+                dialog("Tilda", "Welcome, welcome, {good sir|my lady}! Potions, arrows, armor - and I pay fair coin for whatever you find out there."),
             ],
         ),
         // Quest "Pest Control": offered until accepted, rewarded once five slimes are gone.
@@ -480,7 +492,7 @@ fn shop() -> Map {
             TriggerOn::Interact,
             vec![quest_is("pest_control", QuestCheck::AtStage, 1)],
             vec![
-                dialog("Tilda", "Five slimes? My deliveries are safe again - thank you! Here, as promised."),
+                dialog("Tilda", "Five slimes? My deliveries are safe again - thank you, {player}! Here, as promised."),
                 Action::GiveItem { item: "coin".into(), count: 30 },
                 Action::GiveItem { item: "potion".into(), count: 1 },
                 quest("pest_control", QuestOp::Complete, 0),
@@ -870,8 +882,15 @@ fn database() -> Database {
         sounds: SOUNDS.iter().map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.wav"), volume: if id.starts_with("music") { 0.35 } else { 0.6 } }).collect(),
         sheets: vec![
             SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 32, frame_h: 48 },
+            // More looks for the character creator.
+            SheetDef { id: "hero_2".into(), image: "sprites/hero_2.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_3".into(), image: "sprites/hero_3.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_f".into(), image: "sprites/hero_f.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_f2".into(), image: "sprites/hero_f2.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "hero_f3".into(), image: "sprites/hero_f3.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "elder".into(), image: "sprites/elder.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "villager".into(), image: "sprites/villager.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "guard".into(), image: "sprites/guard.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "merchant_f".into(), image: "sprites/merchant_f.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "slime".into(), image: "sprites/slime.png".into(), frame_w: 32, frame_h: 32 },
             SheetDef { id: "goblin".into(), image: "sprites/goblin.png".into(), frame_w: 32, frame_h: 48 },
@@ -999,6 +1018,7 @@ fn database() -> Database {
             hero,
             ch("elder", "Elder", "elder", 40.0, Behavior::Static),
             ch("villager", "Villager", "villager", 35.0, Behavior::Wander { radius: 3.0 }),
+            ch("guard", "Town Guard", "guard", 40.0, Behavior::Static),
             slime,
             goblin,
             // Every merchant sells these by default; the one in the village has their own stock.
@@ -1045,9 +1065,12 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               wait(seconds) emit(event) then_call(fn)
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
 //               open_shop(target) set_state(target, state)
+//               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
 //               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
 //               quest_done(id)
+// Player:       player_name() player_sex() ("male"/"female") is_female() is_male()
+//               text("...") fills in placeholders: {player} {sir|madam} {variable}
 // Other:        player_hp() random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
@@ -1055,9 +1078,14 @@ fn mira_talk() {
     add_var("mira_talks", 1);
     let n = get_var("mira_talks");
     if n == 1 {
-        say("Mira", "Hi! I'm Mira. Have you met Elder Rowan by the well?");
+        say("Mira", "Hi! I'm Mira. " + player_name() + ", right? Have you met Elder Rowan by the well?");
     } else if flag("shrine_lit") {
-        say("Mira", "You lit the shrine? Amazing!");
+        // Scripts can check the player's sex too (or use "{hero|heroine}" in the text).
+        if is_female() {
+            say("Mira", "You lit the shrine? When I grow up I want to be a heroine like you!");
+        } else {
+            say("Mira", "You lit the shrine? When I grow up I want to be a hero like you!");
+        }
     } else if n < 4 {
         say("Mira", "Talked to me " + n + " times now. You must be bored!");
     } else {
@@ -1117,6 +1145,17 @@ fn slime_defeated() {
     }
 }
 
+// The town guard patrols the road (see his patrol route in the map inspector). Once the
+// shrine is lit he stops: stop_patrol(target) / patrol(target) / patrol(target, [[x, y], ...]).
+fn guard_talk() {
+    if flag("shrine_lit") {
+        say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
+        stop_patrol("guard");
+    } else {
+        say("Guard", "Halt! Oh, it's you, {player}. Careful in Whisperwood, {sir|ma'am} - strange lights out there.");
+    }
+}
+
 fn count_coins() {
     say("You have " + item_count("coin") + " coins.");
 }
@@ -1127,10 +1166,18 @@ fn main() {
     std::fs::create_dir_all(&out).unwrap();
     terrain(&out);
     character(&out, "hero", &Look { skin: 0xf2c49b, hair: 0x5d3a1a, shirt: 0x2e6fdb, pants: 0x3b3b4f, beard: false, ears: false, ..Default::default() });
+    // Character creator looks (hero_f matches the library's "Heroine").
+    character(&out, "hero_2", &Look { skin: 0xe8b88a, hair: 0xe0c060, shirt: 0x2e8b57, pants: 0x4a3a2a, ..Default::default() });
+    character(&out, "hero_3", &Look { skin: 0x8d5a3b, hair: 0x1e1612, shirt: 0xb03a2e, pants: 0x2f2f3f, ..Default::default() });
+    character(&out, "hero_f", &Look { skin: 0xf2c49b, hair: 0x7a4a22, shirt: 0x2e6fdb, pants: 0x3b3b4f, female: true, ..Default::default() });
+    character(&out, "hero_f2", &Look { skin: 0xf5d0b0, hair: 0xd35400, shirt: 0x8e44ad, pants: 0x3b3b4f, female: true, ..Default::default() });
+    character(&out, "hero_f3", &Look { skin: 0x8d5a3b, hair: 0x101010, shirt: 0x16a085, pants: 0x4a3a2a, female: true, ..Default::default() });
     character(&out, "elder", &Look { skin: 0xe8b88a, hair: 0xdedede, shirt: 0x7b4fa0, pants: 0x4a3a5a, beard: true, ears: false, ..Default::default() });
     character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false, ..Default::default() });
     // Same look as the library's "Merchant (female)".
     character(&out, "merchant_f", &Look { skin: 0xe8b88a, hair: 0x3a2418, shirt: 0x7a3a8a, pants: 0x4a3a2a, robe: Some(0x6a3a7a), apron: Some(0xe8dcc0), female: true, ..Default::default() });
+    // Same look as the library's "Town Guard".
+    character(&out, "guard", &Look { skin: 0xe8b88a, hair: 0x3a2a1e, shirt: 0x2b4c8c, pants: 0x3a3a44, hat: Hat::Helmet, ..Default::default() });
     character(&out, "goblin", &Look { skin: 0x7cb342, hair: 0x33691e, shirt: 0x5d4037, pants: 0x3e2723, beard: false, ears: true, ..Default::default() });
     overlay(&out, "ov_cap", Gear::Cap);
     overlay(&out, "ov_helmet", Gear::Helmet);
@@ -1165,6 +1212,22 @@ fn main() {
                 unlock: "unlock".into(),
             },
             inventory_size: 24,
+            creation: rust2d_engine::project::CharacterCreation {
+                enabled: true,
+                sex: rust2d_engine::project::SexChoice::Both,
+                default_name: "Alex".into(),
+                looks: [
+                    ("hero", Sex::Male, "Blue tunic"),
+                    ("hero_2", Sex::Male, "Green tunic"),
+                    ("hero_3", Sex::Male, "Red tunic"),
+                    ("hero_f", Sex::Female, "Blue tunic"),
+                    ("hero_f2", Sex::Female, "Purple tunic"),
+                    ("hero_f3", Sex::Female, "Teal tunic"),
+                ]
+                .iter()
+                .map(|(sheet, sex, label)| rust2d_engine::project::PlayerLook { sheet: sheet.to_string(), sex: *sex, label: label.to_string() })
+                .collect(),
+            },
         },
         db: database(),
     };

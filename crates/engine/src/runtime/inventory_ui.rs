@@ -562,6 +562,10 @@ impl Game {
                     }
                 } else if input::pressed(KeyCode::U) && side == Side::Player {
                     self.use_slot(i);
+                } else if input::pressed(KeyCode::G) && side == Side::Player {
+                    // G drops the stack, Shift+G a single item.
+                    let one = input::down(KeyCode::LeftShift) || input::down(KeyCode::RightShift);
+                    self.drop_slot(i, one.then_some(1));
                 }
             }
         }
@@ -606,6 +610,10 @@ impl Game {
                         }
                         // Dragging a shortcut off the bar removes it.
                         None if side == Side::Quick => self.clear_quick(i),
+                        // Dragging a stack out of the window drops it on the ground.
+                        None if side == Side::Player && !layout.contains(m) => {
+                            self.drop_slot(i, None);
+                        }
                         None => {}
                     }
                 } else if hit == Some((side, i)) {
@@ -855,11 +863,57 @@ impl Game {
 
 impl Game {
     /// Help line at the bottom of the inventory / loot window.
+    /// Where dropped items land: the tile in front of the player if it is free, else at
+    /// the player's feet.
+    fn drop_position(&self) -> Vec2 {
+        let ts = self.ts();
+        let (dx, dy) = self.player.facing.dir();
+        let ahead = self.player.pos + vec2(dx, dy) * ts * 0.9;
+        let (tx, ty) = ((ahead.x / ts).floor() as i32, ((ahead.y - 1.0) / ts).floor() as i32);
+        let blocked = self.loaded.entities.iter().any(|e| e.active && e.solid && e.body.rect().contains(vec2((tx as f32 + 0.5) * ts, (ty as f32 + 0.8) * ts)));
+        if self.loaded.map.in_bounds(tx, ty) && !self.tile_solid(tx, ty) && !blocked {
+            vec2((tx as f32 + 0.5) * ts, (ty as f32 + 1.0) * ts - 1.0)
+        } else {
+            self.player.pos
+        }
+    }
+
+    /// Drops `count` items (None = the whole stack) of inventory slot `i` on the ground.
+    /// They stay on this map (also in save games) until picked up again.
+    pub(super) fn drop_slot(&mut self, i: usize, count: Option<u32>) -> bool {
+        let Some(stack) = self.world.inventory.slots.get(i).cloned().flatten() else { return false };
+        let n = count.unwrap_or(stack.count).min(stack.count);
+        if n == 0 {
+            return false;
+        }
+        if let Some(Some(s)) = self.world.inventory.slots.get_mut(i) {
+            s.count -= n;
+            if s.count == 0 {
+                self.world.inventory.slots[i] = None;
+            }
+        }
+        let pos = self.drop_position();
+        let map = self.loaded.map.name.clone();
+        let (uid, new) = self.world.add_dropped(&map, &stack.item, n, pos.x, pos.y, self.ts() * 0.5);
+        if new {
+            let mut rt = self.new_rt_entity(crate::entity::EntityKind::Item, &stack.item, uid, "", pos, crate::entity::Facing::Down, true, 0);
+            rt.count = n;
+            self.loaded.entities.push(rt);
+        } else if let Some(e) = self.loaded.entities.iter_mut().find(|e| e.uid == uid) {
+            e.count += n;
+            e.active = true;
+        }
+        let name = self.item_name(&stack.item);
+        self.ui.toast(if n > 1 { format!("Dropped {n} {name}") } else { format!("Dropped {name}") });
+        self.audio.play(&self.project.config.sfx.pickup);
+        true
+    }
+
     fn hint(&self) -> &'static str {
         if self.inv.loot.is_some() {
             "Click: take/store stack · Right-click: one · Drag: move · T: take all · Esc: close"
         } else {
-            "Double-click / right-click / Enter: use or equip · Drag to slots or quick bar (or press 1-8) · Esc: close"
+            "Double-click / right-click / Enter: use or equip · Drag to slots or quick bar (or 1-8) · G / drag out: drop (Shift+G: one) · Esc: close"
         }
     }
 }

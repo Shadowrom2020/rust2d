@@ -136,6 +136,9 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.shop(&mut d.shop);
     }
     r.fix(RefKind::Character, &mut config.player);
+    for l in &mut config.creation.looks {
+        r.fix(RefKind::Sheet, &mut l.sheet);
+    }
     r.fix(RefKind::Map, &mut config.start_map);
     for (_, s) in config.sfx.fields_mut() {
         r.fix(RefKind::Sound, s);
@@ -304,6 +307,7 @@ mod tests {
             player: "hero".into(),
             sfx: Default::default(),
             inventory_size: 24,
+            creation: Default::default(),
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);

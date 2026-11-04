@@ -13,6 +13,8 @@ use rust2d_engine::project::{Project, ProjectConfig};
 pub enum Purpose {
     OpenProject,
     NewProject,
+    /// Folder the new project wizard creates the project in.
+    NewProjectParent,
     /// Image for the tileset with this id.
     TilesetImage(String),
     SheetImage(String),
@@ -44,6 +46,7 @@ impl PendingDialog {
             let result = match p {
                 Purpose::OpenProject => d.set_title("Open rust2d project (folder containing project.ron)").pick_folder(),
                 Purpose::NewProject => d.set_title("Choose an empty folder for the new project").pick_folder(),
+                Purpose::NewProjectParent => d.set_title("Where to create the new project").pick_folder(),
                 Purpose::TilesetImage(_) => d.set_title("Choose tileset image").add_filter("Images", &images).pick_file(),
                 Purpose::SheetImage(_) => d.set_title("Choose sprite sheet image").add_filter("Images", &images).pick_file(),
                 Purpose::SoundFile(_) => d.set_title("Choose sound").add_filter("Audio (WAV, OGG)", &["wav", "ogg"]).pick_file(),

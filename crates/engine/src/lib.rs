@@ -17,6 +17,7 @@ pub mod release;
 pub mod render;
 pub mod runtime;
 pub mod script;
+pub mod script_refs;
 pub mod state;
 
 pub use macroquad;

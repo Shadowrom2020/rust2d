@@ -160,6 +160,11 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         speaker: speaker.into(),
         text: text.into()
     })));
+    // say(SELF, "...") / say(uid, "..."): the entity's name as speaker (resolved by the game).
+    engine.register_fn("say", with!(ctx, |c, entity: i64, text: &str| c.actions.push(Action::Dialog {
+        speaker: if entity < 0 { String::new() } else { format!("{{uid:{entity}}}") },
+        text: text.into()
+    })));
     engine.register_fn("choice", with!(ctx, |c, text: &str, options: Array, var: &str| {
         let options = options.into_iter().map(|o| o.to_string()).collect();
         c.actions.push(Action::Choice { speaker: String::new(), text: text.into(), options, var: var.into() })
@@ -176,6 +181,12 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         target: t.into(),
         frame: f.max(0) as u32
     })));
+    engine.register_fn("player_name", with!(ctx, |c| c.world.player_name.clone()));
+    engine.register_fn("player_sex", with!(ctx, |c| c.world.player_sex.key().to_string()));
+    engine.register_fn("is_female", with!(ctx, |c| c.world.player_sex == crate::state::Sex::Female));
+    engine.register_fn("is_male", with!(ctx, |c| c.world.player_sex == crate::state::Sex::Male));
+    // Placeholders like in dialog texts: "{player}", "{sir|madam}", "{var}".
+    engine.register_fn("text", with!(ctx, |c, t: &str| c.world.expand_text(t)));
     engine.register_fn("quest_stage", with!(ctx, |c, q: &str| c.world.quest(q).map_or(-1, |p| p.stage as i64)));
     engine.register_fn("quest_active", with!(ctx, |c, q: &str| c.world.check_quest(q, crate::quest::QuestCheck::Active, 0)));
     engine.register_fn("quest_done", with!(ctx, |c, q: &str| c.world.check_quest(q, crate::quest::QuestCheck::Completed, 0)));
@@ -193,6 +204,19 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         op: crate::quest::QuestOp::SetStage,
         stage: n.max(0) as u32
     })));
+    engine.register_fn("patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: true, points: Vec::new() })));
+    engine.register_fn("patrol", with!(ctx, |c, t: &str, pts: Array| {
+        // [[x, y], [x, y], ...] in tile coordinates.
+        let points = pts
+            .into_iter()
+            .filter_map(|p| {
+                let a = p.try_cast::<Array>()?;
+                Some((a.first()?.as_int().ok()? as i32, a.get(1)?.as_int().ok()? as i32))
+            })
+            .collect();
+        c.actions.push(Action::Patrol { target: t.into(), active: true, points })
+    }));
+    engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
     engine.register_fn("set_state", with!(ctx, |c, t: &str, s: &str| c.actions.push(Action::SetState { target: t.into(), state: s.into() })));
     engine.register_fn("move_by", with!(ctx, |c, t: &str, dx: i64, dy: i64| c.actions.push(Action::Move {
@@ -274,6 +298,32 @@ mod tests {
                 Action::SetLocked { target: "door".into(), locked: false }
             ]
         );
+    }
+
+    #[test]
+    fn patrol_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn walk() { patrol("guard", [[1, 2], [3, 4]]); stop_patrol("guard"); patrol("self"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "walk", None);
+        assert_eq!(
+            actions,
+            vec![
+                Action::Patrol { target: "guard".into(), active: true, points: vec![(1, 2), (3, 4)] },
+                Action::Patrol { target: "guard".into(), active: false, points: vec![] },
+                Action::Patrol { target: "self".into(), active: true, points: vec![] },
+            ]
+        );
+    }
+
+    #[test]
+    fn say_with_an_entity_as_speaker() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn talk() { say(SELF, "Hello"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "talk", Some(7));
+        assert_eq!(actions, vec![Action::Dialog { speaker: "{uid:7}".into(), text: "Hello".into() }]);
+        // Without an owner SELF is -1: no speaker.
+        let actions = host.call(&mut WorldState::default(), "talk", None);
+        assert_eq!(actions, vec![Action::Dialog { speaker: String::new(), text: "Hello".into() }]);
     }
 
     #[test]

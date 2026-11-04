@@ -252,6 +252,10 @@ impl Editor {
             return;
         }
 
+        // Editing a patrol route: clicks place / move / remove waypoints instead.
+        if self.route_edit.is_some() && self.route_edit_mouse(tile, &ms, over_ui) {
+            return;
+        }
         if !over_ui && ms.pressed[L] {
             self.mouse_down(tile, world);
         } else if !over_ui && ms.pressed[R] {
@@ -342,6 +346,12 @@ impl Editor {
         }
         if is_key_pressed(KeyCode::Delete) {
             self.delete_selection();
+        }
+        if is_key_pressed(KeyCode::Escape) && self.route_edit.is_some() {
+            self.route_edit = None;
+            self.route_drag = None;
+            self.set_status("Patrol route done");
+            return;
         }
         if is_key_pressed(KeyCode::Escape) && self.link.is_some() {
             self.link = None;
@@ -788,6 +798,36 @@ impl Editor {
             }
         }
 
+        // Patrol route of the selected character: numbered waypoints joined by lines.
+        if let Some(r) = match self.sel {
+            Selection::Entity(uid) => map.entity(uid).and_then(|e| e.patrol.as_ref()),
+            _ => None,
+        } {
+            let editing = self.route_edit.is_some();
+            let col = if editing { Color::new(0.3, 0.95, 1.0, 1.0) } else { Color::new(0.3, 0.95, 1.0, 0.6) };
+            let c = |p: (i32, i32)| vec2((p.0 as f32 + 0.5) * ts, (p.1 as f32 + 0.5) * ts);
+            let n = r.points.len();
+            let closes = r.mode == rust2d_engine::entity::PatrolMode::Loop && n > 2;
+            for k in 0..n.saturating_sub(1) + usize::from(closes) {
+                let (a, b) = (c(r.points[k]), c(r.points[(k + 1) % n]));
+                draw_line(a.x, a.y, b.x, b.y, 2.0 * px, col);
+                // Arrow head halfway, pointing the walking direction.
+                let mid = a.lerp(b, 0.5);
+                let d = (b - a).normalize_or_zero() * 6.0 * px;
+                let nrm = vec2(-d.y, d.x);
+                draw_triangle(mid + d, mid - d + nrm, mid - d - nrm, col);
+            }
+            for (k, p) in r.points.iter().enumerate() {
+                let q = c(*p);
+                draw_circle(q.x, q.y, 9.0 * px, Color::new(0.05, 0.2, 0.3, 0.9));
+                draw_circle_lines(q.x, q.y, 9.0 * px, 1.5 * px, col);
+                let t = (k + 1).to_string();
+                let fs = (14.0 * px).max(8.0);
+                let w = measure_text(&t, None, fs as u16, 1.0).width;
+                draw_text(&t, q.x - w / 2.0, q.y + fs * 0.35, fs, WHITE);
+            }
+        }
+
         // Selection outline.
         if let Selection::Entity(uid) = self.sel {
             if let Some(e) = map.entity(uid) {
@@ -951,5 +991,68 @@ fn zone_color(k: &ZoneKind) -> Color {
         ZoneKind::Transition { .. } => Color::new(1.0, 0.6, 0.1, 1.0),
         ZoneKind::Trigger => Color::new(1.0, 0.65, 0.2, 1.0),
         ZoneKind::Spawner { .. } => Color::new(1.0, 0.25, 0.3, 1.0),
+    }
+}
+
+impl Editor {
+    /// Mouse handling while a patrol route is edited. Returns true if the event was used.
+    fn route_edit_mouse(&mut self, tile: (i32, i32), ms: &Mouse, over_ui: bool) -> bool {
+        const L: usize = 0;
+        const R: usize = 1;
+        let Some(uid) = self.route_edit else { return false };
+        let Some(doc) = &mut self.doc else { return false };
+        // Editing ends when another object is selected or the character is gone.
+        if self.sel != Selection::Entity(uid) || doc.map.entity(uid).is_none_or(|e| e.patrol.is_none()) {
+            self.route_edit = None;
+            self.route_drag = None;
+            return false;
+        }
+        let inside = doc.map.in_bounds(tile.0, tile.1);
+        fn points(doc: &mut crate::doc::MapDoc, uid: u32) -> Option<&mut Vec<(i32, i32)>> {
+            doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.patrol.as_mut()).map(|r| &mut r.points)
+        }
+        // Dragging a waypoint.
+        if let Some((k, before)) = self.route_drag.take() {
+            if ms.down[L] {
+                if inside {
+                    if let Some(p) = points(doc, uid).and_then(|p| p.get_mut(k)) {
+                        *p = tile;
+                    }
+                }
+                self.route_drag = Some((k, before));
+            } else {
+                doc.record_objects(before, "route");
+            }
+            return true;
+        }
+        if over_ui || !inside {
+            return false;
+        }
+        if ms.pressed[L] {
+            let before = crate::doc::Objects::of(&doc.map);
+            let Some(pts) = points(doc, uid) else { return false };
+            match pts.iter().position(|p| *p == tile) {
+                // On a waypoint: drag it.
+                Some(k) => self.route_drag = Some((k, before)),
+                None => {
+                    pts.push(tile);
+                    doc.record_objects(before, "route");
+                }
+            }
+            return true;
+        }
+        if ms.pressed[R] {
+            let before = crate::doc::Objects::of(&doc.map);
+            if let Some(pts) = points(doc, uid) {
+                // The waypoint on this tile, else the last one.
+                let k = pts.iter().rposition(|p| *p == tile).or(pts.len().checked_sub(1));
+                if let Some(k) = k {
+                    pts.remove(k);
+                }
+            }
+            doc.record_objects(before, "route");
+            return true;
+        }
+        false
     }
 }

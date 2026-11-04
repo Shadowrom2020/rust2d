@@ -155,26 +155,6 @@ impl WorldState {
         }
     }
 
-    /// Replaces `{name}` with the value of variable `name`.
-    pub fn fill_vars(&self, text: &str) -> String {
-        let mut out = String::new();
-        let mut rest = text;
-        while let Some(i) = rest.find('{') {
-            out.push_str(&rest[..i]);
-            match rest[i + 1..].find('}') {
-                Some(j) if rest[i + 1..i + 1 + j].chars().all(|c| c.is_alphanumeric() || c == '_') && j > 0 => {
-                    out.push_str(&self.var(&rest[i + 1..i + 1 + j]).to_string());
-                    rest = &rest[i + 2 + j..];
-                }
-                _ => {
-                    out.push('{');
-                    rest = &rest[i + 1..];
-                }
-            }
-        }
-        out.push_str(rest);
-        out
-    }
 }
 
 #[cfg(test)]
@@ -202,9 +182,12 @@ mod tests {
     }
 
     #[test]
-    fn fills_variables() {
-        let mut w = WorldState::default();
+    fn expands_text() {
+        let mut w = WorldState { player_name: "Ada".into(), ..Default::default() };
         w.set_var("slimes", 3);
-        assert_eq!(w.fill_vars("Slimes ({slimes}/5) {} {a b} {"), "Slimes (3/5) {} {a b} {");
+        assert_eq!(w.expand_text("Slimes ({slimes}/5) {} {a b} {"), "Slimes (3/5) {} {a b} {");
+        assert_eq!(w.expand_text("Thank you, {sir|madam} {player}! {He|She} said."), "Thank you, sir Ada! He said.");
+        w.player_sex = crate::state::Sex::Female;
+        assert_eq!(w.expand_text("{sir|madam} {player}, {|ms. }x"), "madam Ada, ms. x");
     }
 }

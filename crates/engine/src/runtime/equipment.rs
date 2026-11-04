@@ -167,8 +167,8 @@ impl Game {
 
     /// Draws the player's idle front frame + armor scaled into `dest` (character sheet portrait).
     pub(super) fn draw_portrait(&self, dest: Rect) {
-        let Some(sheet) = &self.player_sheet else { return };
-        let mut sheets = vec![sheet.clone()];
+        let Some(sheet) = self.player_sheet_id() else { return };
+        let mut sheets = vec![sheet.to_string()];
         for slot in [EquipSlot::Body, EquipSlot::Head] {
             if let Some(o) = self
                 .world

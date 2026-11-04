@@ -57,6 +57,25 @@ pub struct EntityState {
     /// Current state of a prop (None in saves from before named states: `frame` is used).
     #[serde(default)]
     pub state: Option<String>,
+    /// Where a patrolling character is on its route.
+    #[serde(default)]
+    pub patrol: Option<PatrolState>,
+}
+
+/// Progress of a patrolling character (saved, so a loaded game continues the route).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PatrolState {
+    /// Waypoint it is heading for.
+    pub index: u32,
+    /// Walking the route backwards (back-and-forth routes).
+    #[serde(default)]
+    pub back: bool,
+    /// Stopped by an action / script.
+    #[serde(default)]
+    pub stopped: bool,
+    /// A route given by an action / script instead of the placed character's own.
+    #[serde(default)]
+    pub route: Option<crate::entity::PatrolRoute>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -100,9 +119,125 @@ pub struct WorldState {
     /// quest id -> progress (started quests only).
     #[serde(default)]
     pub quests: BTreeMap<String, crate::quest::QuestProgress>,
+    /// The player character's name, sex and look (sprite sheet; "" = the player
+    /// character definition's), chosen in the character creator.
+    #[serde(default)]
+    pub player_name: String,
+    #[serde(default)]
+    pub player_sex: Sex,
+    #[serde(default)]
+    pub player_look: String,
+    /// map -> items the player dropped there (they stay until picked up again).
+    #[serde(default)]
+    pub dropped: BTreeMap<String, Vec<DroppedItem>>,
+    /// Counter for the uids of dropped items (see [`DROPPED_UID_BASE`]).
+    #[serde(default)]
+    pub next_drop: u32,
+}
+
+/// Uids of dropped items start here, far above the uids of map entities.
+pub const DROPPED_UID_BASE: u32 = 0x4000_0000;
+
+/// An item stack the player dropped on a map.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DroppedItem {
+    pub uid: u32,
+    pub item: String,
+    pub count: u32,
+    /// Feet position in pixels.
+    pub x: f32,
+    pub y: f32,
+}
+
+/// The player character's sex (for dialogs, conditions and scripts).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Sex {
+    #[default]
+    Male,
+    Female,
+}
+
+impl Sex {
+    pub const ALL: [Sex; 2] = [Sex::Male, Sex::Female];
+    pub fn label(self) -> &'static str {
+        match self {
+            Sex::Male => "Male",
+            Sex::Female => "Female",
+        }
+    }
+    /// "male" / "female" (scripts).
+    pub fn key(self) -> &'static str {
+        match self {
+            Sex::Male => "male",
+            Sex::Female => "female",
+        }
+    }
 }
 
 impl WorldState {
+    /// Fills in text placeholders (dialogs, choices, quest texts):
+    /// `{player}` = the player's name, `{his|her}` = the first word for a male player, the
+    /// second for a female one, `{name}` = the value of variable `name`. Anything else in
+    /// braces is kept as it is.
+    pub fn expand_text(&self, text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(i) = rest.find('{') {
+            out.push_str(&rest[..i]);
+            let after = &rest[i + 1..];
+            let Some(j) = after.find('}') else {
+                out.push_str(&rest[i..]);
+                return out;
+            };
+            let inner = &after[..j];
+            let ident = !inner.is_empty() && inner.chars().all(|c| c.is_alphanumeric() || c == '_');
+            if inner == "player" {
+                out.push_str(&self.player_name);
+            } else if inner.contains('|') && !inner.contains('{') {
+                let mut parts = inner.splitn(2, '|');
+                let (m, f) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+                out.push_str(if self.player_sex == Sex::Female { f } else { m });
+            } else if ident {
+                out.push_str(&self.var(inner).to_string());
+            } else {
+                out.push('{');
+                rest = after;
+                continue;
+            }
+            rest = &after[j + 1..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// Puts dropped items on a map: onto a pile of the same item within `merge` pixels, else
+    /// as a new pile. Returns the pile's uid and whether it is new.
+    pub fn add_dropped(&mut self, map: &str, item: &str, count: u32, x: f32, y: f32, merge: f32) -> (u32, bool) {
+        let piles = self.dropped.entry(map.to_string()).or_default();
+        if let Some(p) = piles.iter_mut().find(|p| p.item == item && (p.x - x).hypot(p.y - y) <= merge) {
+            p.count += count;
+            return (p.uid, false);
+        }
+        let uid = DROPPED_UID_BASE + self.next_drop;
+        self.next_drop += 1;
+        piles.push(DroppedItem { uid, item: item.to_string(), count, x, y });
+        (uid, true)
+    }
+
+    /// Updates the size of a dropped pile (0 removes it).
+    pub fn set_dropped_count(&mut self, map: &str, uid: u32, count: u32) {
+        if let Some(piles) = self.dropped.get_mut(map) {
+            if count == 0 {
+                piles.retain(|p| p.uid != uid);
+            } else if let Some(p) = piles.iter_mut().find(|p| p.uid == uid) {
+                p.count = count;
+            }
+            if piles.is_empty() {
+                self.dropped.remove(map);
+            }
+        }
+    }
+
     pub fn flag(&self, name: &str) -> bool {
         self.flags.contains(name)
     }
@@ -165,6 +300,28 @@ impl WorldState {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn dropped_piles() {
+        let mut w = WorldState::default();
+        let (a, new_a) = w.add_dropped("village", "apple", 2, 100.0, 100.0, 16.0);
+        // Same item close by joins the pile; another item or far away makes a new one.
+        assert_eq!(w.add_dropped("village", "apple", 3, 105.0, 100.0, 16.0), (a, false));
+        let (b, new_b) = w.add_dropped("village", "sword", 1, 100.0, 100.0, 16.0);
+        assert!(new_a && new_b && a != b && a >= DROPPED_UID_BASE);
+        assert_eq!(w.dropped["village"][0].count, 5);
+        w.set_dropped_count("village", a, 1);
+        assert_eq!(w.dropped["village"][0].count, 1);
+        w.set_dropped_count("village", a, 0);
+        w.set_dropped_count("village", b, 0);
+        assert!(!w.dropped.contains_key("village"));
+        // Piles survive a save / load round trip.
+        w.add_dropped("forest", "coin", 7, 1.0, 2.0, 16.0);
+        let back: WorldState = ron::from_str(&ron::to_string(&w).unwrap()).unwrap();
+        assert_eq!(back.dropped["forest"][0].count, 7);
+        assert_eq!(back.next_drop, w.next_drop);
+    }
+
     use super::*;
 
     #[test]
@@ -196,7 +353,7 @@ mod tests {
         w.set_entity_state(
             "village",
             7,
-            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()) },
+            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None },
         );
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert!(back.flag("a"));

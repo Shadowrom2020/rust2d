@@ -4,6 +4,8 @@ mod combat;
 mod equipment;
 mod inventory_ui;
 mod journal;
+mod creator;
+mod patrol;
 mod shop_ui;
 mod locks;
 mod menu;
@@ -118,6 +120,8 @@ struct RtEntity {
     defense: i32,
     /// Its key lock has been opened.
     unlocked: bool,
+    /// Patrol route and progress (characters with a route).
+    patrol: Option<patrol::Patrol>,
 }
 
 struct Loaded {
@@ -163,6 +167,7 @@ pub struct Game {
     inv: inventory_ui::InvUi,
     shop: shop_ui::ShopUi,
     journal: journal::Journal,
+    creator: Option<creator::Creator>,
     menu: menu::Menu,
     pub world: WorldState,
     scripts: ScriptHost,
@@ -228,6 +233,7 @@ impl Game {
             inv: Default::default(),
             shop: Default::default(),
             journal: Default::default(),
+            creator: None,
             menu: Default::default(),
             world: WorldState::default(),
             scripts,
@@ -335,6 +341,7 @@ impl Game {
             defense,
             unlocked: false,
             state: 0,
+            patrol: None,
         }
     }
 
@@ -356,6 +363,17 @@ impl Game {
     }
 
     fn build_entities(&self, map: &Map) -> Vec<RtEntity> {
+        let mut out = self.build_map_entities(map);
+        // Items the player dropped here earlier.
+        for p in self.world.dropped.get(&map.name).into_iter().flatten() {
+            let mut rt = self.new_rt_entity(EntityKind::Item, &p.item, p.uid, "", vec2(p.x, p.y), Facing::Down, true, 0);
+            rt.count = p.count;
+            out.push(rt);
+        }
+        out
+    }
+
+    fn build_map_entities(&self, map: &Map) -> Vec<RtEntity> {
         map.entities
             .iter()
             .map(|e| {
@@ -374,6 +392,13 @@ impl Game {
                 );
                 rt.count = count;
                 rt.sheet = e.sheet.clone();
+                if e.kind == EntityKind::Character {
+                    rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
+                    if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
+                        let p = rt.patrol.get_or_insert_with(Default::default);
+                        p.restore(ps);
+                    }
+                }
                 rt.unlocked = st.is_some_and(|s| s.unlocked);
                 if let Some(d) = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten() {
                     // Saved state; saves from before named states store a frame offset.
@@ -398,6 +423,8 @@ impl Game {
     }
 
     fn enter_map(&mut self, map: Map, arrival: Arrival) {
+        // Patrolling characters continue where they were when the player comes back.
+        self.persist_patrols();
         let ts = self.ts();
         let solid = self.assets.compute_solid(&map);
         let entities = self.build_entities(&map);
@@ -618,10 +645,43 @@ impl Game {
         any
     }
 
+    /// Display name of an entity on this map: its definition's name (character, prop, item).
+    fn entity_display_name(&self, uid: u32) -> Option<String> {
+        let e = self.loaded.entities.iter().find(|e| e.uid == uid)?;
+        let db = &self.project.db;
+        match e.kind {
+            EntityKind::Character => db.character(&e.def).map(|d| d.name.clone()),
+            EntityKind::Prop => db.prop(&e.def).map(|d| d.name.clone()),
+            EntityKind::Item => db.item(&e.def).map(|d| d.name.clone()),
+        }
+    }
+
+    /// Replaces `{self}` (the trigger's owner) and `{uid:N}` (from `say(SELF, ...)` in
+    /// scripts) with entity names, e.g. in dialog speakers.
+    fn entity_names_in(&self, text: &str, owner: Option<u32>) -> String {
+        if !text.contains('{') {
+            return text.to_string();
+        }
+        let mut out = text.replace("{self}", &owner.and_then(|u| self.entity_display_name(u)).unwrap_or_default());
+        while let Some(i) = out.find("{uid:") {
+            let Some(j) = out[i..].find('}') else { break };
+            let uid = out[i + 5..i + j].parse::<u32>().ok();
+            let name = uid.and_then(|u| self.entity_display_name(u)).unwrap_or_default();
+            out.replace_range(i..i + j + 1, &name);
+        }
+        out
+    }
+
     fn persist(&mut self, idx: usize) {
         let e = &self.loaded.entities[idx];
         if e.spawned_by.is_some() {
             return; // spawner characters are not saved individually
+        }
+        if e.uid >= crate::state::DROPPED_UID_BASE {
+            // Dropped items live in the world state's list of piles.
+            let (map, uid, count) = (self.loaded.map.name.clone(), e.uid, if e.active { e.count } else { 0 });
+            self.world.set_dropped_count(&map, uid, count);
+            return;
         }
         let state = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten().map(|d| d.state_name(e.state).to_string());
         let st = EntityState {
@@ -633,6 +693,7 @@ impl Game {
             count: (e.kind == EntityKind::Item).then_some(e.count),
             unlocked: e.unlocked,
             state,
+            patrol: e.patrol.as_ref().map(|p| p.state()),
         };
         let map = self.loaded.map.name.clone();
         let uid = e.uid;
@@ -659,6 +720,9 @@ impl Game {
                     self.fade = Fade::None;
                 }
             }
+        }
+        if self.update_creator(dt) {
+            return;
         }
         if self.update_menu(can_open) {
             return;
@@ -916,7 +980,12 @@ impl Game {
                 }
                 EntityKind::Character => {
                     let p = self.player.pos;
-                    let e = &mut self.loaded.entities[i].body;
+                    let ent = &mut self.loaded.entities[i];
+                    // A patrolling character stays a moment after being talked to.
+                    if let Some(pt) = &mut ent.patrol {
+                        pt.wait = pt.wait.max(1.5);
+                    }
+                    let e = &mut ent.body;
                     e.facing = Facing::from_vec(p.x - e.pos.x, p.y - e.pos.y).unwrap_or(e.facing);
                     e.moving = false;
                 }
@@ -953,6 +1022,14 @@ impl Game {
     /// Applies project rules (inventory size, stack limits) to the world state, e.g. after loading.
     fn prepare_world(&mut self) {
         self.migrate_equipment();
+        // Games started without the creator (or saved before it existed) get the default name.
+        if self.world.player_name.trim().is_empty() {
+            self.world.player_name = self.default_player_name();
+        }
+        // A game that fixes the player's sex always has it (new games, play-tests, saves).
+        if let Some(sex) = self.project.config.creation.sex.fixed() {
+            self.world.player_sex = sex;
+        }
         let limits = self.project.db.stack_limits();
         self.world.inventory.resize(self.project.config.inventory_size.max(1) as usize);
         self.world.inventory.set_limits(limits.clone());
@@ -1020,7 +1097,7 @@ impl Game {
                 self.loaded.entities[i].body.moving = false;
                 continue;
             }
-            if self.entity_knockback(i, dt) || self.chase(i, dt) {
+            if self.entity_knockback(i, dt) || self.chase(i, dt) || self.patrol_step(i, dt) {
                 continue;
             }
             let e = &self.loaded.entities[i];
@@ -1070,7 +1147,15 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.patrol_status(),
+            {
+                let ts = self.ts();
+                let here = self.loaded.entities.iter().filter(|e| e.active && e.uid >= crate::state::DROPPED_UID_BASE);
+                here.map(|e| format!("{}x{}@{},{}", e.def, e.count, (e.body.pos.x / ts).floor(), ((e.body.pos.y - 1.0) / ts).floor())).collect::<Vec<_>>()
+            },
+            format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_sheet_id().unwrap_or("-")),
+            self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
             self.shop_status(),
             self.loaded.map.name,
@@ -1093,6 +1178,7 @@ impl Game {
     // ---------------------------------------------------------------- save / load
 
     fn sync_world(&mut self) {
+        self.persist_patrols();
         self.world.current_map = self.loaded.map.name.clone();
         self.world.player_pos = (self.player.pos.x, self.player.pos.y);
         self.world.player_facing = self.player.facing;
@@ -1201,10 +1287,7 @@ impl Game {
                     }
                     let col = if self.player.moving { (self.player.anim * 8.0) as u32 % self.player_frames } else { 0 };
                     let frame = self.player.facing as u32 * self.player_frames + col;
-                    let drawn = self
-                        .player_sheet
-                        .as_ref()
-                        .is_some_and(|s| self.assets.draw_frame(s, frame, self.player.pos, WHITE));
+                    let drawn = self.player_sheet_id().is_some_and(|s| self.assets.draw_frame(s, frame, self.player.pos, WHITE));
                     self.draw_armor_overlays(frame, self.player.pos, WHITE);
                     if !drawn {
                         let r = self.player.rect();
@@ -1251,7 +1334,11 @@ impl Game {
         self.ui.draw_toasts();
         self.ui.draw_dialog();
         self.draw_game_over();
-        self.draw_menu();
+        if self.creator.is_some() {
+            self.draw_creator();
+        } else {
+            self.draw_menu();
+        }
         if self.debug {
             let p = self.player.pos / ts;
             draw_text(
@@ -1339,12 +1426,17 @@ impl ActionHost for Game {
         match action {
             Action::Dialog { speaker, text } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                self.ui.show_dialog(speaker, text);
+                let speaker = self.entity_names_in(speaker, ctx.owner);
+                let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
+                self.ui.show_dialog(&speaker, &text);
                 Step::Block
             }
             Action::Choice { speaker, text, options, var } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                self.ui.show_choice(speaker, text, options, var);
+                let speaker = self.entity_names_in(speaker, ctx.owner);
+                let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
+                let options: Vec<String> = options.iter().map(|o| self.world.expand_text(o)).collect();
+                self.ui.show_choice(&speaker, &text, &options, var);
                 Step::Block
             }
             Action::Teleport { map, spawn } => {
@@ -1390,6 +1482,13 @@ impl ActionHost for Game {
             Action::SetState { target, state } => {
                 if let Some(i) = self.entity_index(target, ctx.owner) {
                     self.set_prop_state(i, state);
+                }
+                Step::Continue
+            }
+            Action::Patrol { target, active, points } => {
+                match self.entity_index(target, ctx.owner) {
+                    Some(i) if self.loaded.entities[i].kind == EntityKind::Character => self.set_patrol(i, *active, points),
+                    _ => eprintln!("Patrol: '{target}' is not a character on this map"),
                 }
                 Step::Continue
             }
