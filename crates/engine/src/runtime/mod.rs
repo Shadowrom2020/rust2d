@@ -15,6 +15,7 @@ pub mod input;
 mod mouse;
 mod spawner;
 mod ui;
+mod worldmap;
 
 use std::collections::{HashSet, VecDeque};
 
@@ -175,6 +176,7 @@ pub struct Game {
     inv: inventory_ui::InvUi,
     shop: shop_ui::ShopUi,
     journal: journal::Journal,
+    worldmap: worldmap::WorldMap,
     creator: Option<creator::Creator>,
     menu: menu::Menu,
     pub world: WorldState,
@@ -255,6 +257,7 @@ impl Game {
             inv: Default::default(),
             shop: Default::default(),
             journal: Default::default(),
+            worldmap: Default::default(),
             creator: None,
             menu: Default::default(),
             world: WorldState::default(),
@@ -753,7 +756,7 @@ impl Game {
     pub fn update(&mut self, dt: f32) {
         // Esc opens the pause menu (unless a window or dialog uses Esc); it pauses everything.
         // (While a bolt spell is being aimed, Esc cancels the spell instead.)
-        let can_open = !self.inventory_open() && !self.ui.dialog_open() && self.game_over.is_none() && matches!(self.fade, Fade::None) && !self.aiming();
+        let can_open = !self.inventory_open() && !self.ui.dialog_open() && self.game_over.is_none() && matches!(self.fade, Fade::None) && !self.aiming() && !self.world_map_open();
         if self.on_title() {
             // The start fade-in still plays behind the title screen.
             if let Fade::In { t } = &mut self.fade {
@@ -767,6 +770,10 @@ impl Game {
             return;
         }
         if self.update_menu(can_open) {
+            return;
+        }
+        // The map screen pauses the game like the menu.
+        if self.update_world_map(dt) {
             return;
         }
         self.world.play_time += dt as f64;
@@ -1208,7 +1215,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.world_map_status(),
             self.skills_status(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
@@ -1405,6 +1413,7 @@ impl Game {
             } else {
                 self.draw_inventory_ui();
             }
+            self.draw_world_map();
         }
         if !self.on_title() {
             self.draw_aim_cursor();

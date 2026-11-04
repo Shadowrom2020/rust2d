@@ -24,6 +24,10 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   master / music / effects volume and dialog text speed (slow, normal, fast, instant), with a
   reset to defaults. Settings apply immediately and are stored per game in
   `~/.config/rust2d/<game>/settings.ron` (XDG config folder; `RUST2D_SETTINGS_DIR` overrides it).
+- **Map screen** (M or the new map button bottom right): the current map from above with the
+  player's position and facing and labelled exits to other maps; pauses the game while open.
+  Scroll with the arrow keys / WASD, by dragging the map or the scrollbars, or the mouse wheel;
+  zoom with + / -, Space centers on the player.
 
 ### Fixes
 - Loading a saved game no longer runs the map's *Map enter* triggers again (a load resumes the
