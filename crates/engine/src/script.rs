@@ -81,7 +81,7 @@ impl ScriptHost {
         self.errors.push(msg);
     }
 
-    fn call_inner(&mut self, world: &mut WorldState, function: &str, owner: Option<u32>) -> Option<Dynamic> {
+    fn call_inner(&mut self, world: &mut WorldState, function: &str, args: Vec<Dynamic>, owner: Option<u32>) -> Option<Dynamic> {
         {
             let mut c = self.ctx.borrow_mut();
             c.world = std::mem::take(world);
@@ -89,7 +89,7 @@ impl ScriptHost {
         }
         let mut scope = Scope::new();
         scope.push_constant("SELF", owner.map_or(-1, |u| u as i64));
-        let res = self.engine.call_fn::<Dynamic>(&mut scope, &self.ast, function, ());
+        let res = self.engine.call_fn::<Dynamic>(&mut scope, &self.ast, function, args);
         *world = std::mem::take(&mut self.ctx.borrow_mut().world);
         match res {
             Ok(v) => Some(v),
@@ -102,13 +102,19 @@ impl ScriptHost {
 
     /// Runs a script function; returns the world actions it queued.
     pub fn call(&mut self, world: &mut WorldState, function: &str, owner: Option<u32>) -> Vec<Action> {
-        self.call_inner(world, function, owner);
+        self.call_inner(world, function, Vec::new(), owner);
+        std::mem::take(&mut self.ctx.borrow_mut().actions)
+    }
+
+    /// Runs a script function with arguments (skill effects: `function(level)`).
+    pub fn call_args(&mut self, world: &mut WorldState, function: &str, args: Vec<Dynamic>, owner: Option<u32>) -> Vec<Action> {
+        self.call_inner(world, function, args, owner);
         std::mem::take(&mut self.ctx.borrow_mut().actions)
     }
 
     /// Runs a script function used as a condition (must return `bool`).
     pub fn condition(&mut self, world: &mut WorldState, function: &str, owner: Option<u32>) -> bool {
-        let r = self.call_inner(world, function, owner);
+        let r = self.call_inner(world, function, Vec::new(), owner);
         self.ctx.borrow_mut().actions.clear();
         r.and_then(|v| v.as_bool().ok()).unwrap_or(false)
     }
@@ -183,6 +189,19 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     })));
     engine.register_fn("player_name", with!(ctx, |c| c.world.player_name.clone()));
     engine.register_fn("hour", with!(ctx, |c| c.world.hour as f64));
+    // Skills and magic.
+    engine.register_fn("skill", with!(ctx, |c, id: &str| c.world.skill_level(id) as i64));
+    engine.register_fn("skill_points", with!(ctx, |c| c.world.skill_points as i64));
+    engine.register_fn("knows_spell", with!(ctx, |c, id: &str| c.world.spells.contains(id)));
+    engine.register_fn("mana", with!(ctx, |c| c.world.mana as f64));
+    engine.register_fn("set_skill", with!(ctx, |c, id: &str, l: i64| c.actions.push(Action::SetSkill { skill: id.into(), level: l.max(0) as u32 })));
+    engine.register_fn("give_skill_points", with!(ctx, |c, n: i64| c.actions.push(Action::GiveSkillPoints { amount: n as i32 })));
+    engine.register_fn("learn_spell", with!(ctx, |c, id: &str| c.actions.push(Action::LearnSpell { spell: id.into() })));
+    engine.register_fn("add_mana", with!(ctx, |c, n: i64| c.actions.push(Action::AddMana { amount: n as i32 })));
+    engine.register_fn("damage_around", with!(ctx, |c, d: i64, r: f64| c.actions.push(Action::DamageAround { damage: d as i32, radius: r as f32 })));
+    engine.register_fn("damage_around", with!(ctx, |c, d: i64, r: i64| c.actions.push(Action::DamageAround { damage: d as i32, radius: r as f32 })));
+    engine.register_fn("player_light", with!(ctx, |c, r: f64, s: f64| c.actions.push(Action::PlayerLight { radius: r as f32, seconds: s as f32 })));
+    engine.register_fn("player_light", with!(ctx, |c, r: i64, s: i64| c.actions.push(Action::PlayerLight { radius: r as f32, seconds: s as f32 })));
     engine.register_fn("is_night", with!(ctx, |c| crate::render::lighting::is_night(c.world.hour)));
     engine.register_fn("set_hour", with!(ctx, |c, h: f64| c.actions.push(Action::SetTime { hour: h as f32 })));
     engine.register_fn("set_hour", with!(ctx, |c, h: i64| c.actions.push(Action::SetTime { hour: h as f32 })));

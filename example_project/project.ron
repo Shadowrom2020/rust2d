@@ -56,4 +56,11 @@
     ),
     day_minutes: 24.0,
     start_hour: 8.0,
+    skills: (
+        enabled: true,
+        magic: true,
+        start_points: 2,
+        max_mana: 20,
+        mana_regen: 0.5,
+    ),
 )

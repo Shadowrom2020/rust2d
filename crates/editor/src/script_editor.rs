@@ -18,6 +18,8 @@ pub enum Arg {
     Sound,
     Quest,
     State,
+    Skill,
+    Spell,
     /// "self", "player" or an entity name.
     Target,
     Flag,
@@ -66,6 +68,16 @@ pub const API: &[ApiFn] = api! {
     "hour"() "Time of day in hours (0..24, e.g. 13.5 = half past one in the afternoon)";
     "is_night"() "Whether it is night (dark outdoors)";
     "set_hour"(hour: Num) "Sets the time of day, e.g. set_hour(22) (queued)";
+    "skill"(skill: Skill) "The player's level in a skill (0 = none)";
+    "skill_points"() "Unspent skill points";
+    "set_skill"(skill: Skill, level: Num) "Sets a skill's level without spending points (queued)";
+    "give_skill_points"(amount: Num) "Gives skill points (negative takes them) (queued)";
+    "knows_spell"(spell: Spell) "Whether the player has learned the spell";
+    "learn_spell"(spell: Spell) "Teaches a spell (queued)";
+    "mana"() "The player's current mana";
+    "add_mana"(amount: Num) "Adds mana (negative drains) (queued)";
+    "damage_around"(damage: Num, radius: Num) "Damages every character within radius tiles of the player (queued)";
+    "player_light"(radius: Num, seconds: Num) "Lights the player's surroundings for a while (queued)";
     "text"(text: Text) "Fills in {player}, {sir|madam} and {variable} placeholders";
     "random"(n: Num) "Random integer from 0 to n-1";
     "say"(text: Text) "Shows a dialog (queued)";
@@ -368,6 +380,8 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                 Some(Arg::Spawn) => call.first.as_ref().and_then(|m| known.spawns.get(m)).into_iter().flatten().map(|s| c(s, "spawn point")).collect(),
                 Some(Arg::Sound) => db.sounds.iter().map(|d| c(&d.id, &d.file)).collect(),
                 Some(Arg::Quest) => db.quests.iter().map(|q| c(&q.id, &q.title)).collect(),
+                Some(Arg::Skill) => db.skills.iter().map(|q| c(&q.id, &q.name)).collect(),
+                Some(Arg::Spell) => db.spells.iter().map(|q| c(&q.id, &q.name)).collect(),
                 Some(Arg::State) => {
                     let mut v: Vec<Cand> = db.props.iter().flat_map(|p| p.state_names().into_iter().map(|s| (s, p.name.clone()))).map(|(s, p)| c(&s, &p)).collect();
                     v.sort_by(|a, b| a.insert.cmp(&b.insert));

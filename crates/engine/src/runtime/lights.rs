@@ -28,6 +28,7 @@ impl Game {
             .iter()
             .filter_map(|s| self.world.equipment.item(*s))
             .filter_map(|id| self.project.db.item(id)?.light.clone())
+            .chain(self.spell_light())
             .max_by(|a, b| a.radius.total_cmp(&b.radius))
     }
 

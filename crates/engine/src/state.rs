@@ -140,6 +140,17 @@ pub struct WorldState {
     /// Counter for the uids of dropped items (see [`DROPPED_UID_BASE`]).
     #[serde(default)]
     pub next_drop: u32,
+    /// skill id -> level (bought with skill points).
+    #[serde(default)]
+    pub skills: BTreeMap<String, u32>,
+    #[serde(default)]
+    pub skill_points: u32,
+    /// Learned spells.
+    #[serde(default)]
+    pub spells: BTreeSet<String>,
+    /// Current mana.
+    #[serde(default)]
+    pub mana: f32,
 }
 
 /// Uids of dropped items start here, far above the uids of map entities and of spawned
@@ -183,6 +194,10 @@ impl Sex {
 }
 
 impl WorldState {
+    pub fn skill_level(&self, id: &str) -> u32 {
+        self.skills.get(id).copied().unwrap_or(0)
+    }
+
     /// Fills in text placeholders (dialogs, choices, quest texts):
     /// `{player}` = the player's name, `{his|her}` = the first word for a male player, the
     /// second for a female one, `{name}` = the value of variable `name`. Anything else in

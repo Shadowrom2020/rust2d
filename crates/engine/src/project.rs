@@ -37,6 +37,9 @@ pub struct ProjectConfig {
     /// Time of day a new game starts at (hours, 0..24).
     #[serde(default = "default_start_hour")]
     pub start_hour: f32,
+    /// Skills and magic (both off by default).
+    #[serde(default)]
+    pub skills: crate::skills::SkillSettings,
 }
 
 fn default_day_minutes() -> f32 {
@@ -122,6 +125,7 @@ impl ProjectConfig {
             creation: CharacterCreation::default(),
             day_minutes: default_day_minutes(),
             start_hour: default_start_hour(),
+            skills: Default::default(),
         }
     }
 }
@@ -178,7 +182,7 @@ pub struct Project {
     pub db: Database,
 }
 
-const DEFS: [&str; 8] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "structures"];
+const DEFS: [&str; 10] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "structures", "skills", "spells"];
 
 fn read_ron<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
     if !path.exists() {
@@ -215,6 +219,8 @@ impl Project {
             sounds: read_ron(&d(DEFS[5]))?,
             quests: read_ron(&d(DEFS[6]))?,
             structures: read_ron(&d(DEFS[7]))?,
+            skills: read_ron(&d(DEFS[8]))?,
+            spells: read_ron(&d(DEFS[9]))?,
         };
         let mut db = db;
         db.upgrade_prop_states();
@@ -237,6 +243,12 @@ impl Project {
         // Only projects that have structures get the file (older editors ignore it anyway).
         if !self.db.structures.is_empty() || d(DEFS[7]).exists() {
             write_ron(&d(DEFS[7]), &self.db.structures)?;
+        }
+        if !self.db.skills.is_empty() || d(DEFS[8]).exists() {
+            write_ron(&d(DEFS[8]), &self.db.skills)?;
+        }
+        if !self.db.spells.is_empty() || d(DEFS[9]).exists() {
+            write_ron(&d(DEFS[9]), &self.db.spells)?;
         }
         Ok(())
     }

@@ -27,6 +27,8 @@ pub enum Tab {
     Project,
     Scripts,
     Structures,
+    Skills,
+    Spells,
 }
 
 /// Inline "rename id" editor state; at most one rename is open at a time.
@@ -114,6 +116,8 @@ fn tab_icon(t: Tab) -> &'static str {
         Tab::Sounds => ph::SPEAKER_HIGH,
         Tab::Structures => ph::HOUSE,
         Tab::Quests => ph::SCROLL,
+        Tab::Skills => ph::STAR,
+        Tab::Spells => ph::MAGIC_WAND,
         Tab::Project => ph::GEAR,
         Tab::Scripts => ph::CODE,
     }
@@ -178,6 +182,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             (Tab::Sheets, "Sprite sheets"),
             (Tab::Sounds, "Sounds"),
             (Tab::Structures, "Structures"),
+            (Tab::Skills, "Skills"),
+            (Tab::Spells, "Spells"),
             (Tab::Quests, "Quests"),
             (Tab::Project, "Project"),
             (Tab::Scripts, "Scripts"),
@@ -212,6 +218,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             Tab::Sheets => db.sheets.get(i).map(|d| (RefKind::Sheet, d.id.clone())),
             Tab::Sounds => db.sounds.get(i).map(|d| (RefKind::Sound, d.id.clone())),
             Tab::Structures => db.structures.get(i).map(|d| (RefKind::Structure, d.id.clone())),
+            Tab::Skills => db.skills.get(i).map(|d| (RefKind::Skill, d.id.clone())),
+            Tab::Spells => db.spells.get(i).map(|d| (RefKind::Spell, d.id.clone())),
             _ => None,
         };
         if !library {
@@ -223,6 +231,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 Tab::Sheets => Some(RefKind::Sheet),
                 Tab::Sounds => Some(RefKind::Sound),
                 Tab::Structures => Some(RefKind::Structure),
+                Tab::Skills => Some(RefKind::Skill),
+                Tab::Spells => Some(RefKind::Spell),
                 _ => None,
             };
             if kind.is_some() {
@@ -284,6 +294,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         max_stack: 99,
                         value: 0,
         light: None,
+        teaches: String::new(),
                     },
                     |d| &mut d.id,
                 ),
@@ -362,6 +373,22 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     sel,
                     |d| format!("{}  ({})", d.name, d.id),
                     |ids| StructureDef { id: unique("structure", ids), name: "New structure".into(), w: 6, h: 5, ..Default::default() },
+                    |d| &mut d.id,
+                ),
+                Tab::Skills => list_ui(
+                    ui,
+                    &mut db.skills,
+                    sel,
+                    |d| format!("{}  ({})", d.name, d.id),
+                    |ids| rust2d_engine::skills::SkillDef::new(&unique("skill", ids), "New skill", "", SpriteRef::default(), 5, rust2d_engine::skills::SkillEffect::None),
+                    |d| &mut d.id,
+                ),
+                Tab::Spells => list_ui(
+                    ui,
+                    &mut db.spells,
+                    sel,
+                    |d| format!("{}  ({})", d.name, d.id),
+                    |ids| rust2d_engine::skills::SpellDef::new(&unique("spell", ids), "New spell", "", SpriteRef::default(), 5, 1.0, rust2d_engine::skills::SpellEffect::Heal { amount: 4 }),
                     |d| &mut d.id,
                 ),
                 Tab::Quests => list_ui(
@@ -452,6 +479,16 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Quests => {
                         if let Some(d) = db.quests.get_mut(i) {
                             quest_form(ui, d, &mut cx);
+                        }
+                    }
+                    Tab::Skills => {
+                        if let Some(d) = db.skills.get_mut(i) {
+                            skill_form(ui, d, &mut cx);
+                        }
+                    }
+                    Tab::Spells => {
+                        if let Some(d) = db.spells.get_mut(i) {
+                            spell_form(ui, d, &mut cx);
                         }
                     }
                     Tab::Structures => {
@@ -718,6 +755,13 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
             });
         }
     }
+    ui.separator();
+    ui.heading("Magic");
+    ui.horizontal(|ui| {
+        ui.label("Teaches spell");
+        widgets::suggest(ui, "item_teaches", &mut d.teaches, &cx.refs.spells, 140.0);
+        ui.weak("(scrolls, spell books; using the item learns it — tick 'Consumed' for one-use scrolls)");
+    });
     ui.separator();
     ui.heading("Light");
     widgets::light_ui(ui, "item_light", &mut d.light, "Gives light (while equipped, e.g. in the left hand, or lying on the ground)");
@@ -1479,6 +1523,28 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     });
     ui.weak("Tile size changes need a restart of the editor.");
     ui.separator();
+    ui.heading("Skills & magic");
+    {
+        let s = &mut c.skills;
+        ui.checkbox(&mut s.enabled, "Skills (K opens the Skills screen; skill points buy levels)").on_hover_text("Define skills in Database › Skills. Points come from the 'Give skill points' action or give_skill_points() in scripts.");
+        ui.add_enabled_ui(s.enabled, |ui| {
+            ui.checkbox(&mut s.magic, "Magic (spells learned from items, cast with mana)").on_hover_text("Define spells in Database › Spells; items with 'Teaches spell' are scrolls and books.");
+            egui::Grid::new("skills_cfg").num_columns(2).show(ui, |ui| {
+                ui.label("Starting skill points");
+                ui.add(egui::DragValue::new(&mut s.start_points).range(0..=99));
+                ui.end_row();
+                if s.magic {
+                    ui.label("Max mana");
+                    ui.add(egui::DragValue::new(&mut s.max_mana).range(0..=9999)).on_hover_text("Before skill bonuses");
+                    ui.end_row();
+                    ui.label("Mana regeneration");
+                    ui.add(egui::DragValue::new(&mut s.mana_regen).range(0.0..=100.0).speed(0.05).suffix(" / s"));
+                    ui.end_row();
+                }
+            });
+        });
+    }
+    ui.separator();
     ui.heading("Game sounds");
     ui.weak("Played by built-in events. Leave empty for silence.");
     egui::Grid::new("sfx").num_columns(2).show(ui, |ui| {
@@ -1488,6 +1554,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
             ui.end_row();
         }
     });
+    ui.separator();
     ui.separator();
     ui.heading("Character creator");
     let cc = &mut c.creation;
@@ -1967,4 +2034,154 @@ impl Editor {
         }
         Ok(rows * cols)
     }
+}
+
+fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &mut Cx) {
+    use rust2d_engine::skills::SkillEffect;
+    ui.heading("Skill");
+    rename_row(ui, RefKind::Skill, &d.id, cx.rename);
+    name_row(ui, &mut d.name);
+    ui.label("Description");
+    ui.add(egui::TextEdit::multiline(&mut d.description).desired_rows(2).desired_width(f32::INFINITY));
+    ui.horizontal(|ui| {
+        ui.label("Max level");
+        ui.add(egui::DragValue::new(&mut d.max_level).range(1..=99));
+    });
+    ui.separator();
+    ui.heading("Effect");
+    let mut idx = d.effect.index();
+    ui.horizontal_wrapped(|ui| {
+        for (i, (name, tip)) in SkillEffect::LABELS.iter().enumerate() {
+            ui.selectable_value(&mut idx, i, *name).on_hover_text(*tip);
+        }
+    });
+    if idx != d.effect.index() {
+        d.effect = SkillEffect::template(idx);
+    }
+    egui::Grid::new("skill_effect").num_columns(2).show(ui, |ui| match &mut d.effect {
+        SkillEffect::None | SkillEffect::Lockpick => {}
+        SkillEffect::MeleeDamage { percent } | SkillEffect::RangedDamage { percent } | SkillEffect::SpellDamage { percent } | SkillEffect::Speed { percent } | SkillEffect::Haggle { percent } => {
+            ui.label("Per level");
+            ui.add(egui::DragValue::new(percent).range(0.0..=100.0).speed(0.5).suffix(" %"));
+            ui.end_row();
+        }
+        SkillEffect::Defense { points } => {
+            ui.label("Per level");
+            ui.add(egui::DragValue::new(points).range(0..=99).suffix(" defense"));
+            ui.end_row();
+        }
+        SkillEffect::Mana { points } => {
+            ui.label("Per level");
+            ui.add(egui::DragValue::new(points).range(0..=999).suffix(" mana"));
+            ui.end_row();
+        }
+        SkillEffect::ManaRegen { per_second } => {
+            ui.label("Per level");
+            ui.add(egui::DragValue::new(per_second).range(0.0..=100.0).speed(0.05).suffix(" mana / s"));
+            ui.end_row();
+        }
+        SkillEffect::Script { function } => {
+            ui.label("Function");
+            widgets::suggest(ui, "skill_fn", function, &cx.refs.functions, 160.0);
+            ui.end_row();
+        }
+    });
+    if let SkillEffect::Script { function } = &d.effect {
+        ui.weak(format!("Called as {}(level) whenever the level changes (and when a game starts or loads with the skill at level 1 or more). The script applies the effect itself, e.g. with set_var or flags that other scripts and triggers read.", if function.is_empty() { "fn" } else { function.as_str() }));
+    }
+    ui.weak(format!("At level {}: {}", d.max_level, d.effect_text(d.max_level)));
+    ui.separator();
+    ui.heading("Icon");
+    widgets::sprite_field(ui, "skill_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
+}
+
+fn spell_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SpellDef, cx: &mut Cx) {
+    use rust2d_engine::skills::SpellEffect;
+    ui.heading("Spell");
+    rename_row(ui, RefKind::Spell, &d.id, cx.rename);
+    name_row(ui, &mut d.name);
+    ui.label("Description");
+    ui.add(egui::TextEdit::multiline(&mut d.description).desired_rows(2).desired_width(f32::INFINITY));
+    egui::Grid::new("spell_cost").num_columns(2).show(ui, |ui| {
+        ui.label("Mana");
+        ui.add(egui::DragValue::new(&mut d.mana).range(0..=9999));
+        ui.end_row();
+        ui.label("Cooldown");
+        ui.add(egui::DragValue::new(&mut d.cooldown).range(0.0..=600.0).speed(0.1).suffix(" s"));
+        ui.end_row();
+        ui.label("Requires skill");
+        ui.horizontal(|ui| {
+            widgets::suggest(ui, "spell_skill", &mut d.skill, &cx.refs.skills, 120.0);
+            if !d.skill.is_empty() {
+                ui.label("at level");
+                ui.add(egui::DragValue::new(&mut d.level).range(0..=99));
+            } else {
+                ui.weak("(none)");
+            }
+        });
+        ui.end_row();
+    });
+    ui.separator();
+    ui.heading("Effect");
+    let mut idx = d.effect.index();
+    ui.horizontal_wrapped(|ui| {
+        for (i, (name, tip)) in SpellEffect::LABELS.iter().enumerate() {
+            ui.selectable_value(&mut idx, i, *name).on_hover_text(*tip);
+        }
+    });
+    if idx != d.effect.index() {
+        d.effect = SpellEffect::template(idx);
+    }
+    let mut projectile: Option<&mut SpriteRef> = None;
+    egui::Grid::new("spell_effect").num_columns(2).show(ui, |ui| match &mut d.effect {
+        SpellEffect::Heal { amount } => {
+            ui.label("Heals");
+            ui.add(egui::DragValue::new(amount).range(1..=999).suffix(" HP")).on_hover_text("1 heart = 2 HP");
+            ui.end_row();
+        }
+        SpellEffect::Bolt { damage, projectile: p, speed, range } => {
+            ui.label("Damage");
+            ui.add(egui::DragValue::new(damage).range(0..=999));
+            ui.end_row();
+            ui.label("Speed (px/s)");
+            ui.add(egui::DragValue::new(speed).range(10.0..=2000.0));
+            ui.end_row();
+            ui.label("Range (tiles)");
+            ui.add(egui::DragValue::new(range).range(0.5..=64.0).speed(0.1));
+            ui.end_row();
+            projectile = Some(p);
+        }
+        SpellEffect::Blast { damage, radius } => {
+            ui.label("Damage");
+            ui.add(egui::DragValue::new(damage).range(0..=999));
+            ui.end_row();
+            ui.label("Radius (tiles)");
+            ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1));
+            ui.end_row();
+        }
+        SpellEffect::Light { radius, seconds } => {
+            ui.label("Radius (tiles)");
+            ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1));
+            ui.end_row();
+            ui.label("Lasts");
+            ui.add(egui::DragValue::new(seconds).range(0.5..=3600.0).speed(0.5).suffix(" s"));
+            ui.end_row();
+        }
+        SpellEffect::Script { function } => {
+            ui.label("Function");
+            widgets::suggest(ui, "spell_fn", function, &cx.refs.functions, 160.0);
+            ui.end_row();
+        }
+    });
+    if let Some(p) = projectile {
+        ui.label("Projectile sprite (drawn pointing right, rotated in flight):");
+        widgets::sprite_picker(ui, "spell_proj", p, cx.tex, cx.assets);
+    }
+    if matches!(d.effect, SpellEffect::Script { .. }) {
+        ui.weak("Called when the spell is cast (mana and cooldown are already taken). The function can use the whole script API: say, heal, give_item, damage_around, player_light, set_flag ...");
+    }
+    ui.separator();
+    ui.heading("Icon");
+    widgets::sprite_field(ui, "spell_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
+    ui.weak("Spells are learned from items with 'Teaches spell' (Database › Items) or the 'Learn spell' action; the player casts them from the Magic screen (K) or the quick bar (1-8).");
 }

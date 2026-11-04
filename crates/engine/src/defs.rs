@@ -300,6 +300,9 @@ pub struct ItemDef {
     /// Gives light while equipped (e.g. a lantern in the left hand) or lying on the ground.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<LightSpec>,
+    /// Using the item teaches this spell (scrolls, spell books); "" = none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub teaches: String,
 }
 
 fn default_max_stack() -> u32 {
@@ -343,6 +346,9 @@ pub struct LockSpec {
     /// Shown when locking it again ("" = "Locked with <key name>." / "Closed.").
     #[serde(default)]
     pub lock_text: String,
+    /// A lockpicking skill of this level opens it without the key (0 = can't be picked).
+    #[serde(default)]
+    pub pick_difficulty: u32,
 }
 
 fn yes() -> bool {
@@ -367,6 +373,7 @@ impl Default for LockSpec {
             on_unlock: OnUnlock::Nothing,
             locked_text: String::new(),
             unlock_text: String::new(),
+            pick_difficulty: 0,
             relock: false,
             lock_text: String::new(),
         }
@@ -729,6 +736,9 @@ pub struct Database {
     pub quests: Vec<crate::quest::QuestDef>,
     /// Multi-tile assets for the editor (houses, walls, rooms…); the game doesn't use them.
     pub structures: Vec<StructureDef>,
+    /// Skills and spells (`ProjectConfig::skills` switches the systems on).
+    pub skills: Vec<crate::skills::SkillDef>,
+    pub spells: Vec<crate::skills::SpellDef>,
 }
 
 /// A multi-tile asset ("structure"): tiles on several map layers, collision overrides and
@@ -784,6 +794,12 @@ impl Database {
     }
     pub fn structure(&self, id: &str) -> Option<&StructureDef> {
         self.structures.iter().find(|d| d.id == id)
+    }
+    pub fn skill(&self, id: &str) -> Option<&crate::skills::SkillDef> {
+        self.skills.iter().find(|d| d.id == id)
+    }
+    pub fn spell(&self, id: &str) -> Option<&crate::skills::SpellDef> {
+        self.spells.iter().find(|d| d.id == id)
     }
 
     /// Ids of all definitions of a kind (for editor dropdowns).
@@ -907,6 +923,7 @@ mod tests {
                 max_stack: 99,
                 value,
         light: None,
+        teaches: String::new(),
             });
         }
         let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };
