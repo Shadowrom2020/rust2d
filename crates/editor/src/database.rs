@@ -24,6 +24,7 @@ pub enum Tab {
     Quests,
     Project,
     Scripts,
+    Structures,
 }
 
 /// Inline "rename id" editor state; at most one rename is open at a time.
@@ -58,6 +59,8 @@ pub struct DbState {
     pub art_open: bool,
     /// What the embedded editor last focused (to select its frame once).
     pub art_focus: Option<(String, u32)>,
+    /// The structure editor (Structures tab).
+    pub st_edit: crate::structures::StructEdit,
 }
 
 /// Everything the definition forms need besides the definition itself.
@@ -81,11 +84,18 @@ struct Cx<'a> {
     art_open: &'a mut bool,
     /// Art actions handled after the form (they need the whole editor).
     art: &'a mut Option<ArtAction>,
+    st_edit: &'a mut crate::structures::StructEdit,
 }
 
 /// An id not yet used in `ids`, based on `prefix`.
 fn unique(prefix: &str, ids: &[String]) -> String {
     (1..).map(|n| format!("{prefix}_{n}")).find(|c| !ids.contains(c)).unwrap()
+}
+
+thread_local! {
+    /// The Database view belongs to the Asset Library window (set each frame by `ui`):
+    /// deleting goes through the library's remove confirmation instead of `list_ui`.
+    static LIBRARY_MODE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// List with add / duplicate / delete. Returns true if the list changed.
@@ -114,7 +124,8 @@ fn list_ui<T: Clone>(
             *sel = items.len() - 1;
             changed = true;
         }
-        if ui.add_enabled(*sel < items.len(), egui::Button::new("Delete")).on_hover_text("References in maps are not removed").clicked() {
+        let library = LIBRARY_MODE.with(|m| m.get());
+        if !library && ui.add_enabled(*sel < items.len(), egui::Button::new("Delete")).on_hover_text("References in maps are not removed").clicked() {
             items.remove(*sel);
             *sel = sel.saturating_sub(1);
             changed = true;
@@ -132,6 +143,11 @@ fn list_ui<T: Clone>(
 }
 
 pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
+    let library = ed.library_mode;
+    LIBRARY_MODE.with(|m| m.set(library));
+    if library && matches!(ed.db.tab, Tab::Quests | Tab::Project | Tab::Scripts) {
+        ed.db.tab = Tab::Items;
+    }
     ui.horizontal(|ui| {
         let tabs = [
             (Tab::Items, "Items"),
@@ -140,11 +156,15 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             (Tab::Tilesets, "Tilesets"),
             (Tab::Sheets, "Sprite sheets"),
             (Tab::Sounds, "Sounds"),
+            (Tab::Structures, "Structures"),
             (Tab::Quests, "Quests"),
             (Tab::Project, "Project"),
             (Tab::Scripts, "Scripts"),
         ];
         for (t, l) in tabs {
+            if library && matches!(t, Tab::Quests | Tab::Project | Tab::Scripts) {
+                continue; // the library only holds assets
+            }
             if ui.selectable_label(ed.db.tab == t, l).clicked() && ed.db.tab != t {
                 ed.db.tab = t;
                 ed.db.sel = 0;
@@ -170,10 +190,30 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             Tab::Tilesets => db.tilesets.get(i).map(|d| (RefKind::Tileset, d.id.clone())),
             Tab::Sheets => db.sheets.get(i).map(|d| (RefKind::Sheet, d.id.clone())),
             Tab::Sounds => db.sounds.get(i).map(|d| (RefKind::Sound, d.id.clone())),
+            Tab::Structures => db.structures.get(i).map(|d| (RefKind::Structure, d.id.clone())),
             _ => None,
         };
+        if !library {
+            let kind = match ed.db.tab {
+                Tab::Items => Some(RefKind::Item),
+                Tab::Props => Some(RefKind::Prop),
+                Tab::Characters => Some(RefKind::Character),
+                Tab::Tilesets => Some(RefKind::Tileset),
+                Tab::Sheets => Some(RefKind::Sheet),
+                Tab::Sounds => Some(RefKind::Sound),
+                Tab::Structures => Some(RefKind::Structure),
+                _ => None,
+            };
+            if kind.is_some() {
+                ed.add_from_library_button(ui, kind);
+            }
+        }
         if let Some(a) = current {
-            if ui.button("📂 Add to library").on_hover_text(format!("Copies '{}' and everything it needs into the shared asset library", a.1)).clicked() {
+            if library {
+                if ui.button("🗑 Delete…").on_hover_text(format!("Removes '{}' from the library (asks first)", a.1)).clicked() {
+                    ed.lib.confirm_remove = Some(vec![a.clone()]);
+                }
+            } else if ui.button("📂 Add to library").on_hover_text(format!("Copies '{}' and everything it needs into the shared asset library", a.1)).clicked() {
                 let r = ed.project_to_library(std::slice::from_ref(&a));
                 ed.show_result(r);
             }
@@ -193,6 +233,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let mut art: Option<ArtAction> = None;
     let mut art_target: Option<(String, (u32, u32), bool, u32)> = None;
     let mut list_changed = false;
+    let mut place_structure: Option<String> = None;
     let tab = ed.db.tab;
     let sel_before = ed.db.sel;
     if matches!(tab, Tab::Project | Tab::Scripts) {
@@ -291,6 +332,14 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     |ids| SoundDef { id: unique("sound", ids), file: "sounds/new.wav".into(), volume: 1.0 },
                     |d| &mut d.id,
                 ),
+                Tab::Structures => list_ui(
+                    ui,
+                    &mut db.structures,
+                    sel,
+                    |d| format!("{}  ({})", d.name, d.id),
+                    |ids| StructureDef { id: unique("structure", ids), name: "New structure".into(), w: 6, h: 5, ..Default::default() },
+                    |d| &mut d.id,
+                ),
                 Tab::Quests => list_ui(
                     ui,
                     &mut db.quests,
@@ -334,6 +383,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     state_renamed: &mut state_renamed,
                     art_open: &mut ed.db.art_open,
                     art: &mut art,
+                    st_edit: &mut ed.db.st_edit,
                 };
                 let i = ed.db.sel;
                 let db = &mut ed.project.db;
@@ -379,6 +429,13 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                             quest_form(ui, d, &mut cx);
                         }
                     }
+                    Tab::Structures => {
+                        if let Some(d) = db.structures.get_mut(i) {
+                            if structure_form(ui, d, &mut cx) {
+                                place_structure = Some(d.id.clone());
+                            }
+                        }
+                    }
                     _ => {}
                 }
             });
@@ -421,6 +478,10 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     }
     if let Some(a) = art.take() {
         ed.art_action(a, tab);
+    }
+    if let Some(id) = place_structure {
+        ed.mode = crate::app::Mode::Map;
+        ed.arm_structure(&id);
     }
     if list_changed || before.0 != ed.project.db || before.1 != ed.project.config {
         ed.defs_dirty = true;
@@ -1201,6 +1262,56 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
         }
     });
     ui.weak("Edit the image below: draw, add frames (Canvas … Resize), copy / mirror frames. Ctrl+S saves it and updates it everywhere.");
+}
+
+/// Structure form: id, name, category, a one-line summary and the structure editor. Returns true
+/// when "Place on map" was clicked.
+fn structure_form(ui: &mut egui::Ui, d: &mut StructureDef, cx: &mut Cx) -> bool {
+    let library = LIBRARY_MODE.with(|m| m.get());
+    let mut place = false;
+    ui.horizontal(|ui| {
+        ui.heading(if d.name.is_empty() { d.id.as_str() } else { d.name.as_str() });
+        ui.add_space(8.0);
+        rename_row(ui, RefKind::Structure, &d.id, cx.rename);
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Name");
+        ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(220.0));
+        ui.add_space(12.0);
+        ui.label("Category");
+        ui.add(egui::TextEdit::singleline(&mut d.category).desired_width(140.0).hint_text("e.g. Buildings"))
+            .on_hover_text("Groups structures in the map palette, e.g. Buildings, Walls & fences, Rooms, Outdoor");
+        let mut cats: Vec<String> = cx.db.structures.iter().map(|s| s.category.clone()).filter(|c| !c.is_empty()).collect();
+        cats.sort();
+        cats.dedup();
+        egui::ComboBox::from_id_salt("st_form_cat").selected_text("⏷").width(30.0).show_ui(ui, |ui| {
+            for c in cats {
+                ui.selectable_value(&mut d.category, c.clone(), c);
+            }
+        });
+    });
+    ui.horizontal_wrapped(|ui| {
+        let missing: Vec<&String> = d.tilesets.iter().filter(|t| cx.db.tileset(t).is_none()).collect();
+        let tilesets = if d.tilesets.is_empty() { "no tiles yet".to_string() } else { format!("tilesets: {}", d.tilesets.join(", ")) };
+        let props = match d.entities.len() {
+            0 => String::new(),
+            1 => " · 1 prop".to_string(),
+            n => format!(" · {n} props"),
+        };
+        ui.weak(format!("{} × {} tiles · {tilesets}{props}", d.w, d.h));
+        if !missing.is_empty() {
+            ui.colored_label(Color32::YELLOW, format!("⚠ not in this project: {}", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
+        }
+        if !library {
+            place = ui.button("🗺 Place on map").on_hover_text("Switches to the map with the Structures tool and this structure picked").clicked();
+        }
+    });
+    ui.separator();
+    crate::structures::structure_editor(ui, d, cx.st_edit, cx.db, cx.tex, cx.assets);
+    if !library {
+        ui.weak("You can also capture an area of a map: Structures tool (H), 📐 New from map area…");
+    }
+    place
 }
 
 fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {

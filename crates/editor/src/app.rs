@@ -47,10 +47,12 @@ pub enum Tool {
     Zone,
     /// Drag an exit area, pick the target map, drag the arrival area there.
     Link,
+    /// Place multi-tile structures (houses, walls, rooms…) with one click.
+    Structure,
 }
 
 impl Tool {
-    pub const ALL: [(Tool, &'static str, &'static str); 10] = [
+    pub const ALL: [(Tool, &'static str, &'static str); 11] = [
         (Tool::Select, "Select", "V"),
         (Tool::Brush, "Brush", "B"),
         (Tool::Rect, "Rect", "R"),
@@ -61,6 +63,7 @@ impl Tool {
         (Tool::Entity, "Entities", "N"),
         (Tool::Zone, "Zones", "Z"),
         (Tool::Link, "Transition", "T"),
+        (Tool::Structure, "Structures", "H"),
     ];
     pub fn paints_tiles(self) -> bool {
         matches!(self, Tool::Brush | Tool::Rect | Tool::Fill | Tool::Erase | Tool::Pick)
@@ -184,6 +187,10 @@ pub struct Editor {
     /// Entity tool palette: kind tab (None = all kinds) and search text.
     pub place_tab: Option<EntityKind>,
     pub place_filter: String,
+    /// Structures tool: the armed structure id ("" = none), palette search, capture state.
+    pub place_structure: String,
+    pub structure_filter: String,
+    pub capture: crate::structures::CaptureState,
     /// Recently placed / picked definitions, newest first.
     pub place_recent: Vec<(EntityKind, String)>,
     pub zone_template: ZoneTemplate,
@@ -195,7 +202,16 @@ pub struct Editor {
     pub defs_dirty: bool,
     /// Definitions and project settings as last loaded / saved: `defs_dirty` is cleared again
     /// when the edits are reverted (e.g. undone in a text field, a checkbox toggled back).
-    defs_saved: Box<(rust2d_engine::defs::Database, rust2d_engine::project::ProjectConfig)>,
+    pub(crate) defs_saved: Box<(rust2d_engine::defs::Database, rust2d_engine::project::ProjectConfig)>,
+    /// This editor is the Asset Library window (`--library`): `project` is the library.
+    pub library_mode: bool,
+    /// Main editor: the Asset Library window it started.
+    pub lib_window: crate::library_window::LibWindow,
+    /// Library mode: modification time of the library's definitions as last loaded / saved,
+    /// when it was last checked, and whether another editor changed them meanwhile.
+    pub lib_stamp: Option<std::time::SystemTime>,
+    pub lib_check: f64,
+    pub lib_changed: bool,
     pub db: DbState,
     pub refs: Refs,
     pub pointer_over_ui: bool,
@@ -258,7 +274,7 @@ impl Editor {
         Self::with_project(project, false)
     }
 
-    fn with_project(project: Project, project_open: bool) -> Self {
+    pub(crate) fn with_project(project: Project, project_open: bool) -> Self {
         let assets = Assets::load(&project);
         let audio = Audio::load(&project);
         let maps = project.list_maps();
@@ -291,6 +307,9 @@ impl Editor {
             place_def: String::new(),
             place_tab: None,
             place_filter: String::new(),
+            place_structure: String::new(),
+            structure_filter: String::new(),
+            capture: Default::default(),
             place_recent: Vec::new(),
             zone_template: ZoneTemplate::Spawn,
             view: ViewOpts { grid: true, collision: false, zones: true, dim_layers: false, minimap: true },
@@ -300,6 +319,11 @@ impl Editor {
             pending: None,
             defs_dirty: false,
             defs_saved: Box::new((project.db.clone(), project.config.clone())),
+            library_mode: false,
+            lib_window: Default::default(),
+            lib_stamp: None,
+            lib_check: 0.0,
+            lib_changed: false,
             db: DbState::default(),
             lib: Default::default(),
             px: Default::default(),
@@ -416,6 +440,10 @@ impl Editor {
             Ok(()) => {
                 self.defs_dirty = false;
                 *self.defs_saved = (self.project.db.clone(), self.project.config.clone());
+                if self.library_mode {
+                    self.mark_library_saved();
+                    self.lib.tex_dirty = true;
+                }
                 self.set_status("Saved definitions");
             }
             Err(e) => self.set_status(format!("Saving definitions failed: {e:#}")),
@@ -435,6 +463,7 @@ impl Editor {
     }
 
     pub fn reload_assets(&mut self) {
+        self.lib.tex_dirty = true; // library thumbnails (the library window shows its own art)
         self.assets = Assets::load(&self.project);
         self.audio.stop_music();
         self.audio = Audio::load(&self.project);
@@ -596,6 +625,7 @@ impl Editor {
             RefKind::Character => db.characters.iter().any(|d| d.id == new),
             RefKind::Sound => db.sounds.iter().any(|d| d.id == new),
             RefKind::Map => self.maps.iter().any(|m| m == new),
+            RefKind::Structure => db.structures.iter().any(|d| d.id == new),
         };
         if taken {
             self.set_status(format!("'{new}' is already used"));
@@ -616,6 +646,7 @@ impl Editor {
             RefKind::Prop => rename_def!(db.props),
             RefKind::Character => rename_def!(db.characters),
             RefKind::Sound => rename_def!(db.sounds),
+            RefKind::Structure => rename_def!(db.structures),
             RefKind::Map => {
                 if let Err(e) = self.project.rename_map_file(old, new) {
                     self.set_status(format!("Rename failed: {e:#}"));
@@ -661,6 +692,7 @@ impl Editor {
         match kind {
             RefKind::Tileset if self.brush.tileset == old => self.brush.tileset = new.to_string(),
             RefKind::Prop | RefKind::Character | RefKind::Item if self.place_def == old => self.place_def = new.to_string(),
+            RefKind::Structure if self.place_structure == old => self.place_structure = new.to_string(),
             _ => {}
         }
         self.save_defs();
@@ -1042,7 +1074,18 @@ impl Editor {
             self.tex = Textures::build(ctx, &self.assets);
             self.tex_dirty = false;
         }
-        self.menu_bar(ctx);
+        if self.library_mode {
+            self.library_menu_bar(ctx);
+            self.watch_library();
+            if self.mode == Mode::Map {
+                self.mode = Mode::Library;
+            }
+            if self.mode != Mode::Pixel && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S)) {
+                self.save_all();
+            }
+        } else {
+            self.menu_bar(ctx);
+        }
         if !self.project_open {
             self.status_bar(ctx);
             self.welcome(ctx);
@@ -1078,6 +1121,9 @@ impl Editor {
             self.goto_map(&m, Some(&zone));
         }
         self.export_window(ctx);
+        self.capture_window(ctx);
+        self.confirm_remove_dialog(ctx);
+        self.add_from_library_dialog(ctx);
         self.canvas_rect = ctx.available_rect();
         self.dialogs(ctx);
         self.pointer_over_ui = ctx.is_pointer_over_area() || ctx.wants_pointer_input();
@@ -1183,6 +1229,14 @@ impl Editor {
                         self.open_export();
                         ui.close_menu();
                     }
+                    if ui.button("📥 Add from library…").clicked() {
+                        self.open_add_dialog(None);
+                        ui.close_menu();
+                    }
+                    if ui.button("📂 Asset Library…").on_hover_text("Opens the library in its own window").clicked() {
+                        self.open_library_window();
+                        ui.close_menu();
+                    }
                     if ui.button("Import asset package into project…").clicked() {
                         self.open_file_dialog(files::Purpose::ImportPackage { into_library: false });
                         ui.close_menu();
@@ -1250,9 +1304,11 @@ impl Editor {
                 ui.separator();
                 ui.selectable_value(&mut self.mode, Mode::Map, "🗺 Map");
                 ui.selectable_value(&mut self.mode, Mode::Database, "📚 Database");
-                ui.selectable_value(&mut self.mode, Mode::Library, "📂 Library");
                 let px_label = if self.px.is_dirty() { "✏ Pixel editor •" } else { "✏ Pixel editor" };
                 ui.selectable_value(&mut self.mode, Mode::Pixel, px_label);
+                if ui.button("📂 Asset Library ↗").on_hover_text("Opens the shared asset library in its own window: edit, create, import and export library assets").clicked() {
+                    self.open_library_window();
+                }
                 ui.separator();
                 self.map_dropdown(ui);
                 if self.defs_dirty {
@@ -1275,7 +1331,9 @@ impl Editor {
                     }
                     ui.separator();
                 }
-                ui.monospace(format!("zoom {:.0}%", self.cam.zoom * 100.0));
+                if !self.library_mode {
+                    ui.monospace(format!("zoom {:.0}%", self.cam.zoom * 100.0));
+                }
                 if let Some(doc) = &self.doc {
                     ui.separator();
                     ui.monospace(format!("{}x{}  ents {}  zones {}", doc.map.width, doc.map.height, doc.map.entities.len(), doc.map.zones.len()));
@@ -1573,6 +1631,7 @@ impl Editor {
                 ui.weak("Red = blocked, green = walkable override. Tileset tiles flagged solid block automatically (edit flags in Database → Tilesets).");
             }
             Tool::Entity => self.entity_palette(ui),
+            Tool::Structure => self.structure_palette(ui),
             Tool::Link => {
                 ui.heading("Transition");
                 ui.label("Link two maps with a pair of transition zones, e.g. where a road leaves one map and enters the other:");
@@ -1596,7 +1655,10 @@ impl Editor {
     }
 
     fn palette(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Tileset");
+        ui.horizontal(|ui| {
+            ui.heading("Tileset");
+            self.add_from_library_button(ui, Some(rust2d_engine::refactor::RefKind::Tileset));
+        });
         let mut ids: Vec<String> = self.project.db.tilesets.iter().map(|t| t.id.clone()).collect();
         ids.sort();
         egui::ComboBox::from_id_salt("brush_ts").selected_text(self.brush.tileset.as_str()).show_ui(ui, |ui| {
@@ -1662,6 +1724,12 @@ impl Editor {
         // What a click on empty space does.
         ui.horizontal(|ui| {
             ui.heading("Place");
+            let kind = self.place_tab.map(|k| match k {
+                EntityKind::Prop => rust2d_engine::refactor::RefKind::Prop,
+                EntityKind::Character => rust2d_engine::refactor::RefKind::Character,
+                EntityKind::Item => rust2d_engine::refactor::RefKind::Item,
+            });
+            self.add_from_library_button(ui, kind);
             if !self.place_def.is_empty() && ui.button("✖ Stop placing").on_hover_text("Right-click or Esc on the map").clicked() {
                 self.disarm();
             }
