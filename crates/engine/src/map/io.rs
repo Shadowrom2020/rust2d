@@ -51,6 +51,7 @@ struct Meta {
     background: [u8; 3],
     music: String,
     lighting: crate::map::MapLighting,
+    fog: bool,
 }
 
 impl Default for Meta {
@@ -64,6 +65,7 @@ impl Default for Meta {
             background: [20, 20, 28],
             music: String::new(),
             lighting: Default::default(),
+            fog: false,
         }
     }
 }
@@ -145,6 +147,7 @@ pub fn encode(map: &Map) -> Result<Vec<u8>> {
         background: map.background,
         music: map.music.clone(),
         lighting: map.lighting,
+        fog: map.fog,
     };
     let core = CoreRef {
         name: &map.name,
@@ -187,6 +190,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map> {
                 background: m.background,
                 music: String::new(),
                 lighting: Default::default(),
+                fog: false,
             }
         }
         2 => {
@@ -207,6 +211,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map> {
                 background: meta.background,
                 music: meta.music,
                 lighting: meta.lighting,
+                fog: meta.fog,
             }
         }
         v => bail!("unsupported map format version {v} (newest supported: {FORMAT_VERSION})"),
@@ -253,6 +258,7 @@ mod tests {
         m.set_collision(512, 512, CollisionOverride::Solid);
         m.music = "theme".into();
         m.lighting = crate::map::MapLighting { mode: crate::map::LightMode::Dark, darkness: 0.9 };
+        m.fog = true;
         let uid = m.alloc_uid();
         let mut chest = EntityInstance::new(uid, EntityKind::Prop, "chest", 1.5, 2.0);
         chest.container = Some(crate::defs::ContainerSpec {
@@ -272,6 +278,7 @@ mod tests {
         assert_eq!(back.tilesets, vec!["terrain".to_string()]);
         assert_eq!(back.music, "theme");
         assert_eq!(back.lighting, m.lighting);
+        assert!(back.fog);
         assert_eq!(back.entities, m.entities);
         assert_eq!(back.next_uid, m.next_uid);
     }

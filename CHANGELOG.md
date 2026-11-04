@@ -28,12 +28,17 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   player's position and facing and labelled exits to other maps; pauses the game while open.
   Scroll with the arrow keys / WASD, by dragging the map or the scrollbars, or the mouse wheel;
   zoom with + / -, Space centers on the player.
+- **Fog of war** per map (map inspector › Map screen): the map screen only shows the explored
+  area (about 6 tiles around everywhere the player has been); kept per map in the save game.
 
 ### Fixes
+- Changing a map's music or lighting in the inspector now marks the map as changed and can
+  be undone (before, only saving together with another change kept it).
 - Loading a saved game no longer runs the map's *Map enter* triggers again (a load resumes the
   game; the player didn't enter the map).
 
 ### Example project
+- Fog of war on the forest, the wilds and the mine; the village and its buildings have none.
 - Eight skills (Swordsmanship, Archery, Toughness, Lockpicking, Haggling, Arcana, Spellcraft and the
   scripted Scavenging),
   four spells (Heal, Light, Spark, Fire Burst), scrolls, spell books and blue mana potions; quests

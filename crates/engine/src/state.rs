@@ -151,6 +151,9 @@ pub struct WorldState {
     /// Current mana.
     #[serde(default)]
     pub mana: f32,
+    /// Fog of war: explored tiles per map (only maps with fog of war).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub explored: BTreeMap<String, crate::fog::Explored>,
 }
 
 /// Uids of dropped items start here, far above the uids of map entities and of spawned

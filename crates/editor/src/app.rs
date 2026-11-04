@@ -2440,6 +2440,12 @@ impl Editor {
                     }
                 }
                 ui.separator();
+                ui.heading("Map screen");
+                ui.checkbox(&mut map.fog, "Fog of war").on_hover_text(
+                    "The in-game map (M) only shows what the player has explored: about 6 tiles around everywhere they have been. Off: the whole map is shown right away.",
+                );
+                ui.weak(if map.fog { "Players uncover this map by exploring it." } else { "The map screen shows this whole map." });
+                ui.separator();
                 ui.heading("Edge transitions");
                 ui.weak("Walking into a linked edge moves the player to the target map, keeping the position along the edge (+offset).");
                 for e in Edge::ALL {

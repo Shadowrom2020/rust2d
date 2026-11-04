@@ -849,6 +849,7 @@ impl Game {
             self.update_skills(dt);
         }
         self.update_player(dt, frozen, consumed);
+        self.reveal_fog();
         self.update_entities(dt, frozen);
         self.update_combat(dt, frozen, consumed);
         if !frozen {
