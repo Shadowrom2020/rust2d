@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.0.6 — 2026-11-04
 
 ### Gameplay
 - **Loot tables**: defeated characters drop items. Each line of a table is an item, a chance in
