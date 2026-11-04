@@ -52,6 +52,79 @@ pub enum TriggerOn {
     Lock,
 }
 
+/// Where a trigger lives. The game only sends some events to each kind of owner (see
+/// `runtime::Game::collect`), so only those make sense in its trigger list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TriggerOwner {
+    /// Triggers of a map (not of an object on it).
+    Map,
+    Zone,
+    /// A placed character or a character definition.
+    Character,
+    /// A placed prop or a prop definition.
+    Prop,
+    /// An item pickup placed on a map.
+    Pickup,
+    /// An item definition's "on use" triggers.
+    ItemUse,
+}
+
+impl TriggerOwner {
+    /// Whether events of this kind ever reach a trigger of this owner.
+    pub fn allows(self, on: &TriggerOn) -> bool {
+        use TriggerOn as T;
+        use TriggerOwner as O;
+        match (self, on) {
+            // emit() / "Emit event" reach the map, its zones and its entities.
+            (O::Map | O::Zone | O::Character | O::Prop | O::Pickup, T::Custom { .. }) => true,
+            (O::Map, T::MapEnter) => true,
+            (O::Zone, T::Enter | T::Leave | T::Interact) => true,
+            (O::Character, T::Interact | T::UseItem { .. } | T::Defeat) => true,
+            (O::Prop, T::Interact | T::UseItem { .. } | T::Unlock | T::Lock) => true,
+            (O::Pickup, T::Interact | T::UseItem { .. }) => true,
+            (O::ItemUse, T::UseItem { .. }) => true,
+            _ => false,
+        }
+    }
+
+    /// The events offered for this owner (first = default for new triggers).
+    pub fn templates(self) -> Vec<TriggerOn> {
+        let mut v: Vec<TriggerOn> = TriggerOn::templates().into_iter().filter(|t| self.allows(t)).collect();
+        // The most likely event first.
+        let first = match self {
+            TriggerOwner::Map => TriggerOn::MapEnter,
+            TriggerOwner::Zone => TriggerOn::Enter,
+            TriggerOwner::ItemUse => TriggerOn::UseItem { item: String::new() },
+            _ => TriggerOn::Interact,
+        };
+        if let Some(k) = v.iter().position(|t| *t == first) {
+            let t = v.remove(k);
+            v.insert(0, t);
+        }
+        v
+    }
+
+    /// What to use instead of an event that never reaches this owner.
+    pub fn replacement(self, on: &TriggerOn) -> TriggerOn {
+        match (self, on) {
+            (TriggerOwner::Map, _) => TriggerOn::MapEnter,
+            (TriggerOwner::Zone, TriggerOn::MapEnter) => TriggerOn::Enter,
+            _ => self.templates().remove(0),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TriggerOwner::Map => "map triggers",
+            TriggerOwner::Zone => "zone triggers",
+            TriggerOwner::Character => "character triggers",
+            TriggerOwner::Prop => "prop triggers",
+            TriggerOwner::Pickup => "item pickup triggers",
+            TriggerOwner::ItemUse => "item use triggers",
+        }
+    }
+}
+
 impl TriggerOn {
     pub fn matches(&self, ev: &GameEvent) -> bool {
         match (self, ev) {
@@ -277,6 +350,14 @@ pub enum Action {
     OpenShop { target: TargetName },
     /// Starts / advances / completes / fails a quest (`stage` is used by `SetStage`).
     Quest { quest: String, op: crate::quest::QuestOp, stage: u32 },
+    /// Starts (the character's own route, or `points` in tile coordinates) or stops a
+    /// character's patrol.
+    Patrol {
+        target: TargetName,
+        active: bool,
+        #[serde(default)]
+        points: Vec<(i32, i32)>,
+    },
 }
 
 impl Action {
@@ -304,6 +385,7 @@ impl Action {
             Action::SetState { .. } => "Set prop state",
             Action::OpenShop { .. } => "Open shop",
             Action::Quest { .. } => "Quest",
+            Action::Patrol { .. } => "Patrol",
         }
     }
 
@@ -332,13 +414,71 @@ impl Action {
             Action::SetState { target: "self".into(), state: String::new() },
             Action::OpenShop { target: "self".into() },
             Action::Quest { quest: s(), op: crate::quest::QuestOp::Start, stage: 0 },
+            Action::Patrol { target: "self".into(), active: true, points: Vec::new() },
         ]
     }
+}
+
+/// Triggers in a project whose event never reaches them: "where: On <event>".
+pub fn useless_triggers(project: &crate::project::Project) -> Vec<String> {
+    use crate::entity::EntityKind;
+    let mut out = Vec::new();
+    let mut check = |owner: TriggerOwner, ts: &[Trigger], place: String| {
+        for t in ts.iter().filter(|t| !owner.allows(&t.on)) {
+            out.push(format!("{place}: On {}", t.on.label()));
+        }
+    };
+    let db = &project.db;
+    for d in &db.items {
+        check(TriggerOwner::ItemUse, &d.on_use, format!("item {}", d.id));
+    }
+    for d in &db.props {
+        check(TriggerOwner::Prop, &d.triggers, format!("prop {}", d.id));
+    }
+    for d in &db.characters {
+        check(TriggerOwner::Character, &d.triggers, format!("character {}", d.id));
+    }
+    for name in project.list_maps() {
+        let Ok(map) = project.load_map(&name) else { continue };
+        check(TriggerOwner::Map, &map.triggers, format!("map {name}"));
+        for z in &map.zones {
+            check(TriggerOwner::Zone, &z.triggers, format!("map {name}, zone {}", z.name));
+        }
+        for e in &map.entities {
+            let owner = match e.kind {
+                EntityKind::Character => TriggerOwner::Character,
+                EntityKind::Prop => TriggerOwner::Prop,
+                EntityKind::Item => TriggerOwner::Pickup,
+            };
+            check(owner, &e.triggers, format!("map {name}, {}", e.label()));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trigger_owners() {
+        assert!(TriggerOwner::Map.allows(&TriggerOn::MapEnter) && !TriggerOwner::Map.allows(&TriggerOn::Enter));
+        assert!(TriggerOwner::Zone.allows(&TriggerOn::Enter) && !TriggerOwner::Zone.allows(&TriggerOn::MapEnter));
+        assert!(!TriggerOwner::Zone.allows(&TriggerOn::UseItem { item: String::new() }));
+        assert!(TriggerOwner::Prop.allows(&TriggerOn::Unlock) && !TriggerOwner::Character.allows(&TriggerOn::Unlock));
+        assert!(TriggerOwner::Character.allows(&TriggerOn::Defeat) && !TriggerOwner::Prop.allows(&TriggerOn::Defeat));
+        assert!(!TriggerOwner::ItemUse.allows(&TriggerOn::Custom { name: "x".into() }));
+        assert_eq!(TriggerOwner::Map.templates().iter().map(|t| t.label()).collect::<Vec<_>>(), vec!["Map enter", "Custom event"]);
+        assert_eq!(TriggerOwner::Map.replacement(&TriggerOn::Enter), TriggerOn::MapEnter);
+        assert_eq!(TriggerOwner::Zone.replacement(&TriggerOn::MapEnter), TriggerOn::Enter);
+    }
+
+    #[test]
+    fn example_project_has_no_useless_triggers() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../example_project");
+        let project = crate::project::Project::load(&root).unwrap();
+        assert_eq!(useless_triggers(&project), Vec::<String>::new());
+    }
 
     #[test]
     fn trigger_matching() {

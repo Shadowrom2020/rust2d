@@ -392,6 +392,17 @@ fn village() -> Map {
     let shop_sign = b.entity(EntityKind::Prop, "sign", door2.0 - 1, door2.1 + 1);
     shop_sign.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Sign", "TILDA'S WARES - Potions, arrows, armor. Fair prices, we buy too!")])];
 
+    // A town guard patrolling the main road (back and forth, pausing at each point).
+    let guard = b.entity(EntityKind::Character, "guard", 8, 18);
+    guard.name = "guard".into();
+    guard.patrol = Some(rust2d_engine::entity::PatrolRoute {
+        points: vec![(8, 18), (20, 18), (30, 18), (38, 18)],
+        mode: rust2d_engine::entity::PatrolMode::PingPong,
+        pause: 1.5,
+        speed: 0.0,
+    });
+    guard.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "guard_talk".into() }])];
+
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
     b.m.triggers = vec![Trigger {
         on: TriggerOn::MapEnter,
@@ -879,6 +890,7 @@ fn database() -> Database {
             SheetDef { id: "hero_f3".into(), image: "sprites/hero_f3.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "elder".into(), image: "sprites/elder.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "villager".into(), image: "sprites/villager.png".into(), frame_w: 32, frame_h: 48 },
+            SheetDef { id: "guard".into(), image: "sprites/guard.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "merchant_f".into(), image: "sprites/merchant_f.png".into(), frame_w: 32, frame_h: 48 },
             SheetDef { id: "slime".into(), image: "sprites/slime.png".into(), frame_w: 32, frame_h: 32 },
             SheetDef { id: "goblin".into(), image: "sprites/goblin.png".into(), frame_w: 32, frame_h: 48 },
@@ -1006,6 +1018,7 @@ fn database() -> Database {
             hero,
             ch("elder", "Elder", "elder", 40.0, Behavior::Static),
             ch("villager", "Villager", "villager", 35.0, Behavior::Wander { radius: 3.0 }),
+            ch("guard", "Town Guard", "guard", 40.0, Behavior::Static),
             slime,
             goblin,
             // Every merchant sells these by default; the one in the village has their own stock.
@@ -1052,6 +1065,7 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               wait(seconds) emit(event) then_call(fn)
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
 //               open_shop(target) set_state(target, state)
+//               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
 //               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
 //               quest_done(id)
@@ -1131,6 +1145,17 @@ fn slime_defeated() {
     }
 }
 
+// The town guard patrols the road (see his patrol route in the map inspector). Once the
+// shrine is lit he stops: stop_patrol(target) / patrol(target) / patrol(target, [[x, y], ...]).
+fn guard_talk() {
+    if flag("shrine_lit") {
+        say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
+        stop_patrol("guard");
+    } else {
+        say("Guard", "Halt! Oh, it's you, {player}. Careful in Whisperwood, {sir|ma'am} - strange lights out there.");
+    }
+}
+
 fn count_coins() {
     say("You have " + item_count("coin") + " coins.");
 }
@@ -1151,6 +1176,8 @@ fn main() {
     character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false, ..Default::default() });
     // Same look as the library's "Merchant (female)".
     character(&out, "merchant_f", &Look { skin: 0xe8b88a, hair: 0x3a2418, shirt: 0x7a3a8a, pants: 0x4a3a2a, robe: Some(0x6a3a7a), apron: Some(0xe8dcc0), female: true, ..Default::default() });
+    // Same look as the library's "Town Guard".
+    character(&out, "guard", &Look { skin: 0xe8b88a, hair: 0x3a2a1e, shirt: 0x2b4c8c, pants: 0x3a3a44, hat: Hat::Helmet, ..Default::default() });
     character(&out, "goblin", &Look { skin: 0x7cb342, hair: 0x33691e, shirt: 0x5d4037, pants: 0x3e2723, beard: false, ears: true, ..Default::default() });
     overlay(&out, "ov_cap", Gear::Cap);
     overlay(&out, "ov_helmet", Gear::Helmet);

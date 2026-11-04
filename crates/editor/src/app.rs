@@ -9,6 +9,7 @@ use rust2d_engine::entity::{EntityInstance, EntityKind, Facing};
 use rust2d_engine::map::{Edge, EdgeLink, Map, Respawn, Tile, Zone, ZoneKind, MAX_MAP_SIZE};
 use rust2d_engine::audio::Audio;
 use rust2d_engine::defs::{ContainerSpec, LockSpec, ShopSpec, SpriteRef};
+use rust2d_engine::entity::{PatrolMode, PatrolRoute};
 
 /// Definitions remembered in the entity palette's "Recent" row.
 const RECENT_MAX: usize = 10;
@@ -146,6 +147,10 @@ pub struct Editor {
     pub model: Option<crate::models::ModelChooser>,
     /// Open new project wizard.
     pub new_project: Option<crate::new_project::NewProjectWizard>,
+    /// Character whose patrol route is being edited on the map (clicks add waypoints).
+    pub route_edit: Option<u32>,
+    /// Waypoint being dragged while editing a route, and the map objects before the drag.
+    pub route_drag: Option<(usize, crate::doc::Objects)>,
     /// Debug: screen points to report the egui layer under (script command `probe X Y`).
     pub probe: Vec<egui::Pos2>,
     /// Camera (center, zoom) per map, restored when switching back.
@@ -260,6 +265,8 @@ impl Editor {
             quick: Default::default(),
             model: None,
             new_project: None,
+            route_edit: None,
+            route_drag: None,
             probe: Vec::new(),
             map_cams: HashMap::new(),
             last_portal_click: None,
@@ -439,12 +446,25 @@ impl Editor {
     pub fn refresh_refs(&mut self) {
         let mut spawns: HashMap<String, Vec<String>> = HashMap::new();
         let mut transitions: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
+        // Names used anywhere in the project (for the script editor's completion).
+        let mut all_names: Vec<String> = Vec::new();
+        let mut all_flags: Vec<String> = Vec::new();
+        let mut all_vars: Vec<String> = Vec::new();
         for m in &self.maps {
-            let zones = if self.doc.as_ref().is_some_and(|d| &d.map.name == m) {
-                self.doc.as_ref().unwrap().map.zones.clone()
-            } else {
-                self.project.load_map(m).map(|m| m.zones).unwrap_or_default()
+            let loaded;
+            let map = match &self.doc {
+                Some(d) if &d.map.name == m => &d.map,
+                _ => match self.project.load_map(m) {
+                    Ok(x) => {
+                        loaded = x;
+                        &loaded
+                    }
+                    Err(_) => continue,
+                },
             };
+            all_names.extend(map.entities.iter().filter(|e| !e.name.is_empty()).map(|e| e.name.clone()));
+            collect_map_names(map, &mut all_flags, &mut all_vars);
+            let zones = map.zones.clone();
             spawns.insert(m.clone(), zones.iter().filter(|z| z.kind == ZoneKind::Spawn).map(|z| z.name.clone()).collect());
             transitions.insert(
                 m.clone(),
@@ -456,6 +476,15 @@ impl Editor {
                     })
                     .collect(),
             );
+        }
+        let db = &self.project.db;
+        for ts in db.items.iter().map(|d| &d.on_use).chain(db.props.iter().map(|d| &d.triggers)).chain(db.characters.iter().map(|d| &d.triggers)) {
+            collect_names(ts, &mut all_flags, &mut all_vars);
+        }
+        for v in [&mut all_names, &mut all_flags, &mut all_vars] {
+            v.retain(|s| !s.is_empty());
+            v.sort();
+            v.dedup();
         }
         let mut scripts = ScriptHost::new();
         scripts.load_dir(&self.project.scripts_dir());
@@ -484,6 +513,10 @@ impl Editor {
                 v.dedup();
                 v
             },
+            entity_names: all_names,
+            speakers: self.doc.as_ref().map(|d| speakers_of(&d.map, &self.project.db)).unwrap_or_default(),
+            all_flags,
+            vars: all_vars,
             quests: self.project.db.quests.iter().map(|q| q.id.clone()).collect(),
             quest_stages: self.project.db.quests.iter().map(|q| (q.id.clone(), q.stages.clone())).collect(),
         };
@@ -631,13 +664,48 @@ impl Editor {
         }
         self.refresh_refs();
         let mut msg = format!("Renamed '{old}' → '{new}': {refs} reference(s) updated in {maps_changed} map file(s)");
-        if matches!(kind, RefKind::Item | RefKind::Sound | RefKind::Map) {
-            msg.push_str(" (strings inside scripts are not changed)");
+        // Ids passed to script functions (give_item("old"), teleport("old", ...), ...).
+        let changed = self.rename_in_scripts(kind, old, new, &mut errors);
+        if !changed.is_empty() {
+            msg.push_str(&format!(", scripts: {}", changed.join(", ")));
         }
         if !errors.is_empty() {
             msg = format!("{msg}; errors: {}", errors.join("; "));
         }
         self.set_status(msg);
+    }
+
+    /// Applies a rename to the project's scripts (backups as `<file>.rhai.bak`). Returns
+    /// "file:line,line" for every changed file. The open script editor follows.
+    fn rename_in_scripts(&mut self, kind: RefKind, old: &str, new: &str, errors: &mut Vec<String>) -> Vec<String> {
+        let mut changed = Vec::new();
+        let Ok(rd) = std::fs::read_dir(self.project.scripts_dir()) else { return changed };
+        let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "rhai")).collect();
+        files.sort();
+        for f in files {
+            // The open file's editor text may have unsaved edits: rename in it as well.
+            let open = self.db.script_file.as_ref() == Some(&f);
+            let Ok(disk) = std::fs::read_to_string(&f) else { continue };
+            let (text, lines) = rust2d_engine::script_refs::rename_in_script(&disk, kind, old, new);
+            if open {
+                let (buf, _) = rust2d_engine::script_refs::rename_in_script(&self.db.script_text, kind, old, new);
+                self.db.script_text = buf;
+            }
+            if lines.is_empty() {
+                continue;
+            }
+            let mut bak = f.clone().into_os_string();
+            bak.push(".bak");
+            let res = std::fs::write(&bak, &disk).and_then(|_| std::fs::write(&f, &text));
+            if let Err(e) = res {
+                errors.push(format!("{}: {e}", f.display()));
+                continue;
+            }
+            let name = f.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+            changed.push(format!("{name}:{}", lines.join(",")));
+        }
+        changed
     }
 
     pub fn play(&mut self, here: bool) {
@@ -1719,6 +1787,8 @@ impl Editor {
             ui.label("No map open. Use File → New map.");
             return;
         };
+        // Speakers follow the map while it is edited (new characters, renamed entities, ...).
+        self.refs.speakers = speakers_of(&doc.map, &self.project.db);
         let before = Objects::of(&doc.map);
         let ts = self.assets.tile_size;
         let refs = &self.refs;
@@ -1863,6 +1933,60 @@ impl Editor {
                     if let Some(v) = set {
                         e.shop = v;
                     }
+
+                    ui.separator();
+                    ui.heading("Patrol route");
+                    let tile = ((e.x / ts).floor() as i32, ((e.y - 1.0) / ts).floor() as i32);
+                    let mut remove_route = false;
+                    match &mut e.patrol {
+                        None => {
+                            ui.weak("No route: the character follows its definition's behaviour.");
+                            if ui.button("➕ Add a patrol route").on_hover_text("Then click tiles on the map to add waypoints").clicked() {
+                                e.patrol = Some(PatrolRoute { points: vec![tile], ..Default::default() });
+                                self.route_edit = Some(uid);
+                            }
+                        }
+                        Some(r) => {
+                            ui.horizontal(|ui| {
+                                ui.radio_value(&mut r.mode, PatrolMode::Loop, PatrolMode::Loop.label());
+                                ui.radio_value(&mut r.mode, PatrolMode::PingPong, PatrolMode::PingPong.label());
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Pause");
+                                ui.add(egui::DragValue::new(&mut r.pause).range(0.0..=30.0).speed(0.1).suffix(" s"));
+                                ui.label("Speed");
+                                ui.add(egui::DragValue::new(&mut r.speed).range(0.0..=400.0).speed(1.0)).on_hover_text("Pixels per second; 0 = the character's speed");
+                            });
+                            let editing = self.route_edit == Some(uid);
+                            ui.horizontal(|ui| {
+                                let label = if editing { "✔ Done editing" } else { "✏ Edit on map" };
+                                if ui.selectable_label(editing, label).on_hover_text("Click tiles to add waypoints, drag one to move it, right-click to remove it, Esc when done").clicked() {
+                                    self.route_edit = if editing { None } else { Some(uid) };
+                                }
+                                remove_route = ui.button("Remove route").clicked();
+                            });
+                            let mut del = None;
+                            for (k, p) in r.points.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.monospace(format!("{:>2}. tile {},{}", k + 1, p.0, p.1));
+                                    if ui.small_button("✖").clicked() {
+                                        del = Some(k);
+                                    }
+                                });
+                            }
+                            if let Some(k) = del {
+                                r.points.remove(k);
+                            }
+                            if r.points.len() < 2 {
+                                ui.colored_label(egui::Color32::YELLOW, "Add at least two waypoints.");
+                            }
+                            ui.weak("Talking to the character pauses it; the 'Patrol' action or patrol(target) / stop_patrol(target) in scripts start and stop it.");
+                        }
+                    }
+                    if remove_route {
+                        e.patrol = None;
+                        self.route_edit = None;
+                    }
                 }
                 if e.kind == EntityKind::Prop {
                     ui.separator();
@@ -1940,7 +2064,12 @@ impl Editor {
                 if n_def > 0 {
                     ui.weak(format!("+ {n_def} trigger(s) from the definition (Database)."));
                 }
-                widgets::triggers_ui(ui, &format!("e{uid}"), &mut e.triggers, refs);
+                let owner = match e.kind {
+                    EntityKind::Character => rust2d_engine::events::TriggerOwner::Character,
+                    EntityKind::Prop => rust2d_engine::events::TriggerOwner::Prop,
+                    EntityKind::Item => rust2d_engine::events::TriggerOwner::Pickup,
+                };
+                widgets::triggers_ui(ui, &format!("e{uid}"), &mut e.triggers, refs, owner);
             }
             Selection::Zone(uid) => {
                 let Some(z) = doc.map.zones.iter_mut().find(|z| z.uid == uid) else {
@@ -1956,7 +2085,7 @@ impl Editor {
                 ui.separator();
                 ui.heading("Triggers");
                 ui.weak("Zones react to Enter, Leave and Interact (pressing E while inside).");
-                widgets::triggers_ui(ui, &format!("z{uid}"), &mut z.triggers, refs);
+                widgets::triggers_ui(ui, &format!("z{uid}"), &mut z.triggers, refs, rust2d_engine::events::TriggerOwner::Zone);
             }
             Selection::None => {
                 let map = &mut doc.map;
@@ -2029,7 +2158,7 @@ impl Editor {
                 ui.separator();
                 ui.heading("Map triggers");
                 ui.weak("Map enter and custom events.");
-                widgets::triggers_ui(ui, "map", &mut map.triggers, refs);
+                widgets::triggers_ui(ui, "map", &mut map.triggers, refs, rust2d_engine::events::TriggerOwner::Map);
                 ui.separator();
                 ui.collapsing(format!("Entities ({})", map.entities.len()), |ui| {
                     for e in &map.entities {
@@ -2252,40 +2381,95 @@ fn valid_name(s: &str) -> bool {
 }
 
 /// Flag names used anywhere on a map (for suggestions).
-fn collect_flags(map: &Map, out: &mut Vec<String>) {
-    use rust2d_engine::events::{Action, Cond, Trigger};
-    fn actions(a: &[Action], out: &mut Vec<String>) {
+/// Flag and variable names used by triggers (conditions and actions, also nested in "If").
+pub fn collect_names(ts: &[rust2d_engine::events::Trigger], flags: &mut Vec<String>, vars: &mut Vec<String>) {
+    use rust2d_engine::events::{Action, Cond, Condition};
+    fn conds(cs: &[Condition], flags: &mut Vec<String>, vars: &mut Vec<String>) {
+        for c in cs {
+            match &c.cond {
+                Cond::Flag { name } => flags.push(name.clone()),
+                Cond::Var { name, .. } => vars.push(name.clone()),
+                _ => {}
+            }
+        }
+    }
+    fn actions(a: &[Action], flags: &mut Vec<String>, vars: &mut Vec<String>) {
         for a in a {
             match a {
-                Action::SetFlag { name, .. } => out.push(name.clone()),
+                Action::SetFlag { name, .. } => flags.push(name.clone()),
+                Action::SetVar { name, .. } => vars.push(name.clone()),
+                Action::Choice { var, .. } => vars.push(var.clone()),
                 Action::If { conditions, then, otherwise } => {
-                    for c in conditions {
-                        if let Cond::Flag { name } = &c.cond {
-                            out.push(name.clone());
-                        }
-                    }
-                    actions(then, out);
-                    actions(otherwise, out);
+                    conds(conditions, flags, vars);
+                    actions(then, flags, vars);
+                    actions(otherwise, flags, vars);
                 }
                 _ => {}
             }
         }
     }
-    let mut trig = |ts: &[Trigger]| {
-        for t in ts {
-            for c in &t.conditions {
-                if let Cond::Flag { name } = &c.cond {
-                    out.push(name.clone());
-                }
-            }
-            actions(&t.actions, out);
-        }
-    };
-    trig(&map.triggers);
+    for t in ts {
+        conds(&t.conditions, flags, vars);
+        actions(&t.actions, flags, vars);
+    }
+}
+
+fn collect_flags(map: &Map, out: &mut Vec<String>) {
+    let mut vars = Vec::new();
+    collect_map_names(map, out, &mut vars);
+}
+
+/// Flags and variables used by a map's triggers (map, entities, zones).
+fn collect_map_names(map: &Map, flags: &mut Vec<String>, vars: &mut Vec<String>) {
+    collect_names(&map.triggers, flags, vars);
     for e in &map.entities {
-        trig(&e.triggers);
+        collect_names(&e.triggers, flags, vars);
     }
     for z in &map.zones {
-        trig(&z.triggers);
+        collect_names(&z.triggers, flags, vars);
     }
+}
+
+/// Dialog speakers to offer for a map: placeholders, the characters on it (definition
+/// names and named instances) and speakers its dialogs already use.
+pub fn speakers_of(map: &Map, db: &rust2d_engine::defs::Database) -> Vec<(String, String)> {
+    use rust2d_engine::events::{Action, Trigger};
+    let mut out: Vec<(String, String)> = vec![("{self}".into(), "name of the trigger's owner".into()), ("{player}".into(), "the player's name".into())];
+    let mut add = |v: String, hint: String| {
+        if !v.trim().is_empty() && !out.iter().any(|(o, _)| *o == v) {
+            out.push((v, hint));
+        }
+    };
+    for e in map.entities.iter().filter(|e| e.kind == EntityKind::Character) {
+        if !e.name.is_empty() {
+            let mut c = e.name.chars();
+            let nice: String = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
+            add(nice.replace('_', " "), format!("'{}' on this map", e.name));
+        }
+        if let Some(d) = db.character(&e.def) {
+            add(d.name.clone(), "character on this map".into());
+        }
+    }
+    fn used(acts: &[Action], out: &mut Vec<String>) {
+        for a in acts {
+            match a {
+                Action::Dialog { speaker, .. } | Action::Choice { speaker, .. } => out.push(speaker.clone()),
+                Action::If { then, otherwise, .. } => {
+                    used(then, out);
+                    used(otherwise, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut names = Vec::new();
+    let mut trig = |ts: &[Trigger]| ts.iter().for_each(|t| used(&t.actions, &mut names));
+    trig(&map.triggers);
+    map.entities.iter().for_each(|e| trig(&e.triggers));
+    map.zones.iter().for_each(|z| trig(&z.triggers));
+    names.sort();
+    for n in names {
+        add(n, "used in a dialog here".into());
+    }
+    out
 }

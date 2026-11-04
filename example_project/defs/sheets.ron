@@ -48,6 +48,12 @@
         frame_h: 48,
     ),
     (
+        id: "guard",
+        image: "sprites/guard.png",
+        frame_w: 32,
+        frame_h: 48,
+    ),
+    (
         id: "merchant_f",
         image: "sprites/merchant_f.png",
         frame_w: 32,
