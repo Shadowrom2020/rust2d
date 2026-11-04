@@ -252,7 +252,7 @@ impl Game {
         to.length() - radius <= w.reach.max(0.3) * ts * 0.9
     }
 
-    fn shoot(&mut self, origin: Vec2, dir: Vec2, r: &Ranged, damage: i32, from_player: bool, shooter: Option<u32>) {
+    pub(super) fn shoot(&mut self, origin: Vec2, dir: Vec2, r: &Ranged, damage: i32, from_player: bool, shooter: Option<u32>) {
         self.projectiles.push(Projectile {
             pos: origin + dir * 4.0,
             vel: dir * r.speed.max(10.0),
@@ -375,7 +375,7 @@ impl Game {
     }
 
     /// Applies damage (minus the target's defense, at least 1) with knockback.
-    fn damage_entity(&mut self, i: usize, dmg: i32, from: Vec2, knockback: f32) {
+    pub(super) fn damage_entity(&mut self, i: usize, dmg: i32, from: Vec2, knockback: f32) {
         let u = self.u();
         let e = &mut self.loaded.entities[i];
         e.hp -= (dmg - e.defense).max(1);
@@ -588,8 +588,8 @@ impl Game {
         if def > 0 {
             draw_text(format!("DEF {def}"), 14.0 + hearts as f32 * (size + 4.0) + 6.0, 32.0, 20.0, LIGHTGRAY);
         }
-        // Equipped weapon and ammo.
-        let (x, y) = (14.0, 44.0);
+        // Equipped weapon and ammo: bottom-left corner, "Q: switch" above it.
+        let (x, y) = (14.0, screen_height() - 54.0);
         draw_rectangle(x, y, 40.0, 40.0, Color::new(0.0, 0.0, 0.0, 0.5));
         draw_rectangle_lines(x, y, 40.0, 40.0, 2.0, Color::new(0.85, 0.8, 0.6, 0.8));
         let db = &self.project.db;
@@ -609,7 +609,7 @@ impl Game {
                 draw_text("fist", x + 6.0, y + 26.0, 18.0, LIGHTGRAY);
             }
         }
-        draw_text("Q: switch", x, y + 56.0, 16.0, Color::new(1.0, 1.0, 1.0, 0.5));
+        draw_text("Q: switch", x, y - 6.0, 16.0, Color::new(1.0, 1.0, 1.0, 0.5));
     }
 
     pub(super) fn draw_game_over(&self) {

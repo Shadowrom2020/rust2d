@@ -201,6 +201,14 @@ pub fn lock_ui(ui: &mut Ui, id: &str, lock: &mut LockSpec, refs: &Refs, tex: &Te
     let disappears = lock.on_unlock == OnUnlock::Disappear;
     ui.add_enabled_ui(!disappears, |ui| {
         let label = if lock.key.is_empty() { "Can be closed again" } else { "Can be locked again with the key" };
+        ui.horizontal(|ui| {
+            ui.label("Lockpicking");
+            ui.add(egui::DragValue::new(&mut lock.pick_difficulty).range(0..=99))
+                .on_hover_text("A lockpicking skill of this level opens the lock without the key (0 = can't be picked). Without a key item the lock can only be picked.");
+            if lock.pick_difficulty > 0 {
+                ui.weak(format!("needs lockpicking {}", lock.pick_difficulty));
+            }
+        });
         ui.checkbox(&mut lock.relock, label).on_hover_text(
             "Interacting with the opened prop (or using the key on it) locks it again if the player carries the key. \
              Containers are only relocked by using the key on them. 'Locked again' triggers run afterwards.",
@@ -549,6 +557,8 @@ pub struct Refs {
     /// Quest ids with their number of stages.
     pub quests: Vec<String>,
     pub quest_stages: HashMap<String, Vec<String>>,
+    pub skills: Vec<String>,
+    pub spells: Vec<String>,
 }
 
 /// Placeholders understood in dialog / choice texts (and quest texts).
@@ -766,6 +776,20 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                         quest_stage_field(ui, &format!("{id}/qs"), quest, stage, refs);
                     }
                 }
+                Cond::Skill { skill, op, level } => {
+                    ui.label("skill");
+                    suggest(ui, &format!("{id}/sk"), skill, &refs.skills, 100.0);
+                    egui::ComboBox::from_id_salt(format!("{id}/skop")).width(40.0).selected_text(op.symbol()).show_ui(ui, |ui| {
+                        for o in CmpOp::ALL {
+                            ui.selectable_value(op, o, o.symbol());
+                        }
+                    });
+                    ui.add(egui::DragValue::new(level).range(0..=99));
+                }
+                Cond::KnowsSpell { spell } => {
+                    ui.label("knows");
+                    suggest(ui, &format!("{id}/sp"), spell, &refs.spells, 120.0);
+                }
                 Cond::TimeBetween { from, to } => {
                     ui.label("time from");
                     ui.add(egui::DragValue::new(from).range(0.0..=24.0).speed(0.25).suffix(" h"));
@@ -921,6 +945,41 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
         Action::SetState { target, state } => {
             target_field(ui, id, target, refs);
             labeled(ui, "state", |ui| suggest(ui, &format!("{id}/state"), state, &refs.states, 100.0));
+        }
+        Action::GiveSkillPoints { amount } => {
+            labeled(ui, "points", |ui| {
+                ui.add(egui::DragValue::new(amount).range(-99..=99)).on_hover_text("Negative takes points away");
+            });
+        }
+        Action::SetSkill { skill, level } => {
+            labeled(ui, "skill", |ui| suggest(ui, &format!("{id}/sk"), skill, &refs.skills, 120.0));
+            labeled(ui, "level", |ui| {
+                ui.add(egui::DragValue::new(level).range(0..=99));
+            });
+        }
+        Action::LearnSpell { spell } => {
+            labeled(ui, "spell", |ui| suggest(ui, &format!("{id}/sp"), spell, &refs.spells, 120.0));
+        }
+        Action::AddMana { amount } => {
+            labeled(ui, "mana", |ui| {
+                ui.add(egui::DragValue::new(amount).range(-999..=999)).on_hover_text("Negative drains mana");
+            });
+        }
+        Action::DamageAround { damage, radius } => {
+            labeled(ui, "damage", |ui| {
+                ui.add(egui::DragValue::new(damage).range(0..=999));
+            });
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+        }
+        Action::PlayerLight { radius, seconds } => {
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+            labeled(ui, "for", |ui| {
+                ui.add(egui::DragValue::new(seconds).range(0.5..=3600.0).speed(0.5).suffix(" s"));
+            });
         }
         Action::SetTime { hour } => {
             labeled(ui, "time", |ui| {

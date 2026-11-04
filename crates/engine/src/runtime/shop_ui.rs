@@ -159,6 +159,10 @@ impl Game {
         let empty = Vec::new();
         let stock = self.world.shops.get(&self.loaded.map.name).and_then(|m| m.get(&uid)).unwrap_or(&empty);
         let db = &self.project.db;
+        // Haggling: buying cheaper, selling better (never below 1).
+        let h = self.haggle_percent() / 100.0;
+        let cheaper = |p: u32| if p == 0 { 0 } else { ((p as f32 * (1.0 - h)).round() as u32).max(1) };
+        let better = |p: u32| ((p as f32 * (1.0 + h)).round() as u32).max(1);
         match side {
             ShopSide::Merchant => stock
                 .iter()
@@ -166,7 +170,7 @@ impl Game {
                 .map(|e| Row {
                     item: e.item.clone(),
                     count: (!e.unlimited).then_some(e.count),
-                    price: Some(ShopSpec::buy_price(stock, &e.item, db)),
+                    price: Some(cheaper(ShopSpec::buy_price(stock, &e.item, db))),
                 })
                 .collect(),
             ShopSide::Player => {
@@ -177,7 +181,7 @@ impl Game {
                     }
                     match rows.iter_mut().find(|r| r.item == s.item) {
                         Some(r) => r.count = Some(r.count.unwrap_or(0) + s.count),
-                        None => rows.push(Row { item: s.item.clone(), count: Some(s.count), price: spec.sell_price(stock, &s.item, db) }),
+                        None => rows.push(Row { item: s.item.clone(), count: Some(s.count), price: spec.sell_price(stock, &s.item, db).map(better) }),
                     }
                 }
                 rows

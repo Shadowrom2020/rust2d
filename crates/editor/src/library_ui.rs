@@ -135,6 +135,8 @@ impl LibState {
             RefKind::Prop => db.prop(&a.1).map(|d| d.sprite.clone()),
             RefKind::Character => db.character(&a.1).map(|d| SpriteRef::new(&d.sheet, 0)),
             RefKind::Sheet => Some(SpriteRef::new(&a.1, 0)),
+            RefKind::Skill => db.skill(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
+            RefKind::Spell => db.spell(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
             _ => None,
         };
         let drawn = match (a.0, sprite) {
@@ -195,6 +197,8 @@ fn name_of(db: &Database, a: &AssetRef) -> String {
         RefKind::Item => db.item(&a.1).map(|d| d.name.clone()),
         RefKind::Prop => db.prop(&a.1).map(|d| d.name.clone()),
         RefKind::Character => db.character(&a.1).map(|d| d.name.clone()),
+        RefKind::Skill => db.skill(&a.1).map(|d| d.name.clone()),
+        RefKind::Spell => db.spell(&a.1).map(|d| d.name.clone()),
         _ => None,
     }
     .unwrap_or_else(|| a.1.clone())
@@ -225,6 +229,8 @@ pub fn parse_kind(s: &str) -> Option<RefKind> {
         "tileset" => RefKind::Tileset,
         "sound" => RefKind::Sound,
         "structure" => RefKind::Structure,
+        "skill" => RefKind::Skill,
+        "spell" => RefKind::Spell,
         _ => return None,
     })
 }

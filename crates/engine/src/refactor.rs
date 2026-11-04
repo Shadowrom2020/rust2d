@@ -19,6 +19,8 @@ pub enum RefKind {
     Map,
     /// Multi-tile asset (`defs::StructureDef`).
     Structure,
+    Skill,
+    Spell,
 }
 
 struct Renamer<'a> {
@@ -46,6 +48,18 @@ impl Renamer<'_> {
         self.shop(&mut e.shop);
         if let Some(l) = &mut e.loot {
             self.loot(l);
+        }
+    }
+
+    fn skill(&mut self, d: &mut crate::skills::SkillDef) {
+        self.fix(RefKind::Sheet, &mut d.icon.sheet);
+    }
+
+    fn spell(&mut self, d: &mut crate::skills::SpellDef) {
+        self.fix(RefKind::Sheet, &mut d.icon.sheet);
+        self.fix(RefKind::Skill, &mut d.skill);
+        if let crate::skills::SpellEffect::Bolt { projectile, .. } = &mut d.effect {
+            self.fix(RefKind::Sheet, &mut projectile.sheet);
         }
     }
 
@@ -149,6 +163,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
     let mut r = Renamer { kind, old, new, count: 0, found: None };
     for d in &mut db.items {
         r.fix(RefKind::Sheet, &mut d.icon.sheet);
+        r.fix(RefKind::Spell, &mut d.teaches);
         if let Some(a) = &mut d.armor {
             r.fix(RefKind::Sheet, &mut a.overlay);
         }
@@ -173,6 +188,12 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
     }
     for d in &mut db.structures {
         r.structure(d);
+    }
+    for d in &mut db.skills {
+        r.skill(d);
+    }
+    for d in &mut db.spells {
+        r.spell(d);
     }
     r.fix(RefKind::Character, &mut config.player);
     for l in &mut config.creation.looks {
@@ -232,6 +253,21 @@ pub fn refs_of_item(d: &crate::defs::ItemDef) -> Vec<(RefKind, String)> {
     }
     r.triggers(&mut d.on_use);
     r.weapon(&mut d.weapon);
+    r.fix(RefKind::Spell, &mut d.teaches);
+    r.found.unwrap_or_default()
+}
+
+pub fn refs_of_skill(d: &crate::skills::SkillDef) -> Vec<(RefKind, String)> {
+    let mut d = d.clone();
+    let mut r = collector();
+    r.skill(&mut d);
+    r.found.unwrap_or_default()
+}
+
+pub fn refs_of_spell(d: &crate::skills::SpellDef) -> Vec<(RefKind, String)> {
+    let mut d = d.clone();
+    let mut r = collector();
+    r.spell(&mut d);
     r.found.unwrap_or_default()
 }
 
@@ -358,6 +394,7 @@ mod tests {
             max_stack: 99,
             value: 0,
         light: None,
+        teaches: String::new(),
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),
@@ -370,6 +407,7 @@ mod tests {
             inventory_size: 24,
             creation: Default::default(),
         day_minutes: 24.0, start_hour: 8.0,
+        skills: Default::default(),
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);

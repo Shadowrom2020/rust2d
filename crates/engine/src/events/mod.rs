@@ -240,6 +240,10 @@ pub enum Cond {
     PlayerSex { sex: crate::state::Sex },
     /// The time of day is between `from` and `to` hours (wraps around midnight, e.g. 20 to 6).
     TimeBetween { from: f32, to: f32 },
+    /// A skill's level compared with a value.
+    Skill { skill: String, op: CmpOp, level: i64 },
+    /// The player has learned the spell.
+    KnowsSpell { spell: String },
 }
 
 /// Whether `hour` lies in `from..to` (hours 0..24; `from > to` wraps around midnight).
@@ -264,6 +268,8 @@ impl Cond {
             Cond::Quest { .. } => "Quest",
             Cond::PlayerSex { .. } => "Player sex",
             Cond::TimeBetween { .. } => "Time of day",
+            Cond::Skill { .. } => "Skill level",
+            Cond::KnowsSpell { .. } => "Knows spell",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -277,6 +283,8 @@ impl Cond {
             Cond::Quest { quest: String::new(), check: crate::quest::QuestCheck::Active, stage: 0 },
             Cond::PlayerSex { sex: crate::state::Sex::Female },
             Cond::TimeBetween { from: 20.0, to: 6.0 },
+            Cond::Skill { skill: String::new(), op: CmpOp::Ge, level: 1 },
+            Cond::KnowsSpell { spell: String::new() },
         ]
     }
 }
@@ -305,6 +313,8 @@ impl Condition {
             Cond::Quest { quest, check, stage } => world.check_quest(quest, *check, *stage),
             Cond::PlayerSex { sex } => world.player_sex == *sex,
             Cond::TimeBetween { from, to } => hour_between(world.hour, *from, *to),
+            Cond::Skill { skill, op, level } => op.apply(world.skill_level(skill) as i64, *level),
+            Cond::KnowsSpell { spell } => world.spells.contains(spell),
         };
         v != self.negate
     }
@@ -375,6 +385,18 @@ pub enum Action {
     },
     /// Sets the time of day (hours, 0..24).
     SetTime { hour: f32 },
+    /// Skill points the player can spend (negative takes them away).
+    GiveSkillPoints { amount: i32 },
+    /// Sets a skill to a level directly (no points spent).
+    SetSkill { skill: String, level: u32 },
+    /// Teaches a spell.
+    LearnSpell { spell: String },
+    /// Mana (negative = drain).
+    AddMana { amount: i32 },
+    /// Damages every character within `radius` tiles of the player (spell effects).
+    DamageAround { damage: i32, radius: f32 },
+    /// A light around the player for a while (radius in tiles).
+    PlayerLight { radius: f32, seconds: f32 },
 }
 
 impl Action {
@@ -404,6 +426,12 @@ impl Action {
             Action::Quest { .. } => "Quest",
             Action::Patrol { .. } => "Patrol",
             Action::SetTime { .. } => "Set time of day",
+            Action::GiveSkillPoints { .. } => "Give skill points",
+            Action::SetSkill { .. } => "Set skill level",
+            Action::LearnSpell { .. } => "Learn spell",
+            Action::AddMana { .. } => "Add mana",
+            Action::DamageAround { .. } => "Damage around player",
+            Action::PlayerLight { .. } => "Light around player",
         }
     }
 
@@ -434,6 +462,12 @@ impl Action {
             Action::Quest { quest: s(), op: crate::quest::QuestOp::Start, stage: 0 },
             Action::Patrol { target: "self".into(), active: true, points: Vec::new() },
             Action::SetTime { hour: 8.0 },
+            Action::GiveSkillPoints { amount: 1 },
+            Action::SetSkill { skill: String::new(), level: 1 },
+            Action::LearnSpell { spell: String::new() },
+            Action::AddMana { amount: 10 },
+            Action::DamageAround { damage: 2, radius: 2.0 },
+            Action::PlayerLight { radius: 5.0, seconds: 30.0 },
         ]
     }
 }

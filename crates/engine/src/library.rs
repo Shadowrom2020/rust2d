@@ -30,7 +30,7 @@ const PACK_VERSION: u32 = 1;
 pub type AssetRef = (RefKind, String);
 
 /// Asset kinds in dependency order (things later in the list may refer to earlier ones).
-pub const KINDS: [RefKind; 7] = [RefKind::Tileset, RefKind::Sheet, RefKind::Sound, RefKind::Item, RefKind::Prop, RefKind::Character, RefKind::Structure];
+pub const KINDS: [RefKind; 9] = [RefKind::Tileset, RefKind::Sheet, RefKind::Sound, RefKind::Item, RefKind::Prop, RefKind::Character, RefKind::Structure, RefKind::Skill, RefKind::Spell];
 
 pub fn kind_label(k: RefKind) -> &'static str {
     match k {
@@ -42,6 +42,8 @@ pub fn kind_label(k: RefKind) -> &'static str {
         RefKind::Character => "Character",
         RefKind::Map => "Map",
         RefKind::Structure => "Structure",
+        RefKind::Skill => "Skill",
+        RefKind::Spell => "Spell",
     }
 }
 
@@ -64,6 +66,10 @@ struct Manifest {
     characters: Vec<CharacterDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     structures: Vec<StructureDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    skills: Vec<crate::skills::SkillDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    spells: Vec<crate::skills::SpellDef>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -109,6 +115,8 @@ pub fn exists(db: &Database, a: &AssetRef) -> bool {
         RefKind::Prop => db.prop(id).is_some(),
         RefKind::Character => db.character(id).is_some(),
         RefKind::Structure => db.structure(id).is_some(),
+        RefKind::Skill => db.skill(id).is_some(),
+        RefKind::Spell => db.spell(id).is_some(),
         RefKind::Map => false,
     }
 }
@@ -120,6 +128,8 @@ pub fn deps(db: &Database, a: &AssetRef) -> Vec<AssetRef> {
         RefKind::Prop => db.prop(&a.1).map(refactor::refs_of_prop),
         RefKind::Character => db.character(&a.1).map(refactor::refs_of_character),
         RefKind::Structure => db.structure(&a.1).map(refactor::refs_of_structure),
+        RefKind::Skill => db.skill(&a.1).map(refactor::refs_of_skill),
+        RefKind::Spell => db.spell(&a.1).map(refactor::refs_of_spell),
         _ => None,
     };
     refs.unwrap_or_default().into_iter().filter(|r| r.0 != RefKind::Map).collect()
@@ -135,6 +145,8 @@ pub fn all_assets(db: &Database) -> Vec<AssetRef> {
     out.extend(db.props.iter().map(|d| (RefKind::Prop, d.id.clone())));
     out.extend(db.characters.iter().map(|d| (RefKind::Character, d.id.clone())));
     out.extend(db.structures.iter().map(|d| (RefKind::Structure, d.id.clone())));
+    out.extend(db.skills.iter().map(|d| (RefKind::Skill, d.id.clone())));
+    out.extend(db.spells.iter().map(|d| (RefKind::Spell, d.id.clone())));
     out
 }
 
@@ -176,6 +188,8 @@ impl Bundle {
             props: db.props.iter().filter(|d| has(RefKind::Prop, &d.id)).cloned().collect(),
             characters: db.characters.iter().filter(|d| has(RefKind::Character, &d.id)).cloned().collect(),
             structures: db.structures.iter().filter(|d| has(RefKind::Structure, &d.id)).cloned().collect(),
+            skills: db.skills.iter().filter(|d| has(RefKind::Skill, &d.id)).cloned().collect(),
+            spells: db.spells.iter().filter(|d| has(RefKind::Spell, &d.id)).cloned().collect(),
             quests: Vec::new(),
         };
         let mut files = BTreeMap::new();
@@ -207,6 +221,8 @@ impl Bundle {
             props: self.db.props.clone(),
             characters: self.db.characters.clone(),
             structures: self.db.structures.clone(),
+            skills: self.db.skills.clone(),
+            spells: self.db.spells.clone(),
         };
         let cfg = ron::ser::PrettyConfig::default().struct_names(false);
         let manifest = ron::ser::to_string_pretty(&m, cfg)?;
@@ -245,7 +261,7 @@ impl Bundle {
             f.read_to_end(&mut data)?;
             files.insert(rel, data);
         }
-        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters, structures: m.structures };
+        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters, structures: m.structures, skills: m.skills, spells: m.spells };
         let b = Bundle { name: m.name, tile_size: m.tile_size, db, files };
         for rel in b.db.tilesets.iter().map(|d| &d.image).chain(b.db.sheets.iter().map(|d| &d.image)).chain(b.db.sounds.iter().map(|d| &d.file)) {
             if !rel.is_empty() && !b.files.contains_key(rel) {
@@ -314,6 +330,8 @@ impl Bundle {
             RefKind::Prop => self.db.props.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Character => self.db.characters.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Structure => self.db.structures.iter_mut().for_each(|d| set(&mut d.id)),
+            RefKind::Skill => self.db.skills.iter_mut().for_each(|d| set(&mut d.id)),
+            RefKind::Spell => self.db.spells.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Map => {}
         }
         let mut cfg = ProjectConfig::new("");
@@ -331,6 +349,8 @@ impl Bundle {
             RefKind::Prop => db.prop(id) == self.db.prop(id),
             RefKind::Character => db.character(id) == self.db.character(id),
             RefKind::Structure => db.structure(id) == self.db.structure(id),
+            RefKind::Skill => db.skill(id) == self.db.skill(id),
+            RefKind::Spell => db.spell(id) == self.db.spell(id),
             RefKind::Map => true,
         }
     }
@@ -346,6 +366,8 @@ impl Bundle {
         self.db.props.retain(|d| new(RefKind::Prop, &d.id));
         self.db.characters.retain(|d| new(RefKind::Character, &d.id));
         self.db.structures.retain(|d| new(RefKind::Structure, &d.id));
+        self.db.skills.retain(|d| new(RefKind::Skill, &d.id));
+        self.db.spells.retain(|d| new(RefKind::Spell, &d.id));
         let used = files_of(&self.db);
         self.files.retain(|rel, _| used.contains(rel));
         self.merge_into(db, root)
@@ -436,6 +458,8 @@ impl Bundle {
                 RefKind::Prop => db.props.extend(self.db.prop(id).cloned()),
                 RefKind::Character => db.characters.extend(self.db.character(id).cloned()),
                 RefKind::Structure => db.structures.extend(self.db.structure(id).cloned()),
+                RefKind::Skill => db.skills.extend(self.db.skill(id).cloned()),
+                RefKind::Spell => db.spells.extend(self.db.spell(id).cloned()),
                 RefKind::Map => {}
             }
             report.added.push(a);
@@ -464,6 +488,8 @@ pub fn remove_assets(project: &mut Project, assets: &[AssetRef]) -> Result<()> {
     db.props.retain(|d| keep(RefKind::Prop, &d.id));
     db.characters.retain(|d| keep(RefKind::Character, &d.id));
     db.structures.retain(|d| keep(RefKind::Structure, &d.id));
+    db.skills.retain(|d| keep(RefKind::Skill, &d.id));
+    db.spells.retain(|d| keep(RefKind::Spell, &d.id));
     let files_after = files_of(&project.db);
     for f in files_before.difference(&files_after) {
         if safe_rel(f) {
@@ -577,6 +603,7 @@ mod tests {
             max_stack: 99,
             value: 0,
         light: None,
+        teaches: String::new(),
         };
         let mut bow = item("bow");
         bow.weapon = Some(Weapon::ranged(1, 0.5, Ranged { projectile: SpriteRef::new("items", 1), speed: 100.0, range: 6.0, ammo: "arrows".into() }));

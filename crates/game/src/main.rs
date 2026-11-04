@@ -129,6 +129,17 @@ async fn main() {
             if let Some(h) = a.hour.take() {
                 game.set_hour(h);
             }
+            for (cmd, id) in std::mem::take(&mut a.skill_cmds) {
+                match cmd.as_str() {
+                    "skillpoint" => game.spend_skill_point(&id),
+                    "cast" => {
+                        game.cast_spell(&id);
+                    }
+                    _ => {
+                        game.learn_spell(&id);
+                    }
+                }
+            }
         }
         if is_quit_requested() {
             game.request_close();
@@ -157,6 +168,7 @@ struct Autoplay {
     close: bool,
     /// `settime H`: applied by the main loop.
     hour: Option<f32>,
+    skill_cmds: Vec<(String, String)>,
 }
 
 impl Autoplay {
@@ -166,7 +178,7 @@ impl Autoplay {
             .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .filter(|c| !c.is_empty())
             .collect();
-        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None }
+        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new() }
     }
 
     /// Advances the script; returns false to quit.
@@ -223,6 +235,12 @@ impl Autoplay {
                     return true;
                 }
                 // slot player|chest|equip IDX [right|double]: click a slot of the open inventory / loot window
+                // hud bag|character|skills: click a button in the bottom-right corner
+                "hud" => {
+                    let Some(p) = game.hud_button_pos(arg(1)) else { continue };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
                 "slot" => {
                     let Some(p) = game.slot_screen_pos(arg(1), secs(2) as usize) else { continue };
                     let b = if arg(3) == "right" { MouseButton::Right } else { MouseButton::Left };
@@ -271,6 +289,8 @@ impl Autoplay {
                 "spawners" => println!("[autoplay] spawners: {}", game.spawner_status()),
                 // settime H: jump to a time of day (hours)
                 "settime" => self.hour = arg(1).parse().ok(),
+                // skillpoint ID: spend a skill point · cast ID: cast a spell · learn ID: learn a spell
+                "skillpoint" | "cast" | "learn" => self.skill_cmds.push((arg(0).to_string(), arg(1).to_string())),
                 "quit" => return false,
                 // close: as if the window's close button was clicked
                 "close" => {

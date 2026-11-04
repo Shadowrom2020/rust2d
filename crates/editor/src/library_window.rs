@@ -125,6 +125,8 @@ impl Editor {
             RefKind::Sheet => (Tab::Sheets, db.sheets.iter().position(|d| d.id == a.1)),
             RefKind::Sound => (Tab::Sounds, db.sounds.iter().position(|d| d.id == a.1)),
             RefKind::Structure => (Tab::Structures, db.structures.iter().position(|d| d.id == a.1)),
+            RefKind::Skill => (Tab::Skills, db.skills.iter().position(|d| d.id == a.1)),
+            RefKind::Spell => (Tab::Spells, db.spells.iter().position(|d| d.id == a.1)),
             _ => return,
         };
         let Some(i) = index else { return };

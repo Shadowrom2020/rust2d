@@ -4,6 +4,7 @@ mod combat;
 mod equipment;
 mod inventory_ui;
 mod journal;
+mod skills;
 mod lights;
 mod creator;
 mod patrol;
@@ -181,6 +182,9 @@ pub struct Game {
     runner: ActionRunner,
     /// Darkness and light renderer (created on first use).
     light_pass: Option<render::lighting::LightPass>,
+    skills: skills::Skills,
+    /// Set while a saved game is being loaded (see `enter_map`).
+    resuming: bool,
     loaded: Loaded,
     cache: VecDeque<Map>,
     player: Body,
@@ -227,6 +231,8 @@ impl Game {
         };
         let mut game = Game {
             light_pass: None,
+            skills: Default::default(),
+            resuming: false,
             loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![], tile_lights: vec![] },
             project,
             assets,
@@ -492,7 +498,13 @@ impl Game {
         if !music.is_empty() {
             self.audio.play_music(&music);
         }
-        self.pending_events.push((GameEvent::MapEnter, Source::Map));
+        // Loading a saved game resumes it: the player didn't enter the map, so its "Map enter"
+        // triggers don't run again (their effects are part of the save).
+        if std::mem::take(&mut self.resuming) {
+            self.pending_events.retain(|(e, _)| !matches!(e, GameEvent::MapEnter));
+        } else {
+            self.pending_events.push((GameEvent::MapEnter, Source::Map));
+        }
     }
 
     /// Starts a fade-out; the map switches when the screen is black.
@@ -732,7 +744,8 @@ impl Game {
 
     pub fn update(&mut self, dt: f32) {
         // Esc opens the pause menu (unless a window or dialog uses Esc); it pauses everything.
-        let can_open = !self.inventory_open() && !self.ui.dialog_open() && self.game_over.is_none() && matches!(self.fade, Fade::None);
+        // (While a bolt spell is being aimed, Esc cancels the spell instead.)
+        let can_open = !self.inventory_open() && !self.ui.dialog_open() && self.game_over.is_none() && matches!(self.fade, Fade::None) && !self.aiming();
         if self.on_title() {
             // The start fade-in still plays behind the title screen.
             if let Fade::In { t } = &mut self.fade {
@@ -799,12 +812,15 @@ impl Game {
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
         let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
-        let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open(), input.consumed || shop_key);
-        let others = self.shop_open() || self.journal_open();
+        let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.skills_open(), input.consumed || shop_key);
+        let (k_key, k_mouse) = self.update_skills_ui(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.journal_open(), input.consumed || shop_key || j_key);
+        let (j_key, j_mouse) = (j_key || k_key, j_mouse || k_mouse);
+        let others = self.shop_open() || self.journal_open() || self.skills_open();
         let (inv_key, inv_mouse) = self.update_inventory_ui(allow_windows && !others, input.consumed || shop_key || j_key);
         let (inv_key, inv_mouse) = (inv_key || shop_key || j_key, inv_mouse || shop_mouse || j_mouse);
-        let consumed = input.consumed || inv_key;
-        if !input.mouse_consumed && !inv_mouse && allow_inventory && !self.modal() {
+        let (aim_key, aim_mouse) = self.update_aim(input.consumed || inv_key, input.mouse_consumed || inv_mouse);
+        let consumed = input.consumed || inv_key || aim_key;
+        if !input.mouse_consumed && !inv_mouse && !aim_mouse && allow_inventory && !self.modal() {
             self.handle_mouse();
         }
 
@@ -813,6 +829,9 @@ impl Game {
         self.runner = runner;
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
+        if !frozen && !self.on_title() {
+            self.update_skills(dt);
+        }
         self.update_player(dt, frozen, consumed);
         self.update_entities(dt, frozen);
         self.update_combat(dt, frozen, consumed);
@@ -1047,6 +1066,7 @@ impl Game {
     fn prepare_world(&mut self) {
         self.migrate_equipment();
         self.world.renumber_old_drops();
+        self.init_skills(self.world.play_time == 0.0 && self.world.current_map.is_empty());
         // Games started without the creator (or saved before it existed) get the default name.
         if self.world.player_name.trim().is_empty() {
             self.world.player_name = self.default_player_name();
@@ -1066,6 +1086,13 @@ impl Game {
     fn use_item(&mut self, item: &str) {
         if self.project.db.item(item).is_some_and(|d| d.equip_slot().is_some()) {
             self.equip_item(item);
+            return;
+        }
+        // Scrolls and spell books teach a spell (consumed if the item is consumable).
+        if let Some(spell) = self.project.db.item(item).map(|d| d.teaches.clone()).filter(|s| !s.is_empty()) {
+            if self.learn_spell(&spell) && self.project.db.item(item).is_some_and(|d| d.consumable) {
+                self.world.take_item(item, 1);
+            }
             return;
         }
         // Using the right key on a locked prop opens it.
@@ -1172,7 +1199,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.skills_status(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),
@@ -1244,6 +1272,7 @@ impl Game {
         // Rebuild the map from scratch so entity states from the save apply.
         self.cache.clear();
         self.loaded.map.name.clear();
+        self.resuming = true;
         self.transition(&map, Arrival::Pos(pos));
         self.ui.toast("Game loaded".into());
         Ok(())
@@ -1357,13 +1386,19 @@ impl Game {
         if !self.on_title() {
             self.draw_hud();
             self.draw_clock();
+            self.draw_mana_bar();
             if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
+            } else if self.skills_open() {
+                self.draw_skills_ui();
             } else {
                 self.draw_inventory_ui();
             }
+        }
+        if !self.on_title() {
+            self.draw_aim_cursor();
         }
         self.ui.draw_toasts();
         self.ui.draw_dialog();
@@ -1532,6 +1567,30 @@ impl ActionHost for Game {
             }
             Action::SetTime { hour } => {
                 self.world.hour = hour.rem_euclid(24.0);
+                Step::Continue
+            }
+            Action::GiveSkillPoints { amount } => {
+                self.give_skill_points(*amount);
+                Step::Continue
+            }
+            Action::SetSkill { skill, level } => {
+                self.set_skill_level(skill, *level);
+                Step::Continue
+            }
+            Action::LearnSpell { spell } => {
+                self.learn_spell(spell);
+                Step::Continue
+            }
+            Action::AddMana { amount } => {
+                self.add_mana(*amount);
+                Step::Continue
+            }
+            Action::DamageAround { damage, radius } => {
+                self.damage_around(*damage, *radius);
+                Step::Continue
+            }
+            Action::PlayerLight { radius, seconds } => {
+                self.player_light_for(*radius, *seconds);
                 Step::Continue
             }
             Action::OpenShop { target } => {

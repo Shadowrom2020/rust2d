@@ -120,6 +120,24 @@ impl Game {
     /// Unlocks (consuming the key) if possible. Returns true if the entity is now unlocked.
     pub(super) fn try_unlock(&mut self, i: usize, using: Option<&str>) -> bool {
         let Some(lock) = self.active_lock(i) else { return true };
+        // Lockpicking: a skill of at least the lock's difficulty opens it without the key.
+        let picked = using.is_none() && lock.pick_difficulty > 0 && self.lockpick_level() >= lock.pick_difficulty;
+        if picked {
+            self.ui.toast(if lock.key.is_empty() { "You pick the lock.".into() } else { format!("You pick the lock instead of using the {}.", self.item_name(&lock.key)) });
+            self.audio.play(&self.project.config.sfx.unlock);
+            self.apply_unlock(i, &lock.on_unlock);
+            let uid = self.loaded.entities[i].uid;
+            self.fire(GameEvent::Unlock, Source::Entity(uid));
+            return true;
+        }
+        // Lock without a key that can only be picked.
+        if lock.key.is_empty() && lock.pick_difficulty > 0 {
+            if using.is_none() {
+                let msg = if lock.locked_text.is_empty() { format!("It's locked. A lockpicking skill of {} could open it.", lock.pick_difficulty) } else { lock.locked_text.clone() };
+                self.ui.toast(msg);
+            }
+            return false;
+        }
         // No key item: a door / gate that simply opens when used.
         if lock.key.is_empty() {
             if using.is_some() {
@@ -140,7 +158,8 @@ impl Game {
             None => self.world.item_count(&lock.key) > 0,
         };
         if !has_key {
-            let msg = if lock.locked_text.is_empty() { format!("It's locked. You need the {key_name}.") } else { lock.locked_text.clone() };
+            let hint = if lock.pick_difficulty > 0 && self.skills_on() { format!(" (or lockpicking {})", lock.pick_difficulty) } else { String::new() };
+            let msg = if lock.locked_text.is_empty() { format!("It's locked. You need the {key_name}{hint}.") } else { lock.locked_text.clone() };
             self.ui.toast(msg);
             return false;
         }

@@ -31,10 +31,14 @@ impl Game {
 
     /// The weapon used for attacks: the equipped one, or bare hands (player damage).
     pub(super) fn attack_weapon(&self) -> Weapon {
-        self.current_weapon().unwrap_or(Weapon {
+        let mut w = self.current_weapon().unwrap_or(Weapon {
             reach: UNARMED_REACH,
             ..Weapon::melee(self.combat.damage, UNARMED_COOLDOWN)
-        })
+        });
+        // Combat skills raise the damage: one for melee (and bare hands), one for ranged weapons.
+        let f = if w.ranged.is_some() { self.ranged_damage_factor() } else { self.melee_damage_factor() };
+        w.damage = (w.damage as f32 * f).round() as i32;
+        w
     }
 
     fn armor_pieces(&self) -> impl Iterator<Item = &crate::defs::Armor> {
@@ -45,12 +49,12 @@ impl Game {
     }
 
     pub(super) fn player_defense(&self) -> i32 {
-        self.combat.defense + self.armor_pieces().map(|a| a.defense).sum::<i32>()
+        self.combat.defense + self.armor_pieces().map(|a| a.defense).sum::<i32>() + self.skill_defense()
     }
 
     /// Movement speed factor from armor (heavy armor slows down).
     pub(super) fn speed_factor(&self) -> f32 {
-        (1.0 + self.armor_pieces().map(|a| a.speed).sum::<f32>()).clamp(0.3, 2.0)
+        ((1.0 + self.armor_pieces().map(|a| a.speed).sum::<f32>()) * self.skill_speed_factor()).clamp(0.3, 2.0)
     }
 
     pub(super) fn stats(&self) -> Stats {

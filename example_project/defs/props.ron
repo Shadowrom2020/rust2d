@@ -85,6 +85,7 @@
             unlock_text: "",
             relock: true,
             lock_text: "",
+            pick_difficulty: 0,
         )),
     ),
     (
@@ -190,6 +191,7 @@
             unlock_text: "The gate swings open.",
             relock: true,
             lock_text: "The gate swings shut.",
+            pick_difficulty: 0,
         )),
     ),
     (
@@ -293,6 +295,7 @@
             unlock_text: "",
             relock: true,
             lock_text: "",
+            pick_difficulty: 0,
         )),
     ),
 ]

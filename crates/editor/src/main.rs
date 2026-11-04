@@ -599,6 +599,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "scripts" => Tab::Scripts,
                 "sounds" => Tab::Sounds,
                 "structures" => Tab::Structures,
+                "skills" => Tab::Skills,
+                "spells" => Tab::Spells,
                 _ => Tab::Items,
             };
             ed.db.sel = num(2) as usize;
