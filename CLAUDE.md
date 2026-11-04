@@ -116,8 +116,8 @@ there and test on the copy. Set `RUST2D_MUTE=1`, and for the editor
 `RUST2D_EDITOR_CONFIG=<scratch>/cfg RUST2D_LIBRARY=<scratch>/lib`.
 
 - **Game:** `RUST2D_AUTOPLAY="wait 1; press e; hold right 0.5; rclick 6 3; type Name; shop buy 0; close; status; shot /path/a.png; quit" target/debug/rust2d-game <project> [--no-title] [--map M --spawn S | --pos X,Y]`.
-  Commands: `wait`, `press`, `hold`, `click`/`rclick X Y` (tiles), `clickenemy`, `slot`,
-  `slotdrag`, `shop buy|sell N`, `type`, `close` (window close button), `status`,
+  Commands: `wait`, `press` (`press shift+g` holds Shift), `hold`, `click`/`rclick X Y` (tiles), `clickenemy`, `slot`,
+  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `status`,
   `spawners`, `shot`, `quit`. `status` prints player, creator, quests, shop, map, tile, hp,
   vars, inventory, flags. Load a crafted save with `press f9` from `<project>/saves/quick.ron`
   (a minimal `WorldState` RON) to start in a specific situation.

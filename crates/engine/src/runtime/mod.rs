@@ -359,6 +359,17 @@ impl Game {
     }
 
     fn build_entities(&self, map: &Map) -> Vec<RtEntity> {
+        let mut out = self.build_map_entities(map);
+        // Items the player dropped here earlier.
+        for p in self.world.dropped.get(&map.name).into_iter().flatten() {
+            let mut rt = self.new_rt_entity(EntityKind::Item, &p.item, p.uid, "", vec2(p.x, p.y), Facing::Down, true, 0);
+            rt.count = p.count;
+            out.push(rt);
+        }
+        out
+    }
+
+    fn build_map_entities(&self, map: &Map) -> Vec<RtEntity> {
         map.entities
             .iter()
             .map(|e| {
@@ -625,6 +636,12 @@ impl Game {
         let e = &self.loaded.entities[idx];
         if e.spawned_by.is_some() {
             return; // spawner characters are not saved individually
+        }
+        if e.uid >= crate::state::DROPPED_UID_BASE {
+            // Dropped items live in the world state's list of piles.
+            let (map, uid, count) = (self.loaded.map.name.clone(), e.uid, if e.active { e.count } else { 0 });
+            self.world.set_dropped_count(&map, uid, count);
+            return;
         }
         let state = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten().map(|d| d.state_name(e.state).to_string());
         let st = EntityState {
@@ -1084,7 +1101,12 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            {
+                let ts = self.ts();
+                let here = self.loaded.entities.iter().filter(|e| e.active && e.uid >= crate::state::DROPPED_UID_BASE);
+                here.map(|e| format!("{}x{}@{},{}", e.def, e.count, (e.body.pos.x / ts).floor(), ((e.body.pos.y - 1.0) / ts).floor())).collect::<Vec<_>>()
+            },
             format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_sheet_id().unwrap_or("-")),
             self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),

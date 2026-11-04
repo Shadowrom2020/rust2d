@@ -100,6 +100,7 @@ pub fn key_from_name(name: &str) -> Option<KeyCode> {
         "x" => KeyCode::X,
         "q" => KeyCode::Q,
         "t" => KeyCode::T,
+        "g" => KeyCode::G,
         "c" => KeyCode::C,
         "1" => KeyCode::Key1,
         "2" => KeyCode::Key2,
