@@ -31,6 +31,19 @@ pub struct ProjectConfig {
     /// Character creator shown when a new game starts.
     #[serde(default)]
     pub creation: CharacterCreation,
+    /// Real minutes one in-game day lasts (day / night on outdoor maps).
+    #[serde(default = "default_day_minutes")]
+    pub day_minutes: f32,
+    /// Time of day a new game starts at (hours, 0..24).
+    #[serde(default = "default_start_hour")]
+    pub start_hour: f32,
+}
+
+fn default_day_minutes() -> f32 {
+    24.0
+}
+pub fn default_start_hour() -> f32 {
+    8.0
 }
 
 /// The character creator: the player chooses a name, sex and look before a new game.
@@ -107,6 +120,8 @@ impl ProjectConfig {
             sfx: GameSfx::default(),
             inventory_size: default_inventory_size(),
             creation: CharacterCreation::default(),
+            day_minutes: default_day_minutes(),
+            start_hour: default_start_hour(),
         }
     }
 }

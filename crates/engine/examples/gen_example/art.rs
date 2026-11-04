@@ -95,6 +95,11 @@ impl Canvas {
             return;
         }
         let Some((ax, ay)) = self.abs(x, y) else { return };
+        // Fully transparent (CLEAR) erases: cut-outs like holes, flat bottoms, neck openings.
+        if c.a <= 0.0 {
+            self.img.set_pixel(ax, ay, c);
+            return;
+        }
         if c.a >= 0.999 {
             self.img.set_pixel(ax, ay, c);
             return;
@@ -1278,9 +1283,10 @@ pub fn slime(out: &Path) {
             let (w, h) = (24.0 + squish, 18.0 - squish);
             let cy = 29.0 - h / 2.0;
             c.shade_ellipse(16.0, cy + 2.0, w / 2.0, h / 2.0 + 2.0, pal);
-            // Flat bottom.
+            // Flat bottom: cut the body at row 30 — also what the ellipse drew below the frame
+            // (rows 32-33 belong to the next facing row, which is drawn after this one).
             for x in 0..32 {
-                for y in 30..32 {
+                for y in 30..36 {
                     c.px(x, y, CLEAR);
                 }
             }
@@ -1629,6 +1635,10 @@ pub mod it {
     pub const LEATHER: u32 = 16;
     pub const CHAIN: u32 = 17;
     pub const BRONZE_KEY: u32 = 18;
+    /// Left-hand items: lights and a shield.
+    pub const LANTERN: u32 = 19;
+    pub const TORCH: u32 = 20;
+    pub const SHIELD: u32 = 21;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -1648,11 +1658,11 @@ fn arrow(c: &mut Canvas, x0: i32, y: i32, len: i32, feathers: bool) {
 }
 
 pub fn items(out: &Path) {
-    let mut c = Canvas::new(TS * 19, TS);
+    let mut c = Canvas::new(TS * 22, TS);
     let n = TS as i32;
     let steel = [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6];
     let string = hex(0xe8e0c8);
-    for i in 0..19u32 {
+    for i in 0..22u32 {
         c.at(i * TS, 0);
         match i {
             it::KEY | it::BRONZE_KEY => {
@@ -1796,6 +1806,37 @@ pub fn items(out: &Path) {
                 } else {
                     c.vline(16, 10, 10, hex(pal[1]));
                 }
+            }
+            it::LANTERN => {
+                // Iron frame with a glowing glass body and a ring handle.
+                c.stroke(12.0, 7.0, 16.0, 3.0, 1.2, hex(IRON[2]));
+                c.stroke(16.0, 3.0, 20.0, 7.0, 1.2, hex(IRON[2]));
+                c.shade_box(10, 7, 12, 3, IRON);
+                c.shade_box(11, 10, 10, 13, [0xb07a20, 0xf0b030, 0xffd860, 0xfff4c0]);
+                c.rect(15, 13, 2, 6, hex(0xffffff));
+                c.vline(11, 10, 13, hex(IRON[1]));
+                c.vline(20, 10, 13, hex(IRON[1]));
+                c.vline(15, 10, 3, hex(IRON[1]));
+                c.shade_box(9, 23, 14, 4, IRON);
+            }
+            it::TORCH => {
+                // Wooden handle with a wrapped head and a flame.
+                c.stroke(9.0, 29.0, 18.0, 13.0, 1.6, hex(WOOD[2]));
+                c.stroke(9.5, 29.0, 18.5, 13.0, 0.8, hex(WOOD[1]));
+                c.shade_box(16, 10, 6, 5, [0x3a2a1a, 0x5a4028, 0x7a5a38, 0x9a7a50]);
+                c.shade_disc(20.0, 8.0, 5.5, [0xc62828, 0xef6c00, 0xffa726, 0xffe082]);
+                c.disc(20.5, 9.0, 2.5, hex(0xfff8e1));
+                c.px(21, 2, hex(0xffa726));
+                c.px(18, 3, hex(0xef6c00));
+            }
+            it::SHIELD => {
+                // Round wooden shield: planks, iron rim and boss.
+                c.shade_disc(16.0, 16.0, 13.0, IRON);
+                c.shade_disc(16.0, 16.0, 11.0, WOOD);
+                for x in [11, 16, 21] {
+                    c.vline(x, 6, 21, hex(WOOD[0]));
+                }
+                c.shade_disc(16.0, 16.0, 3.5, [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6]);
             }
             _ => {}
         }

@@ -376,6 +376,13 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         // Asset Library window / add dialog: libwindow · libdialog [KIND] · libpick KIND ID ·
         // libdialogadd · libdialogclose · libedit KIND ID (library mode: edit that asset)
         "libwindow" => ed.open_library_window(),
+        // lighting on|off [HOUR]: the map view's lighting preview
+        "lighting" => {
+            ed.view.lighting = arg(1) != "off";
+            if !arg(2).is_empty() {
+                ed.view.hour = num(2);
+            }
+        }
         // Structures: structure ID (arm it) · stplace X Y (top-left corner) ·
         // stcapture X Y W H ID [noground] · stinfo
         "structure" => ed.arm_structure(arg(1)),

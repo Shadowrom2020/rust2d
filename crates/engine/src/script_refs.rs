@@ -365,6 +365,7 @@ fn reward() {
             armor: None,
             max_stack: 99,
             value: 0,
+        light: None,
         });
         let maps = vec!["village".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("village".to_string(), vec!["gate".to_string()])].into();

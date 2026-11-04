@@ -5,6 +5,17 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 
 ## Unreleased
 
+### Gameplay
+- **Lighting, day and night**: maps are *Always bright* (default), *Outdoor* (day and night with
+  warm dusk and dawn; darker at night) or *Dark* (dungeons, caves: pitch black at 100 %). Light
+  sources — tiles (wall torches, lamps, windows), props per state, characters, items (equipped or
+  on the ground) and single placed entities — light soft circles with their own radius, color,
+  strength and optional flicker. The clock runs while playing (day length and start hour in the
+  project), is saved, shown top right on outdoor maps and available to events (*Set time of day*,
+  *Time of day* condition) and scripts (`hour()`, `is_night()`, `set_hour()`).
+- **Left hand slot**: a fourth equipment slot for a shield (defense) or a light (lantern, torch).
+  Weapons can be *two-handed*; equipping one puts the left-hand item away and vice versa.
+
 ### Editor
 - **Icons, ribbon and grouped menus**: the editor uses the Phosphor icon font. Map mode has a
   tool ribbon under the menu (Edit · Select · Paint · Collision · Objects · Layer · View · Play)
@@ -47,9 +58,17 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   draw.
 
 ### Example project
+- Day and night in the village, forest and wilds: lit windows, the guard's lantern, the shrine's
+  glow. Tilda sells a lantern, torches and a wooden shield; spear, bow and crossbow are
+  two-handed. A pitch-dark old mine in the forest with wall torches, slimes and a treasure room.
 - 18 structures from the terrain tileset (cottages, shop front, stone walls, fences, a walled
   yard, a fenced garden, bedroom / storage / small rooms, pond, bridge, well square, groves,
   rocks). The starter library adds 16 more from the city and dungeon tilesets and its props.
+
+### Fixes
+- Slimes showed a thin line of their own body above them when facing left, right or up (the
+  sprite's bottom spilled into the next row of the sheet). Erasing in the art generator never
+  worked either: key rings, the leather cap's opening and similar cut-outs are now transparent.
 
 ## 0.0.6 — 2026-11-04
 

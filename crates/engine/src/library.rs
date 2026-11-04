@@ -576,6 +576,7 @@ mod tests {
             armor: None,
             max_stack: 99,
             value: 0,
+        light: None,
         };
         let mut bow = item("bow");
         bow.weapon = Some(Weapon::ranged(1, 0.5, Ranged { projectile: SpriteRef::new("items", 1), speed: 100.0, range: 6.0, ammo: "arrows".into() }));
@@ -640,6 +641,7 @@ mod tests {
             lock: None,
             default_state: default_state_name(),
             states: vec![],
+        light: None,
         });
         let mut b = Bundle::collect(&db, &root, 16, "x", &all_assets(&db)).unwrap();
         b.rescale(32).unwrap();

@@ -126,6 +126,12 @@
                     frame: 6,
                 ),
                 solid: true,
+                light: Some((
+                    radius: 5.0,
+                    color: (150, 200, 255),
+                    intensity: 0.85,
+                    flicker: false,
+                )),
             ),
         ],
         hitbox: (20.0, 12.0),

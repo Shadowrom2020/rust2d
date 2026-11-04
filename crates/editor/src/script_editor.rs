@@ -63,6 +63,9 @@ pub const API: &[ApiFn] = api! {
     "player_sex"() "\"male\" or \"female\"";
     "is_female"() "Whether the player character is female";
     "is_male"() "Whether the player character is male";
+    "hour"() "Time of day in hours (0..24, e.g. 13.5 = half past one in the afternoon)";
+    "is_night"() "Whether it is night (dark outdoors)";
+    "set_hour"(hour: Num) "Sets the time of day, e.g. set_hour(22) (queued)";
     "text"(text: Text) "Fills in {player}, {sir|madam} and {variable} placeholders";
     "random"(n: Num) "Random integer from 0 to n-1";
     "say"(text: Text) "Shows a dialog (queued)";

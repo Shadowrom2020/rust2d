@@ -171,7 +171,7 @@ impl Editor {
             }
             std::fs::write(&path, bytes)?;
             if w.kind == WKind::Tileset {
-                self.project.db.tilesets.push(TilesetDef { id: id.clone(), image: rel.clone(), solid: vec![], animations: vec![] });
+                self.project.db.tilesets.push(TilesetDef { id: id.clone(), image: rel.clone(), solid: vec![], animations: vec![], lights: vec![] });
             } else {
                 let mut sheet_id = id.clone();
                 let mut n = 2;
@@ -197,6 +197,7 @@ impl Editor {
                 lock: None,
                 default_state: default_state_name(),
                 states: vec![],
+        light: None,
             }),
             WKind::Item => db.items.push(ItemDef {
                 id: id.clone(),
@@ -209,6 +210,7 @@ impl Editor {
                 armor: None,
                 max_stack: 99,
                 value: 0,
+        light: None,
             }),
             WKind::Character => db.characters.push(CharacterDef {
                 id: id.clone(),
@@ -226,6 +228,7 @@ impl Editor {
                 triggers: vec![],
                 shop: None,
                 loot: vec![],
+        light: None,
             }),
             WKind::Tileset | WKind::Sheet | WKind::Structure => {}
         }

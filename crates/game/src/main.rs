@@ -126,6 +126,9 @@ async fn main() {
             if std::mem::take(&mut a.close) {
                 game.request_close();
             }
+            if let Some(h) = a.hour.take() {
+                game.set_hour(h);
+            }
         }
         if is_quit_requested() {
             game.request_close();
@@ -152,6 +155,8 @@ struct Autoplay {
     mouse_frames: std::collections::VecDeque<rust2d_engine::runtime::input::MouseInject>,
     /// Simulates the window's close button.
     close: bool,
+    /// `settime H`: applied by the main loop.
+    hour: Option<f32>,
 }
 
 impl Autoplay {
@@ -161,7 +166,7 @@ impl Autoplay {
             .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .filter(|c| !c.is_empty())
             .collect();
-        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false }
+        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None }
     }
 
     /// Advances the script; returns false to quit.
@@ -264,6 +269,8 @@ impl Autoplay {
                 }
                 "status" => println!("[autoplay] {} order={}", game.status(), game.order_debug()),
                 "spawners" => println!("[autoplay] spawners: {}", game.spawner_status()),
+                // settime H: jump to a time of day (hours)
+                "settime" => self.hour = arg(1).parse().ok(),
                 "quit" => return false,
                 // close: as if the window's close button was clicked
                 "close" => {

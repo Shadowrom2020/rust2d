@@ -766,6 +766,13 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                         quest_stage_field(ui, &format!("{id}/qs"), quest, stage, refs);
                     }
                 }
+                Cond::TimeBetween { from, to } => {
+                    ui.label("time from");
+                    ui.add(egui::DragValue::new(from).range(0.0..=24.0).speed(0.25).suffix(" h"));
+                    ui.label("to");
+                    ui.add(egui::DragValue::new(to).range(0.0..=24.0).speed(0.25).suffix(" h"))
+                        .on_hover_text("Hours 0–24; e.g. 20 to 6 = at night (wraps around midnight)");
+                }
                 Cond::PlayerSex { sex } => {
                     ui.label("player is");
                     egui::ComboBox::from_id_salt(format!("{id}/sex")).selected_text(sex.label()).show_ui(ui, |ui| {
@@ -914,6 +921,11 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
         Action::SetState { target, state } => {
             target_field(ui, id, target, refs);
             labeled(ui, "state", |ui| suggest(ui, &format!("{id}/state"), state, &refs.states, 100.0));
+        }
+        Action::SetTime { hour } => {
+            labeled(ui, "time", |ui| {
+                ui.add(egui::DragValue::new(hour).range(0.0..=24.0).speed(0.25).suffix(" h")).on_hover_text("Hours 0–24, e.g. 22 = 10 pm");
+            });
         }
         Action::Quest { quest, op, stage } => {
             labeled(ui, "quest", |ui| suggest(ui, &format!("{id}/q"), quest, &refs.quests, 120.0));
@@ -1298,4 +1310,46 @@ pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Texture
     }
     ui.ctx().data_mut(|d| d.insert_temp(key, st));
     changed
+}
+
+/// Edits an optional light: on / off, radius (tiles), color, strength, flicker and presets.
+/// Returns true if it changed.
+pub fn light_ui(ui: &mut Ui, id: &str, l: &mut Option<rust2d_engine::defs::LightSpec>, label: &str) -> bool {
+    use rust2d_engine::defs::LightSpec;
+    let before = l.clone();
+    let mut on = l.is_some();
+    if ui.checkbox(&mut on, label).changed() {
+        *l = on.then(LightSpec::default);
+    }
+    if let Some(spec) = l {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("radius");
+            ui.add(egui::DragValue::new(&mut spec.radius).range(0.5..=24.0).speed(0.1).suffix(" tiles"));
+            ui.label("color");
+            egui::color_picker::color_edit_button_srgb(ui, &mut spec.color);
+            ui.label("strength");
+            let mut pct = (spec.intensity * 100.0).round();
+            if ui.add(egui::DragValue::new(&mut pct).range(0.0..=100.0).suffix(" %")).changed() {
+                spec.intensity = pct / 100.0;
+            }
+            ui.checkbox(&mut spec.flicker, "flickers").on_hover_text("Like a flame (torches, campfires)");
+        });
+        ui.horizontal(|ui| {
+            ui.weak("presets:");
+            let presets = [
+                ("Torch", LightSpec::torch(4.0)),
+                ("Lantern", LightSpec::new(5.5, [255, 220, 170], false)),
+                ("Campfire", LightSpec::torch(6.0)),
+                ("Window", LightSpec { intensity: 0.7, ..LightSpec::new(1.8, [255, 205, 130], false) }),
+                ("Magic", LightSpec { intensity: 0.85, ..LightSpec::new(4.0, [150, 200, 255], false) }),
+            ];
+            for (name, p) in presets {
+                if ui.small_button(name).clicked() {
+                    *spec = p;
+                }
+            }
+        });
+        let _ = id;
+    }
+    *l != before
 }

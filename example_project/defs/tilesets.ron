@@ -34,5 +34,44 @@
                 fps: 3.0,
             ),
         ],
+        lights: [
+            (
+                tile: 19,
+                light: (
+                    radius: 1.8,
+                    color: (255, 205, 130),
+                    intensity: 0.7,
+                    flicker: false,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "dungeon",
+        image: "tilesets/dungeon.png",
+        solid: [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            22,
+        ],
+        animations: [],
+        lights: [
+            (
+                tile: 10,
+                light: (
+                    radius: 4.5,
+                    color: (255, 190, 120),
+                    intensity: 1.0,
+                    flicker: true,
+                ),
+            ),
+        ],
     ),
 ]

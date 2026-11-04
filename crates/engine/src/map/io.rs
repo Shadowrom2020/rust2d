@@ -50,6 +50,7 @@ struct Meta {
     next_uid: u32,
     background: [u8; 3],
     music: String,
+    lighting: crate::map::MapLighting,
 }
 
 impl Default for Meta {
@@ -62,6 +63,7 @@ impl Default for Meta {
             next_uid: 1,
             background: [20, 20, 28],
             music: String::new(),
+            lighting: Default::default(),
         }
     }
 }
@@ -142,6 +144,7 @@ pub fn encode(map: &Map) -> Result<Vec<u8>> {
         next_uid: map.next_uid,
         background: map.background,
         music: map.music.clone(),
+        lighting: map.lighting,
     };
     let core = CoreRef {
         name: &map.name,
@@ -183,6 +186,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map> {
                 next_uid: m.next_uid,
                 background: m.background,
                 music: String::new(),
+                lighting: Default::default(),
             }
         }
         2 => {
@@ -202,6 +206,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map> {
                 next_uid: meta.next_uid,
                 background: meta.background,
                 music: meta.music,
+                lighting: meta.lighting,
             }
         }
         v => bail!("unsupported map format version {v} (newest supported: {FORMAT_VERSION})"),
@@ -247,6 +252,7 @@ mod tests {
         m.layers[1].set(1023, 1023, Tile::new(slot, 5));
         m.set_collision(512, 512, CollisionOverride::Solid);
         m.music = "theme".into();
+        m.lighting = crate::map::MapLighting { mode: crate::map::LightMode::Dark, darkness: 0.9 };
         let uid = m.alloc_uid();
         let mut chest = EntityInstance::new(uid, EntityKind::Prop, "chest", 1.5, 2.0);
         chest.container = Some(crate::defs::ContainerSpec {
@@ -265,6 +271,7 @@ mod tests {
         assert_eq!(back.collision_at(512, 512), CollisionOverride::Solid);
         assert_eq!(back.tilesets, vec!["terrain".to_string()]);
         assert_eq!(back.music, "theme");
+        assert_eq!(back.lighting, m.lighting);
         assert_eq!(back.entities, m.entities);
         assert_eq!(back.next_uid, m.next_uid);
     }

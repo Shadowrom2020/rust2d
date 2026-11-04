@@ -357,6 +357,7 @@ mod tests {
             armor: None,
             max_stack: 99,
             value: 0,
+        light: None,
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),
@@ -368,6 +369,7 @@ mod tests {
             sfx: Default::default(),
             inventory_size: 24,
             creation: Default::default(),
+        day_minutes: 24.0, start_hour: 8.0,
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);
