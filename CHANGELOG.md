@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.0.7 — 2026-11-04
 
 ### Gameplay
 - **Lighting, day and night**: maps are *Always bright* (default), *Outdoor* (day and night with
