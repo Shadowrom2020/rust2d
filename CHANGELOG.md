@@ -20,6 +20,11 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   Bolt spells are aimed with the mouse (magic crosshair; click an enemy to fire, X straight
   ahead, right-click / Esc cancels).
 
+- **Options menu** on the title screen and in the pause menu: fullscreen, zoom, show FPS,
+  master / music / effects volume and dialog text speed (slow, normal, fast, instant), with a
+  reset to defaults. Settings apply immediately and are stored per game in
+  `~/.config/rust2d/<game>/settings.ron` (XDG config folder; `RUST2D_SETTINGS_DIR` overrides it).
+
 ### Fixes
 - Loading a saved game no longer runs the map's *Map enter* triggers again (a load resumes the
   game; the player didn't enter the map).

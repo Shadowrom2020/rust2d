@@ -36,6 +36,8 @@ crates/engine/src/      library: everything shared by game and editor
                         writes ordinary tiles + entities)
   project.rs            ProjectConfig (project.ron), defs loading/saving (DEFS list),
                         TILE_SIZE = 32, CharacterCreation / PlayerLook / SexChoice
+  settings.rs           player options (Options menu): ~/.config/rust2d/<game>/settings.ron,
+                        RUST2D_SETTINGS_DIR overrides the folder (set it to a scratch dir in tests)
   state.rs              WorldState = save game (flags, vars, inventory, quests, shops,
                         player name/sex/look), Sex, expand_text() placeholders
   map/                  Map, tile layers, zones (spawn, portal, trigger, spawner, transition),
@@ -130,12 +132,12 @@ cargo build --release --workspace  # keep release binaries current too (export, 
 ```
 
 Use the session scratchpad for everything temporary: copy `example_project` (minus `saves/`)
-there and test on the copy. Set `RUST2D_MUTE=1`, and for the editor
+there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratch>/settings` (the game's Options menu saves there), and for the editor
 `RUST2D_EDITOR_CONFIG=<scratch>/cfg RUST2D_LIBRARY=<scratch>/lib`.
 
 - **Game:** `RUST2D_AUTOPLAY="wait 1; press e; hold right 0.5; rclick 6 3; type Name; shop buy 0; close; status; shot /path/a.png; quit" target/debug/rust2d-game <project> [--no-title] [--map M --spawn S | --pos X,Y]`.
   Commands: `wait`, `press` (`press shift+g` holds Shift), `hold`, `click`/`rclick X Y` (tiles), `clickenemy`, `slot`,
-  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `settime H`, `skillpoint|learn|cast ID`, `status`,
+  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `settime H`, `skillpoint|learn|cast ID`, `opt ROW prev|next|row` (Options page arrows), `status`,
   `spawners`, `shot`, `quit`. `status` prints player, creator, quests, shop, map, tile, hp,
   vars, inventory, flags. Load a crafted save with `press f9` from `<project>/saves/quick.ron`
   (a minimal `WorldState` RON) to start in a specific situation; loading never fires *Map enter*
