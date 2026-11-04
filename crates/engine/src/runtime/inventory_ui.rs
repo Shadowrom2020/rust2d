@@ -101,12 +101,13 @@ impl Layout {
     }
 }
 
-/// Buttons in the bottom-right corner: inventory (bag), character sheet, skills & magic.
+/// Buttons in the bottom-right corner: inventory (bag), character sheet, skills & magic, map.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HudButton {
     Bag,
     Character,
     Skills,
+    Map,
 }
 
 impl Game {
@@ -117,14 +118,16 @@ impl Game {
         if self.skills_on() {
             out.push(HudButton::Skills);
         }
+        out.push(HudButton::Map);
         out.into_iter().enumerate().map(|(k, b)| (b, Rect::new(sw - 64.0 - k as f32 * 60.0, sh - 64.0, 52.0, 52.0))).collect()
     }
 
-    /// Screen position of a HUD button ("bag", "character", "skills") for automated play-throughs.
+    /// Screen position of a HUD button ("bag", "character", "skills", "map") for automated play-throughs.
     pub fn hud_button_pos(&self, name: &str) -> Option<Vec2> {
         let want = match name {
             "character" => HudButton::Character,
             "skills" => HudButton::Skills,
+            "map" => HudButton::Map,
             _ => HudButton::Bag,
         };
         self.hud_buttons().into_iter().find(|(b, _)| *b == want).map(|(_, r)| r.center())
@@ -167,6 +170,25 @@ impl Game {
                         draw_triangle(vec2(cx, cy), pts[k], pts[(k + 1) % 10], c);
                     }
                     "K"
+                }
+                HudButton::Map => {
+                    // A folded parchment map with a red cross.
+                    let paper = Color::new(0.88, 0.8, 0.6, 1.0);
+                    let fold = Color::new(0.7, 0.6, 0.42, 1.0);
+                    let (x, y) = (r.x + 9.0, r.y + 12.0);
+                    for k in 0..3 {
+                        let fx = x + k as f32 * 11.0;
+                        let (top, bottom) = if k % 2 == 0 { (0.0, 3.0) } else { (3.0, 0.0) };
+                        draw_triangle(vec2(fx, y + top), vec2(fx + 11.0, y + bottom), vec2(fx, y + 26.0 + top), if k == 1 { fold } else { paper });
+                        draw_triangle(vec2(fx + 11.0, y + bottom), vec2(fx + 11.0, y + 26.0 + bottom), vec2(fx, y + 26.0 + top), if k == 1 { fold } else { paper });
+                    }
+                    let brown = Color::new(0.45, 0.3, 0.15, 1.0);
+                    draw_line(x + 4.0, y + 20.0, x + 14.0, y + 12.0, 1.5, brown);
+                    draw_line(x + 14.0, y + 12.0, x + 22.0, y + 16.0, 1.5, brown);
+                    let red = Color::new(0.85, 0.15, 0.1, 1.0);
+                    draw_line(x + 22.0, y + 6.0, x + 28.0, y + 12.0, 2.0, red);
+                    draw_line(x + 28.0, y + 6.0, x + 22.0, y + 12.0, 2.0, red);
+                    "M"
                 }
             };
             draw_text(key, r.x + 40.0, r.y + 48.0, 16.0, LIGHTGRAY);
@@ -566,6 +588,7 @@ impl Game {
                             self.inv.sel = Some((Side::Equip, 0));
                         }
                         HudButton::Skills => self.open_skills(),
+                        HudButton::Map => self.open_world_map(),
                     }
                     return (false, true);
                 }

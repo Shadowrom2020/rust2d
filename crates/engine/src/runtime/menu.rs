@@ -569,7 +569,7 @@ impl Game {
             } else if self.menu.sel >= self.menu.scroll + MAX_ROWS {
                 self.menu.scroll = self.menu.sel + 1 - MAX_ROWS;
             }
-            let wheel = mouse_wheel().1;
+            let wheel = input::wheel();
             if wheel != 0.0 && panel_rect.contains(m) && n > MAX_ROWS {
                 self.menu.scroll = if wheel < 0.0 { (self.menu.scroll + 1).min(n - MAX_ROWS) } else { self.menu.scroll.saturating_sub(1) };
             }

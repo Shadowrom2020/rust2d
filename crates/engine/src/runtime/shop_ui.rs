@@ -362,7 +362,7 @@ impl Game {
         }
 
         // ---- mouse
-        let wheel = mouse_wheel().1;
+        let wheel = input::wheel();
         if wheel != 0.0 {
             for side in [ShopSide::Merchant, ShopSide::Player] {
                 if l.lists[side.idx()].contains(m) {
