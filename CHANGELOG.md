@@ -3,6 +3,13 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Editor
+- **Removing assets from the library asks for confirmation** first. The dialog lists the assets
+  and says up front when other library assets still use them (removal deletes their files and
+  can't be undone).
+
 ## 0.0.6 — 2026-11-04
 
 ### Gameplay

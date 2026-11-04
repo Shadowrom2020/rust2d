@@ -321,6 +321,16 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 ed.lib.selected.insert((k, arg(2).to_string()));
             }
         }
+        // libremove: the "Remove from library" button (opens the confirmation) · libconfirm yes|no
+        "libremove" => ed.lib.confirm_remove = Some(ed.lib.selected.iter().cloned().collect()),
+        "libconfirm" => {
+            if let Some(list) = ed.lib.confirm_remove.take() {
+                if arg(1) == "yes" {
+                    ed.remove_from_library(&list);
+                }
+            }
+            println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+        }
         "libadd" => {
             let sel: Vec<_> = ed.lib.selected.iter().cloned().collect();
             let r = ed.library_to_project(&sel);
