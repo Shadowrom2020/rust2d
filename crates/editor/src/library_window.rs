@@ -14,6 +14,7 @@ use rust2d_engine::refactor::RefKind;
 use crate::app::{Editor, Mode, Pending};
 use crate::database::Tab;
 use crate::files;
+use crate::ui::{self, ph};
 
 /// Newest modification time of the library's definition files (to notice changes made by
 /// another editor process, e.g. the main editor's "Add to library").
@@ -137,36 +138,36 @@ impl Editor {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Save   Ctrl+S").clicked() {
+                    if ui.button(ui::t(ph::FLOPPY_DISK, "Save   Ctrl+S")).clicked() {
                         self.save_all();
                         ui.close_menu();
                     }
-                    if ui.add_enabled(!self.defs_dirty, egui::Button::new("Reload from disk")).on_hover_text("Re-reads the library (save or undo your edits first)").clicked() {
+                    if ui.add_enabled(!self.defs_dirty, egui::Button::new(ui::t(ph::ARROW_CLOCKWISE, "Reload from disk"))).on_hover_text("Re-reads the library (save or undo your edits first)").clicked() {
                         self.reload_library();
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("New asset…").clicked() {
+                    if ui.button(ui::t(ph::SPARKLE, "New asset…")).clicked() {
                         self.wizard = Some(crate::wizard::Wizard::new(&self.project));
                         ui.close_menu();
                     }
-                    if ui.button("Import package…").clicked() {
+                    if ui.button(ui::t(ph::DOWNLOAD_SIMPLE, "Import package…")).clicked() {
                         self.open_file_dialog(files::Purpose::ImportPackage { into_library: true });
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Close window").clicked() {
+                    if ui.button(ui::t(ph::X, "Close window")).clicked() {
                         self.request(Pending::Quit);
                         ui.close_menu();
                     }
                 });
                 ui.separator();
-                ui.selectable_value(&mut self.mode, Mode::Library, "📂 Browse");
-                ui.selectable_value(&mut self.mode, Mode::Database, "📚 Edit");
-                let px_label = if self.px.is_dirty() { "✏ Pixel editor •" } else { "✏ Pixel editor" };
-                ui.selectable_value(&mut self.mode, Mode::Pixel, px_label);
+                ui::tab(ui, self.mode == Mode::Library, ph::SQUARES_FOUR, "Browse").on_hover_text("All library assets: select, import, export, remove").clicked().then(|| self.mode = Mode::Library);
+                ui::tab(ui, self.mode == Mode::Database, ph::PENCIL_SIMPLE, "Edit").on_hover_text("Definitions of the library's assets").clicked().then(|| self.mode = Mode::Database);
+                let px_label = if self.px.is_dirty() { "Pixel editor •" } else { "Pixel editor" };
+                ui::tab(ui, self.mode == Mode::Pixel, ph::IMAGE, px_label).on_hover_text("Draw and edit the library's images").clicked().then(|| self.mode = Mode::Pixel);
                 ui.separator();
-                ui.label(egui::RichText::new("Asset Library").strong());
+                ui.label(egui::RichText::new(ui::t(ph::BOOKS, "Asset Library")).strong());
                 if self.defs_dirty {
                     ui.colored_label(Color32::YELLOW, "unsaved •");
                 }
@@ -174,7 +175,7 @@ impl Editor {
             if self.lib_changed {
                 ui.horizontal(|ui| {
                     ui.colored_label(Color32::YELLOW, "The library was changed in another editor window.");
-                    if ui.button("⟳ Reload (discard my edits)").clicked() {
+                    if ui.button(ui::t(ph::ARROW_CLOCKWISE, "Reload (discard my edits)")).clicked() {
                         self.reload_library();
                     }
                     if ui.button("Keep mine").on_hover_text("Saving then overwrites the other window's changes to the definitions").clicked() {

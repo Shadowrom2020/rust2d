@@ -250,7 +250,7 @@ impl Editor {
             egui::Grid::new("np_setup").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                 ui.label("Starter assets");
                 ui.checkbox(&mut w.starter, "Copy basics from the asset library: grass tileset, hero looks, a few items and props")
-                    .on_hover_text("Everything else can be added later from 📂 Library");
+                    .on_hover_text("Everything else can be added later with Assets \u{E13A} Add from library");
                 ui.end_row();
                 ui.label("First map");
                 ui.horizontal(|ui| {
@@ -277,7 +277,7 @@ impl Editor {
                 ui.colored_label(Color32::LIGHT_RED, e);
             }
             ui.horizontal(|ui| {
-                create = ui.add_enabled(problem.is_none(), egui::Button::new("✔ Create project")).clicked();
+                create = ui.add_enabled(problem.is_none(), egui::Button::new("\u{E182} Create project")).clicked();
                 cancel = ui.button("Cancel").clicked();
             });
         });

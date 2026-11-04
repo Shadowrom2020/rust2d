@@ -15,6 +15,7 @@ use rust2d_engine::refactor::RefKind;
 
 use crate::app::Editor;
 use crate::files::Purpose;
+use crate::ui::{self, ph};
 
 /// Assets the library starts with (built from the example project by `gen_example`).
 pub const STARTER: &[u8] = include_bytes!("../assets/starter.r2dpack");
@@ -147,7 +148,7 @@ impl LibState {
             _ => false,
         };
         if !drawn {
-            let glyph = if a.0 == RefKind::Sound { "♪" } else { "?" };
+            let glyph = if a.0 == RefKind::Sound { "\u{E33C}" } else { "?" };
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(28.0), Color32::GRAY);
         }
     }
@@ -368,7 +369,7 @@ impl Editor {
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let remove = egui::Button::new(egui::RichText::new("🗑 Remove").color(Color32::WHITE)).fill(Color32::from_rgb(150, 40, 40));
+                let remove = egui::Button::new(egui::RichText::new(ui::t(ph::TRASH, "Remove")).color(Color32::WHITE)).fill(Color32::from_rgb(150, 40, 40));
                 if ui.add_enabled(users.is_empty(), remove).clicked() {
                     choice = Some(true);
                 }
@@ -404,23 +405,23 @@ impl Editor {
             let sel: Vec<AssetRef> = self.lib.selected.iter().cloned().collect();
             let any = !sel.is_empty();
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(sel.len() == 1, egui::Button::new("✏ Edit")).on_hover_text("Edit the selected asset (or double-click it)").clicked() {
+                if ui.add_enabled(sel.len() == 1, egui::Button::new(ui::t(ph::PENCIL_SIMPLE, "Edit"))).on_hover_text("Edit the selected asset (or double-click it)").clicked() {
                     edit = sel.first().cloned();
                 }
-                if ui.button("✨ New asset…").on_hover_text("Create a prop, item, character, tileset or sprite sheet in the library (draw it in the pixel editor)").clicked() {
+                if ui.button(ui::t(ph::SPARKLE, "New asset…")).on_hover_text("Create a prop, item, character, tileset, sprite sheet or structure in the library").clicked() {
                     self.wizard = Some(crate::wizard::Wizard::new(&self.project));
                 }
-                if ui.button("🏠 New structure").on_hover_text("A multi-tile structure (house, wall, room…), assembled from tileset stamps").clicked() {
+                if ui.button(ui::t(ph::HOUSE, "New structure")).on_hover_text("A multi-tile structure (house, wall, room…), assembled from tileset stamps").clicked() {
                     new_structure = true;
                 }
                 ui.separator();
-                if ui.button("📥 Import package…").on_hover_text("Adds a .r2dpack file to the library").clicked() {
+                if ui.button(ui::t(ph::DOWNLOAD_SIMPLE, "Import package…")).on_hover_text("Adds a .r2dpack file to the library").clicked() {
                     self.open_file_dialog(Purpose::ImportPackage { into_library: true });
                 }
-                if ui.add_enabled(any, egui::Button::new("📦 Export package…")).on_hover_text("Saves the selected assets and everything they need as a .r2dpack file").clicked() {
+                if ui.add_enabled(any, egui::Button::new(ui::t(ph::PACKAGE, "Export package…"))).on_hover_text("Saves the selected assets and everything they need as a .r2dpack file").clicked() {
                     self.open_file_dialog(Purpose::ExportPackage { from_library: true, assets: sel.clone() });
                 }
-                if ui.add_enabled(any, egui::Button::new("🗑 Remove from library…")).clicked() {
+                if ui.add_enabled(any, egui::Button::new(ui::t(ph::TRASH, "Remove from library…"))).on_hover_text("Deletes the selected assets and their files from the library (asks first)").clicked() {
                     self.lib.confirm_remove = Some(sel.clone());
                 }
             });
@@ -429,12 +430,12 @@ impl Editor {
                     self.lib.filter = None;
                 }
                 for k in KINDS {
-                    if ui.selectable_label(self.lib.filter == Some(k), format!("{}s", kind_label(k))).clicked() {
+                    if ui.selectable_label(self.lib.filter == Some(k), ui::t(ui::kind_icon(k), &format!("{}s", kind_label(k)))).clicked() {
                         self.lib.filter = Some(k);
                     }
                 }
                 ui.separator();
-                ui.label("🔍");
+                ui.label(ph::MAGNIFYING_GLASS);
                 ui.add(egui::TextEdit::singleline(&mut self.lib.search).hint_text("search").desired_width(160.0));
             });
             let db = &self.project.db;
@@ -513,13 +514,13 @@ impl Editor {
                         d.filter = None;
                     }
                     for k in KINDS {
-                        if ui.selectable_label(d.filter == Some(k), format!("{}s", kind_label(k))).clicked() {
+                        if ui.selectable_label(d.filter == Some(k), ui::t(ui::kind_icon(k), &format!("{}s", kind_label(k)))).clicked() {
                             d.filter = Some(k);
                         }
                     }
                     ui.separator();
                 }
-                ui.label("🔍");
+                ui.label(ph::MAGNIFYING_GLASS);
                 ui.add(egui::TextEdit::singleline(&mut d.search).hint_text("search").desired_width(160.0));
             });
             let shown = filtered(&lib.db, d.kind.or(d.filter), &d.search);
@@ -573,7 +574,7 @@ impl Editor {
                 ui.weak("Assets marked 'in project' are skipped if identical; a different one with the same id is added under a new id.");
             }
             ui.horizontal(|ui| {
-                let label = format!("➕ Add {} to project", d.picked.len());
+                let label = ui::t(ph::DOWNLOAD_SIMPLE, &format!("Add {} to project", d.picked.len()));
                 if ui.add_enabled(!d.picked.is_empty(), egui::Button::new(label)).clicked() {
                     add = true;
                 }
@@ -593,10 +594,10 @@ impl Editor {
         }
     }
 
-    /// "📥 Add from library…" button for `kind` (`None`: all kinds).
+    /// "Add from library…" button for `kind` (`None`: all kinds).
     pub fn add_from_library_button(&mut self, ui: &mut egui::Ui, kind: Option<RefKind>) {
         let what = kind.map_or("assets".to_string(), plural);
-        if ui.button("📥 Add from library…").on_hover_text(format!("Choose {what} from the shared asset library to copy into this project")).clicked() {
+        if ui.button(ui::t(ph::DOWNLOAD_SIMPLE, "Add from library…")).on_hover_text(format!("Choose {what} from the shared asset library to copy into this project")).clicked() {
             self.open_add_dialog(kind);
         }
     }
