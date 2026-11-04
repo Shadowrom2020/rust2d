@@ -59,10 +59,14 @@ pub struct Stroke {
 
 pub struct MapDoc {
     pub map: Map,
-    pub dirty: bool,
     pub overview: Overview,
-    undo: Vec<Edit>,
-    redo: Vec<Edit>,
+    /// History entries with an id each (ids are never reused).
+    undo: Vec<(u64, Edit)>,
+    redo: Vec<(u64, Edit)>,
+    next_id: u64,
+    /// History position of the saved file: `Some(id of the newest undo entry)` (`Some(None)`
+    /// = empty history), or `None` when no undo/redo can get back to it.
+    saved: Option<Option<u64>>,
     stroke: Option<Stroke>,
 }
 
@@ -71,7 +75,7 @@ const MAX_HISTORY: usize = 200;
 impl MapDoc {
     pub fn new(map: Map, assets: &Assets) -> Self {
         let overview = Overview::build(&map, assets);
-        MapDoc { map, dirty: false, overview, undo: Vec::new(), redo: Vec::new(), stroke: None }
+        MapDoc { map, overview, undo: Vec::new(), redo: Vec::new(), next_id: 0, saved: Some(None), stroke: None }
     }
 
     pub fn rebuild_overview(&mut self, assets: &Assets) {
@@ -79,19 +83,45 @@ impl MapDoc {
     }
 
     fn push(&mut self, e: Edit) {
-        self.undo.push(e);
+        self.next_id += 1;
+        self.undo.push((self.next_id, e));
         if self.undo.len() > MAX_HISTORY {
             self.undo.remove(0);
+            if self.saved == Some(None) {
+                self.saved = None; // the saved state was before the dropped entry
+            }
         }
         self.redo.clear();
-        self.dirty = true;
+    }
+
+    /// History position right now.
+    fn position(&self) -> Option<u64> {
+        self.undo.last().map(|(id, _)| *id)
+    }
+
+    /// Whether the map differs from the saved file. Undoing back to the saved state (or
+    /// redoing to it) makes it clean again.
+    pub fn is_dirty(&self) -> bool {
+        self.stroke.is_some() || self.saved != Some(self.position())
+    }
+
+    /// The map was written to (or freshly loaded from) disk.
+    pub fn mark_saved(&mut self) {
+        self.saved = Some(self.position());
+    }
+
+    /// The map was changed outside the undo history: only saving makes it clean again.
+    pub fn mark_changed(&mut self) {
+        self.saved = None;
     }
 
     /// Drops undo/redo history (after edits made outside the history, e.g. id renames).
     pub fn clear_history(&mut self) {
         self.end_stroke();
+        let clean = !self.is_dirty();
         self.undo.clear();
         self.redo.clear();
+        self.saved = if clean { Some(None) } else { None };
     }
 
     pub fn can_undo(&self) -> bool {
@@ -202,11 +232,12 @@ impl MapDoc {
             return;
         }
         let now = Instant::now();
-        if let Some(Edit::Objects { after: last_after, tag: last_tag, time, .. }) = self.undo.last_mut() {
-            if *last_tag == tag && now.duration_since(*time).as_secs_f32() < 1.0 && self.redo.is_empty() {
+        let at_saved = self.saved == Some(self.position());
+        if let Some((_, Edit::Objects { after: last_after, tag: last_tag, time, .. })) = self.undo.last_mut() {
+            // Not into the saved entry: undo must still be able to get back to the saved state.
+            if *last_tag == tag && now.duration_since(*time).as_secs_f32() < 1.0 && self.redo.is_empty() && !at_saved {
                 **last_after = after;
                 *time = now;
-                self.dirty = true;
                 return;
             }
         }
@@ -241,22 +272,21 @@ impl MapDoc {
                 self.rebuild_overview(assets);
             }
         }
-        self.dirty = true;
     }
 
     pub fn undo(&mut self, assets: &Assets) {
         self.end_stroke();
-        if let Some(e) = self.undo.pop() {
+        if let Some((id, e)) = self.undo.pop() {
             self.apply(&e, false, assets);
-            self.redo.push(e);
+            self.redo.push((id, e));
         }
     }
 
     pub fn redo(&mut self, assets: &Assets) {
         self.end_stroke();
-        if let Some(e) = self.redo.pop() {
+        if let Some((id, e)) = self.redo.pop() {
             self.apply(&e, true, assets);
-            self.undo.push(e);
+            self.undo.push((id, e));
         }
     }
 }
@@ -282,7 +312,7 @@ mod tests {
         }
         d.paint(0, -1, 3, t, &a); // out of bounds is ignored
         d.end_stroke();
-        assert!(d.dirty && d.can_undo());
+        assert!(d.is_dirty() && d.can_undo());
         assert_eq!(d.map.layers[0].get(39, 3), t);
         d.undo(&a);
         assert_eq!(d.map.layers[0].get(39, 3), Tile::EMPTY);
@@ -340,6 +370,57 @@ mod tests {
         d.record_objects(before, "noop");
         d.redo(&a);
         assert_eq!(d.map.collision[2 * 8 + 2], 1);
+    }
+
+    #[test]
+    fn dirty_follows_the_saved_history_position() {
+        let a = assets();
+        let mut d = MapDoc::new(Map::new("t", 8, 8), &a);
+        assert!(!d.is_dirty());
+        let paint = |d: &mut MapDoc, x| {
+            d.paint(0, x, 0, Tile::new(0, 1), &a);
+            d.end_stroke();
+        };
+        paint(&mut d, 1);
+        assert!(d.is_dirty());
+        d.undo(&a);
+        assert!(!d.is_dirty(), "undo back to the loaded state is clean");
+        d.redo(&a);
+        assert!(d.is_dirty());
+        d.mark_saved();
+        paint(&mut d, 2);
+        d.undo(&a);
+        assert!(!d.is_dirty(), "undo back to the saved state is clean");
+        d.undo(&a);
+        assert!(d.is_dirty(), "undo past the saved state is a change");
+        d.redo(&a);
+        assert!(!d.is_dirty());
+        // A new edit after undoing past the save drops the saved state from the redo list.
+        d.undo(&a);
+        paint(&mut d, 3);
+        d.undo(&a);
+        assert!(d.is_dirty());
+        // Inspector edits merge, but never into the saved entry.
+        let mut d = MapDoc::new(Map::new("t", 8, 8), &a);
+        let uid = d.map.alloc_uid();
+        let before = Objects::of(&d.map);
+        d.map.entities.push(EntityInstance::new(uid, EntityKind::Prop, "chest", 8.0, 15.0));
+        d.record_objects(before, "inspector");
+        d.mark_saved();
+        let before = Objects::of(&d.map);
+        d.map.entities[0].name = "x".into();
+        d.record_objects(before, "inspector");
+        assert!(d.is_dirty());
+        d.undo(&a);
+        assert!(!d.is_dirty() && d.map.entities.len() == 1);
+        // Changes outside the history stay dirty until saved.
+        d.mark_changed();
+        assert!(d.is_dirty());
+        d.clear_history();
+        assert!(d.is_dirty());
+        d.mark_saved();
+        d.clear_history();
+        assert!(!d.is_dirty());
     }
 
     #[test]

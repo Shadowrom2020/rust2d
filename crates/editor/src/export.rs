@@ -41,7 +41,7 @@ impl Editor {
     /// Saves everything, then exports. Returns a summary.
     pub fn run_export(&mut self, name: &str, out: &str, zip: bool) -> Result<String, String> {
         self.save_all();
-        if self.doc.as_ref().is_some_and(|d| d.dirty) || self.defs_dirty {
+        if self.doc.as_ref().is_some_and(|d| d.is_dirty()) || self.defs_dirty {
             return Err("Unsaved changes could not be saved; nothing was exported.".into());
         }
         let Some((bin, debug)) = game_binary() else {
