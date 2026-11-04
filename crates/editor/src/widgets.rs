@@ -6,7 +6,7 @@ use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, Strok
 use rust2d_engine::defs::{ContainerSpec, LockSpec, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::entity::Facing;
-use rust2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, VarOp};
+use rust2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, TriggerOwner, VarOp};
 use rust2d_engine::render::Assets;
 
 /// egui copies of tileset and sprite sheet images.
@@ -484,13 +484,20 @@ pub struct Refs {
     pub characters: Vec<String>,
     /// All prop state names (for "Set prop state" / "Prop state").
     pub states: Vec<String>,
+    /// Named entities on all maps (script targets).
+    pub entity_names: Vec<String>,
+    /// Dialog speakers for the open map: (value, explanation).
+    pub speakers: Vec<(String, String)>,
+    /// Flags and variables used by triggers anywhere in the project.
+    pub all_flags: Vec<String>,
+    pub vars: Vec<String>,
     /// Quest ids with their number of stages.
     pub quests: Vec<String>,
     pub quest_stages: HashMap<String, Vec<String>>,
 }
 
 /// Placeholders understood in dialog / choice texts (and quest texts).
-pub const TEXT_HELP: &str = "Placeholders: {player} = the player's name, {sir|madam} = first word for a male player, second for a female one, {name} = value of variable 'name'.";
+pub const TEXT_HELP: &str = "Placeholders: {player} = the player's name, {sir|madam} = first word for a male player, second for a female one, {name} = value of variable 'name'. In the speaker field {self} is the name of the trigger's owner.";
 
 /// Stage number with the stage's objective text as a dropdown.
 fn quest_stage_field(ui: &mut Ui, id: &str, quest: &str, stage: &mut u32, refs: &Refs) {
@@ -525,6 +532,43 @@ pub fn suggest(ui: &mut Ui, id: &str, value: &mut String, options: &[String], wi
     });
 }
 
+/// Like [`suggest`], with an explanation next to each option in the dropdown.
+pub fn suggest_described(ui: &mut Ui, id: &str, value: &mut String, options: &[(String, String)], width: f32) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 1.0;
+        ui.add(egui::TextEdit::singleline(value).desired_width(width));
+        if !options.is_empty() {
+            ui.push_id(id, |ui| {
+                ui.menu_button("⏷", |ui| {
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for (o, hint) in options {
+                            let text = egui::RichText::new(o.as_str());
+                            let resp = ui.horizontal(|ui| {
+                                let r = ui.selectable_label(o == value, text);
+                                if !hint.is_empty() {
+                                    ui.weak(hint.as_str());
+                                }
+                                r
+                            });
+                            if resp.inner.clicked() {
+                                *value = o.clone();
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                });
+            });
+        }
+    });
+}
+
+/// Speaker field of Dialog / Choice actions: type a name or pick one from the map.
+fn speaker_field(ui: &mut Ui, id: &str, speaker: &mut String, refs: &Refs) {
+    labeled(ui, "speaker", |ui| {
+        suggest_described(ui, &format!("{id}/speaker"), speaker, &refs.speakers, 160.0);
+    });
+}
+
 fn labeled(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {
         ui.label(label);
@@ -532,14 +576,18 @@ fn labeled(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     });
 }
 
-pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &Refs) {
+/// The trigger list of `owner` (a map, zone, character, ...). Only events that reach that
+/// owner are offered; triggers with another event get a warning and a fix.
+pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &Refs, owner: TriggerOwner) {
     let mut remove = None;
     let mut swap = None;
     let n = triggers.len();
     for (i, t) in triggers.iter_mut().enumerate() {
         let id = format!("{salt}/t{i}");
+        let useless = !owner.allows(&t.on);
         let title = format!(
-            "On {}{}  ·  {} cond, {} act{}",
+            "{}On {}{}  ·  {} cond, {} act{}",
+            if useless { "⚠ " } else { "" },
             t.on.label(),
             match &t.on {
                 TriggerOn::UseItem { item } if !item.is_empty() => format!(" [{item}]"),
@@ -554,7 +602,7 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
             ui.horizontal(|ui| {
                 ui.label("On");
                 egui::ComboBox::from_id_salt(format!("{id}/on")).selected_text(t.on.label()).show_ui(ui, |ui| {
-                    for tpl in TriggerOn::templates() {
+                    for tpl in owner.templates() {
                         let same = std::mem::discriminant(&tpl) == std::mem::discriminant(&t.on);
                         if ui.selectable_label(same, tpl.label()).clicked() && !same {
                             t.on = tpl;
@@ -585,6 +633,15 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
                     }
                 });
             });
+            if useless {
+                let fix = owner.replacement(&t.on);
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::YELLOW, format!("'{}' never happens in {}.", t.on.label(), owner.label()));
+                    if ui.button(format!("Use '{}'", fix.label())).clicked() {
+                        t.on = fix;
+                    }
+                });
+            }
             if matches!(t.on, TriggerOn::UseItem { .. }) {
                 ui.weak("(empty item = any item)");
             }
@@ -601,7 +658,7 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
         triggers.swap(a, b);
     }
     ui.menu_button("+ Trigger", |ui| {
-        for tpl in TriggerOn::templates() {
+        for tpl in owner.templates() {
             if ui.button(tpl.label()).clicked() {
                 triggers.push(Trigger::new(tpl));
                 ui.close_menu();
@@ -748,16 +805,12 @@ fn target_field(ui: &mut Ui, id: &str, target: &mut String, refs: &Refs) {
 fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
     match a {
         Action::Dialog { speaker, text } => {
-            labeled(ui, "speaker", |ui| {
-                ui.add(egui::TextEdit::singleline(speaker).desired_width(160.0));
-            });
+            speaker_field(ui, id, speaker, refs);
             ui.add(egui::TextEdit::multiline(text).desired_rows(2).desired_width(f32::INFINITY))
                 .on_hover_text(TEXT_HELP);
         }
         Action::Choice { speaker, text, options, var } => {
-            labeled(ui, "speaker", |ui| {
-                ui.add(egui::TextEdit::singleline(speaker).desired_width(160.0));
-            });
+            speaker_field(ui, id, speaker, refs);
             ui.add(egui::TextEdit::multiline(text).desired_rows(2).desired_width(f32::INFINITY));
             ui.label("Options (one per line):");
             let mut joined = options.join("\n");
@@ -821,6 +874,26 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             if !quest.is_empty() && !refs.quests.contains(quest) {
                 ui.colored_label(Color32::LIGHT_RED, "unknown quest (Database → Quests)");
+            }
+        }
+        Action::Patrol { target, active, points } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.radio_value(active, true, "start");
+                ui.radio_value(active, false, "stop");
+            });
+            if *active {
+                if points.is_empty() {
+                    ui.weak("walks the character's own route (map inspector → Patrol route)");
+                } else {
+                    let list: Vec<String> = points.iter().map(|(x, y)| format!("{x},{y}")).collect();
+                    ui.horizontal(|ui| {
+                        ui.weak(format!("route: {}", list.join(" → ")));
+                        if ui.small_button("use own route").clicked() {
+                            points.clear();
+                        }
+                    });
+                }
             }
         }
         Action::OpenShop { target } => {

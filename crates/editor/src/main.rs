@@ -13,6 +13,7 @@ mod maps;
 mod models;
 mod new_project;
 mod pixel;
+mod script_editor;
 mod wizard;
 mod widgets;
 
@@ -419,6 +420,13 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "wizcreate" => {
             let r = ed.create_from_wizard().map(|d| format!("created {}", d.display()));
             println!("[script] {r:?}");
+        }
+        // routeedit on|off: edit the selected character's patrol route on the map
+        "routeedit" => {
+            ed.route_edit = match (arg(1), ed.sel) {
+                ("on", app::Selection::Entity(uid)) => Some(uid),
+                _ => None,
+            }
         }
         // scriptsel FILE: what clicking a file in Database > Scripts does
         "scriptsel" => {

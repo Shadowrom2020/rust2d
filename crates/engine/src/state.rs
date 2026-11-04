@@ -57,6 +57,25 @@ pub struct EntityState {
     /// Current state of a prop (None in saves from before named states: `frame` is used).
     #[serde(default)]
     pub state: Option<String>,
+    /// Where a patrolling character is on its route.
+    #[serde(default)]
+    pub patrol: Option<PatrolState>,
+}
+
+/// Progress of a patrolling character (saved, so a loaded game continues the route).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PatrolState {
+    /// Waypoint it is heading for.
+    pub index: u32,
+    /// Walking the route backwards (back-and-forth routes).
+    #[serde(default)]
+    pub back: bool,
+    /// Stopped by an action / script.
+    #[serde(default)]
+    pub stopped: bool,
+    /// A route given by an action / script instead of the placed character's own.
+    #[serde(default)]
+    pub route: Option<crate::entity::PatrolRoute>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -334,7 +353,7 @@ mod tests {
         w.set_entity_state(
             "village",
             7,
-            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()) },
+            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None },
         );
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert!(back.flag("a"));

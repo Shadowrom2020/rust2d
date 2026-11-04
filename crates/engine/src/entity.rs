@@ -96,6 +96,9 @@ pub struct EntityInstance {
     /// Overrides the prop definition's key lock.
     #[serde(default)]
     pub lock: Option<crate::defs::LockSpec>,
+    /// Characters: a route the NPC walks along (instead of its definition's behaviour).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patrol: Option<PatrolRoute>,
     /// Characters: sprite sheet ("model") used instead of the definition's ("" = definition's).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sheet: String,
@@ -109,6 +112,68 @@ fn yes() -> bool {
 }
 fn one() -> u32 {
     1
+}
+
+/// How a patrol continues after its last waypoint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PatrolMode {
+    /// Back to the first waypoint and around again.
+    #[default]
+    Loop,
+    /// Turn around and walk the waypoints in reverse.
+    PingPong,
+}
+
+impl PatrolMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            PatrolMode::Loop => "Loop",
+            PatrolMode::PingPong => "Back and forth",
+        }
+    }
+}
+
+/// A patrol route: tile waypoints a character walks between (finding its way around
+/// obstacles), pausing at each one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PatrolRoute {
+    /// Waypoints in tile coordinates.
+    pub points: Vec<(i32, i32)>,
+    #[serde(default)]
+    pub mode: PatrolMode,
+    /// Seconds to wait at each waypoint.
+    #[serde(default = "default_pause")]
+    pub pause: f32,
+    /// Walking speed in pixels per second (0 = the character's speed).
+    #[serde(default)]
+    pub speed: f32,
+}
+
+fn default_pause() -> f32 {
+    1.0
+}
+
+impl Default for PatrolRoute {
+    fn default() -> Self {
+        PatrolRoute { points: Vec::new(), mode: PatrolMode::Loop, pause: default_pause(), speed: 0.0 }
+    }
+}
+
+impl PatrolRoute {
+    /// The waypoint after `idx` (and the new direction for back-and-forth routes).
+    pub fn next(&self, idx: usize, back: bool) -> (usize, bool) {
+        let n = self.points.len();
+        if n < 2 {
+            return (0, false);
+        }
+        match self.mode {
+            PatrolMode::Loop => ((idx + 1) % n, false),
+            PatrolMode::PingPong if back && idx == 0 => (1, false),
+            PatrolMode::PingPong if back => (idx - 1, true),
+            PatrolMode::PingPong if idx + 1 >= n => (n - 2, true),
+            PatrolMode::PingPong => (idx + 1, false),
+        }
+    }
 }
 
 impl EntityInstance {
@@ -130,6 +195,7 @@ impl EntityInstance {
             lock: None,
             shop: None,
             sheet: String::new(),
+            patrol: None,
         }
     }
 
