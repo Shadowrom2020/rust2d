@@ -34,6 +34,8 @@ pub struct LibState {
     pub search: String,
     pub selected: BTreeSet<AssetRef>,
     pub report: Option<String>,
+    /// Assets waiting for the user to confirm their removal (the confirmation dialog is open).
+    pub confirm_remove: Option<Vec<AssetRef>>,
 }
 
 impl LibState {
@@ -210,7 +212,77 @@ impl Editor {
         }
     }
 
+    /// Removes assets from the library right away (after the confirmation dialog).
+    pub fn remove_from_library(&mut self, assets: &[AssetRef]) {
+        let r = match self.lib.lib.as_mut() {
+            Some(lib) => library::remove_assets(lib, assets).map(|_| format!("Removed {} asset(s) from the library", assets.len())),
+            None => Ok(String::new()),
+        };
+        if r.is_ok() {
+            self.lib.selected.clear();
+            self.lib.tex_dirty = true;
+        }
+        self.show_result(r);
+    }
+
+    /// The "Remove from library?" dialog: lists the assets and what still uses them.
+    fn confirm_remove_dialog(&mut self, ctx: &egui::Context) {
+        let Some(list) = self.lib.confirm_remove.clone() else { return };
+        let Some(lib) = &self.lib.lib else {
+            self.lib.confirm_remove = None;
+            return;
+        };
+        // Remaining library assets that depend on the ones to remove (removal would be refused).
+        let mut users: Vec<String> = list
+            .iter()
+            .flat_map(|a| library::dependents(&lib.db, a))
+            .filter(|u| !list.contains(u))
+            .map(|u| format!("{} '{}'", kind_label(u.0), u.1))
+            .collect();
+        users.sort();
+        users.dedup();
+        let mut choice: Option<bool> = None;
+        let modal = egui::Modal::new(egui::Id::new("lib_confirm_remove")).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.heading(format!("Remove {} asset(s) from the library?", list.len()));
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                for a in &list {
+                    ui.label(format!("• {} '{}'", kind_label(a.0), a.1));
+                }
+            });
+            ui.add_space(4.0);
+            if users.is_empty() {
+                ui.label("Their definitions and image / sound files are deleted from the library folder. This can't be undone. Projects that already use them keep their own copies.");
+            } else {
+                ui.colored_label(Color32::LIGHT_RED, format!("Can't remove: still used by {}. Select those too, or remove them first.", users.join(", ")));
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let remove = egui::Button::new(egui::RichText::new("🗑 Remove").color(Color32::WHITE)).fill(Color32::from_rgb(150, 40, 40));
+                if ui.add_enabled(users.is_empty(), remove).clicked() {
+                    choice = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && choice.is_none() {
+            choice = Some(false); // Esc or a click outside cancels
+        }
+        match choice {
+            Some(true) => {
+                self.lib.confirm_remove = None;
+                self.remove_from_library(&list);
+            }
+            Some(false) => self.lib.confirm_remove = None,
+            None => {}
+        }
+    }
+
     pub fn library_ui(&mut self, ctx: &egui::Context) {
+        self.confirm_remove_dialog(ctx);
         self.lib.ensure_loaded();
         self.lib.textures(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -238,16 +310,8 @@ impl Editor {
                 if ui.button("📥 Import package…").on_hover_text("Adds a .r2dpack file to the library").clicked() {
                     self.open_file_dialog(Purpose::ImportPackage { into_library: true });
                 }
-                if ui.add_enabled(any, egui::Button::new("🗑 Remove from library")).clicked() {
-                    let r = match self.lib.lib.as_mut() {
-                        Some(lib) => library::remove_assets(lib, &sel).map(|_| format!("Removed {} asset(s) from the library", sel.len())),
-                        None => Ok(String::new()),
-                    };
-                    if r.is_ok() {
-                        self.lib.selected.clear();
-                        self.lib.tex_dirty = true;
-                    }
-                    self.show_result(r);
+                if ui.add_enabled(any, egui::Button::new("🗑 Remove from library…")).clicked() {
+                    self.lib.confirm_remove = Some(sel.clone());
                 }
                 ui.separator();
                 if ui.button("✨ New asset…").on_hover_text("Create a prop, item, character, tileset or sprite sheet in the project (draw it in the pixel editor)").clicked() {
