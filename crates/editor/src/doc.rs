@@ -46,6 +46,8 @@ pub enum Edit {
     Objects { before: Box<Objects>, after: Box<Objects>, tag: &'static str, time: Instant },
     /// Whole-map replacement (resize, layer add/remove).
     Map { before: Box<Map>, after: Box<Map> },
+    /// Several edits that undo / redo together (placing a structure).
+    Group(Vec<Edit>),
 }
 
 /// Tile changes being accumulated during a mouse drag.
@@ -251,6 +253,34 @@ impl MapDoc {
         self.rebuild_overview(assets);
     }
 
+    /// Places a structure with its top-left corner at tile `(x, y)` as one undo step. Returns
+    /// the uids of the entities it added.
+    pub fn place_structure(&mut self, def: &rust2d_engine::defs::StructureDef, x: i32, y: i32, assets: &Assets) -> Vec<u32> {
+        self.end_stroke();
+        let before = Objects::of(&self.map);
+        let p = def.place(&mut self.map, x, y);
+        let mut group: Vec<Edit> = Vec::new();
+        for (layer, changes) in p.tiles.into_iter().enumerate().filter(|(_, c)| !c.is_empty()) {
+            for &(tx, ty, _, _) in &changes {
+                self.overview.update_tile(&self.map, assets, tx, ty);
+            }
+            group.push(Edit::Tiles { layer, changes });
+        }
+        if !p.collision.is_empty() {
+            group.push(Edit::Collision { changes: p.collision });
+        }
+        let after = Objects::of(&self.map);
+        if after != before {
+            // (Registering tilesets on the map is part of this too: `tilesets` isn't undone,
+            // an unused tileset slot is harmless.)
+            group.push(Edit::Objects { before: Box::new(before), after: Box::new(after), tag: "structure", time: Instant::now() });
+        }
+        if !group.is_empty() {
+            self.push(Edit::Group(group));
+        }
+        p.entities
+    }
+
     // ------------------------------------------------------------ undo / redo
 
     fn apply(&mut self, e: &Edit, forward: bool, assets: &Assets) {
@@ -270,6 +300,13 @@ impl MapDoc {
             Edit::Map { before, after } => {
                 self.map = (if forward { after } else { before }).as_ref().clone();
                 self.rebuild_overview(assets);
+            }
+            Edit::Group(edits) => {
+                if forward {
+                    edits.iter().for_each(|e| self.apply(e, true, assets));
+                } else {
+                    edits.iter().rev().for_each(|e| self.apply(e, false, assets));
+                }
             }
         }
     }
@@ -421,6 +458,36 @@ mod tests {
         d.mark_saved();
         d.clear_history();
         assert!(!d.is_dirty());
+    }
+
+    #[test]
+    fn placing_a_structure_is_one_undo_step() {
+        let a = assets();
+        let mut src = Map::new("s", 4, 4);
+        let slot = src.tileset_slot("terrain");
+        for x in 0..3 {
+            src.layers[0].set(x, 1, Tile::new(slot, 6));
+            src.layers[1].set(x, 0, Tile::new(slot, 9));
+        }
+        src.set_collision(1, 1, rust2d_engine::map::CollisionOverride::Walkable);
+        let uid = src.alloc_uid();
+        src.entities.push(EntityInstance::new(uid, EntityKind::Prop, "barrel", 48.0, 63.0));
+        let def = rust2d_engine::defs::StructureDef::capture(&src, "s", "S", (0, 0, 3, 2), true);
+
+        let mut d = MapDoc::new(Map::new("t", 8, 8), &a);
+        let tree = d.map.tileset_slot("forest");
+        d.map.layers[1].set(3, 3, Tile::new(tree, 2));
+        d.mark_saved();
+        let before = (d.map.layers[0].get(3, 4), d.map.layers[1].get(3, 3), d.map.collision.clone(), d.map.entities.len());
+        let added = d.place_structure(&def, 2, 3, &a);
+        assert_eq!(added.len(), 1);
+        assert!(d.is_dirty() && d.map.layers[1].get(3, 3).parts().is_some_and(|p| p.1 == 9));
+        d.undo(&a);
+        assert_eq!((d.map.layers[0].get(3, 4), d.map.layers[1].get(3, 3), d.map.collision.clone(), d.map.entities.len()), before);
+        assert!(!d.is_dirty());
+        d.redo(&a);
+        assert_eq!(d.map.entities.len(), 1);
+        assert_eq!(d.map.collision_at(3, 4), rust2d_engine::map::CollisionOverride::Walkable);
     }
 
     #[test]

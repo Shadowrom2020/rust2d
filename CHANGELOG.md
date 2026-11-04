@@ -6,9 +6,44 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 ## Unreleased
 
 ### Editor
+- **Structures**: multi-tile assets placed with one click — houses, wall and fence segments,
+  rooms, ponds, groves, a plaza and more. New *Structures* map tool (H) with a categorized
+  palette, a preview that follows the mouse and one undo step per placement. A structure sets
+  tiles on all layers, collision overrides (walkable doors) and places its entities (signs,
+  barrels, chests). *📐 New from map area…* turns a rectangle of the map into a new structure;
+  *Database → Structures* lists them, with a **structure editor**: assemble a structure from
+  tileset stamps (drag-select tiles in a tileset, paint them on the ground / detail / overhead
+  layer), mark cells that clear the map's tile, set collision, place props, resize, undo / redo.
+  *✨ New asset… → Structure* (empty grid or a copy), *🏠 New structure* in the Asset Library
+  window and *➕ New…* in the palette start one. The editor has grouped tools on the left, a
+  layer stack (Overhead / Detail / Ground with descriptions, show / hide and what each holds),
+  zoom, and a tileset with stamp preview or a prop gallery on the right. Ctrl+Z / Ctrl+Y undo
+  and redo in it. Structures live in `defs/structures.ron`, can
+  be added from / to the asset library and exported in packages. Games need nothing new: placing
+  writes ordinary tiles and entities.
+- **Asset Library window**: the library opens in its own window (top bar *📂 Asset Library ↗*,
+  or `rust2d-editor --library`). *Browse* shows all library assets with import, export and
+  remove; *Edit* is the Database editor for library assets; the pixel editor and the new-asset
+  wizard create and change library assets in place. Changes the main editor makes to the library
+  are picked up automatically.
+- **📥 Add from library…** dialogs in the Database tabs, next to the tileset and placement
+  palettes and in the File menu: show the library's tilesets (or props, characters, items, sprite
+  sheets, sounds) as thumbnails, pick one or more and add them with everything they need. The old
+  *Library* mode of the main editor is replaced by these.
 - **Removing assets from the library asks for confirmation** first. The dialog lists the assets
   and says up front when other library assets still use them (removal deletes their files and
   can't be undone).
+- **Pixel editor: Ctrl+C / Ctrl+X / Ctrl+V** copy, cut and paste the selected frame (cut + paste
+  moves a frame). Pasting now makes the frame exactly the copied one (transparent pixels
+  included) instead of drawing the copy over the old content.
+- **Pixel editor: *Select frame* is the default tool** (shortcut S): clicking into the image
+  selects the frame under the cursor instead of drawing; pick the pencil (B) or another tool to
+  draw.
+
+### Example project
+- 18 structures from the terrain tileset (cottages, shop front, stone walls, fences, a walled
+  yard, a fenced garden, bedroom / storage / small rooms, pond, bridge, well square, groves,
+  rocks). The starter library adds 16 more from the city and dungeon tilesets and its props.
 
 ## 0.0.6 — 2026-11-04
 

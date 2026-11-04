@@ -57,6 +57,8 @@ pub enum Drag {
     NewZone { start: (i32, i32) },
     /// Transition tool: exit / arrival area.
     LinkRect { start: (i32, i32) },
+    /// Structures tool: the area of a new structure ("New from map area").
+    Capture { start: (i32, i32) },
 }
 
 fn modifier_ctrl() -> bool {
@@ -326,6 +328,7 @@ impl Editor {
             (KeyCode::N, Tool::Entity),
             (KeyCode::Z, Tool::Zone),
             (KeyCode::T, Tool::Link),
+            (KeyCode::H, Tool::Structure),
         ];
         for (k, t) in tools {
             if is_key_pressed(k) {
@@ -363,6 +366,9 @@ impl Editor {
             self.sel = Selection::None;
             if self.tool == Tool::Entity && !self.place_def.is_empty() {
                 self.disarm();
+            } else if self.tool == Tool::Structure && (!self.place_structure.is_empty() || self.capture.dragging) {
+                self.place_structure.clear();
+                self.capture.dragging = false;
             } else {
                 self.tool = Tool::Select;
             }
@@ -433,6 +439,10 @@ impl Editor {
                 self.sel = Selection::None;
             }
             Tool::Zone | Tool::Select => self.sel = Selection::None,
+            Tool::Structure => {
+                self.place_structure.clear();
+                self.capture.dragging = false;
+            }
             _ => {}
         }
     }
@@ -525,6 +535,14 @@ impl Editor {
                 }
             }
             Tool::Link => self.drag = Some(Drag::LinkRect { start: tile }),
+            Tool::Structure if self.capture.dragging => self.drag = Some(Drag::Capture { start: tile }),
+            Tool::Structure if !self.place_structure.is_empty() => {
+                let origin = self.project.db.structure(&self.place_structure).map(|d| self.structure_origin(d, tile));
+                if let Some(o) = origin {
+                    self.place_structure_at(o);
+                }
+            }
+            Tool::Structure => self.sel = Selection::None,
             Tool::Zone => {
                 if let Some(uid) = self.zone_at(world) {
                     self.sel = Selection::Zone(uid);
@@ -620,6 +638,16 @@ impl Editor {
                         self.sel = stack[i];
                         self.on_map_scroll = true;
                     }
+                }
+            }
+            Some(Drag::Capture { start }) => {
+                let Some(doc) = &self.doc else { return };
+                let (mw, mh) = (doc.map.width as i32, doc.map.height as i32);
+                let (x0, y0, w, h) = rect_of(start, tile);
+                let (x1, y1) = ((x0 + w).min(mw), (y0 + h).min(mh));
+                let (x0, y0) = (x0.max(0), y0.max(0));
+                if x1 > x0 && y1 > y0 {
+                    self.capture_dragged((x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32));
                 }
             }
             Some(Drag::LinkRect { start }) => {
@@ -855,6 +883,12 @@ impl Editor {
                     let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
                     draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, SKYBLUE);
                 }
+                (Some(Drag::Capture { start }), _) => {
+                    let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
+                    draw_rectangle(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, Color::new(0.3, 1.0, 0.5, 0.2));
+                    draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, GREEN);
+                }
+                (None, Tool::Structure) if !self.place_structure.is_empty() => self.draw_structure_ghost((tx, ty)),
                 (Some(Drag::LinkRect { start }), _) => {
                     let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
                     draw_rectangle(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, Color::new(1.0, 0.6, 0.1, 0.25));

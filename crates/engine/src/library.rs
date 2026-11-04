@@ -30,7 +30,7 @@ const PACK_VERSION: u32 = 1;
 pub type AssetRef = (RefKind, String);
 
 /// Asset kinds in dependency order (things later in the list may refer to earlier ones).
-pub const KINDS: [RefKind; 6] = [RefKind::Tileset, RefKind::Sheet, RefKind::Sound, RefKind::Item, RefKind::Prop, RefKind::Character];
+pub const KINDS: [RefKind; 7] = [RefKind::Tileset, RefKind::Sheet, RefKind::Sound, RefKind::Item, RefKind::Prop, RefKind::Character, RefKind::Structure];
 
 pub fn kind_label(k: RefKind) -> &'static str {
     match k {
@@ -41,6 +41,7 @@ pub fn kind_label(k: RefKind) -> &'static str {
         RefKind::Prop => "Prop",
         RefKind::Character => "Character",
         RefKind::Map => "Map",
+        RefKind::Structure => "Structure",
     }
 }
 
@@ -61,6 +62,8 @@ struct Manifest {
     props: Vec<PropDef>,
     #[serde(default)]
     characters: Vec<CharacterDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    structures: Vec<StructureDef>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -105,6 +108,7 @@ pub fn exists(db: &Database, a: &AssetRef) -> bool {
         RefKind::Item => db.item(id).is_some(),
         RefKind::Prop => db.prop(id).is_some(),
         RefKind::Character => db.character(id).is_some(),
+        RefKind::Structure => db.structure(id).is_some(),
         RefKind::Map => false,
     }
 }
@@ -115,6 +119,7 @@ pub fn deps(db: &Database, a: &AssetRef) -> Vec<AssetRef> {
         RefKind::Item => db.item(&a.1).map(refactor::refs_of_item),
         RefKind::Prop => db.prop(&a.1).map(refactor::refs_of_prop),
         RefKind::Character => db.character(&a.1).map(refactor::refs_of_character),
+        RefKind::Structure => db.structure(&a.1).map(refactor::refs_of_structure),
         _ => None,
     };
     refs.unwrap_or_default().into_iter().filter(|r| r.0 != RefKind::Map).collect()
@@ -129,6 +134,7 @@ pub fn all_assets(db: &Database) -> Vec<AssetRef> {
     out.extend(db.items.iter().map(|d| (RefKind::Item, d.id.clone())));
     out.extend(db.props.iter().map(|d| (RefKind::Prop, d.id.clone())));
     out.extend(db.characters.iter().map(|d| (RefKind::Character, d.id.clone())));
+    out.extend(db.structures.iter().map(|d| (RefKind::Structure, d.id.clone())));
     out
 }
 
@@ -169,6 +175,7 @@ impl Bundle {
             items: db.items.iter().filter(|d| has(RefKind::Item, &d.id)).cloned().collect(),
             props: db.props.iter().filter(|d| has(RefKind::Prop, &d.id)).cloned().collect(),
             characters: db.characters.iter().filter(|d| has(RefKind::Character, &d.id)).cloned().collect(),
+            structures: db.structures.iter().filter(|d| has(RefKind::Structure, &d.id)).cloned().collect(),
             quests: Vec::new(),
         };
         let mut files = BTreeMap::new();
@@ -199,6 +206,7 @@ impl Bundle {
             items: self.db.items.clone(),
             props: self.db.props.clone(),
             characters: self.db.characters.clone(),
+            structures: self.db.structures.clone(),
         };
         let cfg = ron::ser::PrettyConfig::default().struct_names(false);
         let manifest = ron::ser::to_string_pretty(&m, cfg)?;
@@ -237,7 +245,7 @@ impl Bundle {
             f.read_to_end(&mut data)?;
             files.insert(rel, data);
         }
-        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters };
+        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters, structures: m.structures };
         let b = Bundle { name: m.name, tile_size: m.tile_size, db, files };
         for rel in b.db.tilesets.iter().map(|d| &d.image).chain(b.db.sheets.iter().map(|d| &d.image)).chain(b.db.sounds.iter().map(|d| &d.file)) {
             if !rel.is_empty() && !b.files.contains_key(rel) {
@@ -278,6 +286,10 @@ impl Bundle {
         for d in &mut self.db.props {
             d.hitbox = [d.hitbox[0] * f, d.hitbox[1] * f];
         }
+        for e in self.db.structures.iter_mut().flat_map(|d| d.entities.iter_mut()) {
+            e.x *= f;
+            e.y *= f;
+        }
         for d in &mut self.db.characters {
             d.hitbox = [d.hitbox[0] * f, d.hitbox[1] * f];
             d.speed *= f;
@@ -301,6 +313,7 @@ impl Bundle {
             RefKind::Item => self.db.items.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Prop => self.db.props.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Character => self.db.characters.iter_mut().for_each(|d| set(&mut d.id)),
+            RefKind::Structure => self.db.structures.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Map => {}
         }
         let mut cfg = ProjectConfig::new("");
@@ -317,6 +330,7 @@ impl Bundle {
             RefKind::Item => db.item(id) == self.db.item(id),
             RefKind::Prop => db.prop(id) == self.db.prop(id),
             RefKind::Character => db.character(id) == self.db.character(id),
+            RefKind::Structure => db.structure(id) == self.db.structure(id),
             RefKind::Map => true,
         }
     }
@@ -331,6 +345,7 @@ impl Bundle {
         self.db.items.retain(|d| new(RefKind::Item, &d.id));
         self.db.props.retain(|d| new(RefKind::Prop, &d.id));
         self.db.characters.retain(|d| new(RefKind::Character, &d.id));
+        self.db.structures.retain(|d| new(RefKind::Structure, &d.id));
         let used = files_of(&self.db);
         self.files.retain(|rel, _| used.contains(rel));
         self.merge_into(db, root)
@@ -420,6 +435,7 @@ impl Bundle {
                 RefKind::Item => db.items.extend(self.db.item(id).cloned()),
                 RefKind::Prop => db.props.extend(self.db.prop(id).cloned()),
                 RefKind::Character => db.characters.extend(self.db.character(id).cloned()),
+                RefKind::Structure => db.structures.extend(self.db.structure(id).cloned()),
                 RefKind::Map => {}
             }
             report.added.push(a);
@@ -447,6 +463,7 @@ pub fn remove_assets(project: &mut Project, assets: &[AssetRef]) -> Result<()> {
     db.items.retain(|d| keep(RefKind::Item, &d.id));
     db.props.retain(|d| keep(RefKind::Prop, &d.id));
     db.characters.retain(|d| keep(RefKind::Character, &d.id));
+    db.structures.retain(|d| keep(RefKind::Structure, &d.id));
     let files_after = files_of(&project.db);
     for f in files_before.difference(&files_after) {
         if safe_rel(f) {

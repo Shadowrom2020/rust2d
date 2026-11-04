@@ -17,6 +17,8 @@ pub enum WKind {
     Character,
     Tileset,
     Sheet,
+    /// Multi-tile structure (assembled from tileset stamps in the structure editor).
+    Structure,
 }
 
 impl WKind {
@@ -27,6 +29,7 @@ impl WKind {
             "character" => WKind::Character,
             "tileset" => WKind::Tileset,
             "sheet" => WKind::Sheet,
+            "structure" => WKind::Structure,
             _ => return None,
         })
     }
@@ -57,6 +60,9 @@ pub struct Wizard {
     /// Sheet (or tileset) to copy / reuse, and the frame to use.
     pub other: String,
     pub other_frame: u32,
+    /// Structures: palette category, and an existing structure to copy ("" = start empty).
+    pub category: String,
+    pub copy_of: String,
     pub error: Option<String>,
 }
 
@@ -73,6 +79,8 @@ impl Wizard {
             grid: (4, 4),
             other: project.db.sheets.first().map(|s| s.id.clone()).unwrap_or_default(),
             other_frame: 0,
+            category: String::new(),
+            copy_of: String::new(),
             error: None,
         }
     }
@@ -110,9 +118,26 @@ impl Editor {
             WKind::Character => db.character(&id).is_some(),
             WKind::Tileset => db.tileset(&id).is_some(),
             WKind::Sheet => db.sheet(&id).is_some(),
+            WKind::Structure => db.structure(&id).is_some(),
         };
         if taken {
             bail!("The id '{id}' is already used");
+        }
+        if w.kind == WKind::Structure {
+            // No image: an empty grid (or a copy) to fill in the structure editor.
+            let mut d = match db.structure(&w.copy_of) {
+                Some(src) => src.clone(),
+                None => rust2d_engine::defs::StructureDef { w: w.cells.0.max(1), h: w.cells.1.max(1), ..Default::default() },
+            };
+            d.id = id.clone();
+            d.name = name;
+            d.category = w.category.trim().to_string();
+            self.project.db.structures.push(d);
+            self.defs_dirty = true;
+            self.db.tab = crate::database::Tab::Structures;
+            self.db.sel = self.project.db.structures.len() - 1;
+            self.mode = Mode::Database;
+            return Ok(format!("Created structure '{id}' — pick tiles from a tileset on the right and paint them on the grid, then save"));
         }
         // The image: a new one (blank or copied) or a frame of an existing sheet.
         let mut new_image: Option<(String, (u32, u32), Layout)> = None;
@@ -127,7 +152,7 @@ impl Editor {
                 WKind::Item => ("sprites", (ts, ts), (ts, ts), Layout::Plain),
                 WKind::Character => ("sprites", w.frame, (w.frame.0 * 4, w.frame.1 * 4), Layout::Character),
                 WKind::Sheet => ("sprites", w.frame, (w.frame.0 * w.grid.0, w.frame.1 * w.grid.1), Layout::Plain),
-                WKind::Tileset => ("tilesets", (ts, ts), (ts * w.grid.0, ts * w.grid.1), Layout::Plain),
+                WKind::Tileset | WKind::Structure => ("tilesets", (ts, ts), (ts * w.grid.0, ts * w.grid.1), Layout::Plain),
             };
             let rel = free_path(&self.project, dir, &id);
             let (bytes, frame) = if w.source == Source::CopyOf {
@@ -202,7 +227,7 @@ impl Editor {
                 shop: None,
                 loot: vec![],
             }),
-            WKind::Tileset | WKind::Sheet => {}
+            WKind::Tileset | WKind::Sheet | WKind::Structure => {}
         }
         self.defs_dirty = true;
         self.reload_assets();
@@ -226,10 +251,70 @@ impl Editor {
         let ts = rust2d_engine::project::TILE_SIZE;
         egui::Window::new("New asset").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                for (k, l) in [(WKind::Prop, "Prop"), (WKind::Item, "Item"), (WKind::Character, "Character"), (WKind::Tileset, "Tileset"), (WKind::Sheet, "Sprite sheet")] {
-                    ui.selectable_value(&mut w.kind, k, l);
+                for (k, l) in [(WKind::Prop, "Prop"), (WKind::Item, "Item"), (WKind::Character, "Character"), (WKind::Tileset, "Tileset"), (WKind::Sheet, "Sprite sheet"), (WKind::Structure, "Structure")] {
+                    if ui.selectable_value(&mut w.kind, k, l).clicked() && k == WKind::Structure && w.cells == (1, 1) {
+                        w.cells = (6, 5);
+                    }
                 }
             });
+            if w.kind == WKind::Structure {
+                egui::Grid::new("wiz_st").num_columns(2).show(ui, |ui| {
+                    ui.label("Id");
+                    ui.add(egui::TextEdit::singleline(&mut w.id).hint_text("e.g. stone_house"));
+                    ui.end_row();
+                    ui.label("Name");
+                    ui.add(egui::TextEdit::singleline(&mut w.name).hint_text("shown in the palette"));
+                    ui.end_row();
+                    ui.label("Category");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut w.category).hint_text("e.g. Buildings").desired_width(140.0));
+                        let mut cats: Vec<String> = self.project.db.structures.iter().map(|d| d.category.clone()).filter(|c| !c.is_empty()).collect();
+                        cats.sort();
+                        cats.dedup();
+                        egui::ComboBox::from_id_salt("wiz_cat").selected_text("⏷").width(30.0).show_ui(ui, |ui| {
+                            for c in cats {
+                                ui.selectable_value(&mut w.category, c.clone(), c);
+                            }
+                        });
+                    });
+                    ui.end_row();
+                    ui.label("Start");
+                    ui.vertical(|ui| {
+                        let empty = w.copy_of.is_empty();
+                        if ui.radio(empty, "Empty grid").clicked() {
+                            w.copy_of.clear();
+                        }
+                        if ui.radio(!empty, "Copy of an existing structure").clicked() && empty {
+                            w.copy_of = self.project.db.structures.first().map(|d| d.id.clone()).unwrap_or_default();
+                        }
+                    });
+                    ui.end_row();
+                    if w.copy_of.is_empty() {
+                        ui.label("Size (tiles)");
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut w.cells.0).range(1..=64));
+                            ui.label("×");
+                            ui.add(egui::DragValue::new(&mut w.cells.1).range(1..=64));
+                        });
+                    } else {
+                        ui.label("Structure");
+                        egui::ComboBox::from_id_salt("wiz_copy").selected_text(&w.copy_of).show_ui(ui, |ui| {
+                            for d in &self.project.db.structures {
+                                ui.selectable_value(&mut w.copy_of, d.id.clone(), format!("{} ({})", d.name, d.id));
+                            }
+                        });
+                    }
+                    ui.end_row();
+                });
+                ui.weak("The structure editor opens next: pick tile stamps from a tileset and paint them on the grid.");
+                if let Some(e) = &w.error {
+                    ui.colored_label(egui::Color32::LIGHT_RED, e);
+                }
+                if ui.button("Create").clicked() {
+                    create = true;
+                }
+                return;
+            }
             if matches!(w.kind, WKind::Tileset | WKind::Sheet) && w.source == Source::Existing {
                 w.source = Source::Blank;
             }

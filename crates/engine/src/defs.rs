@@ -642,6 +642,37 @@ pub struct Database {
     pub characters: Vec<CharacterDef>,
     pub sounds: Vec<SoundDef>,
     pub quests: Vec<crate::quest::QuestDef>,
+    /// Multi-tile assets for the editor (houses, walls, rooms…); the game doesn't use them.
+    pub structures: Vec<StructureDef>,
+}
+
+/// A multi-tile asset ("structure"): tiles on several map layers, collision overrides and
+/// entities that the editor places on a map in one click (a house, a wall segment, a room…).
+/// Placing it writes ordinary tiles and entities, so the game never needs it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StructureDef {
+    pub id: String,
+    pub name: String,
+    /// Group in the editor's palette ("Buildings", "Walls", "Rooms", "Nature", …).
+    #[serde(default)]
+    pub category: String,
+    /// Size in tiles.
+    pub w: u32,
+    pub h: u32,
+    /// Tilesets the tiles come from; a tile's slot indexes into this list.
+    #[serde(default)]
+    pub tilesets: Vec<String>,
+    /// Tiles per map layer (0 = ground, 1 = detail, 2 = overhead, …), row by row (`w × h`),
+    /// encoded like map tiles: 0 = keep the map's tile, `StructureDef::CLEAR` = empty it.
+    #[serde(default)]
+    pub layers: Vec<Vec<u32>>,
+    /// Collision override per tile (`CollisionOverride` as a byte; 0 = keep the map's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collision: Vec<u8>,
+    /// Entities placed with it (doors, chests, signs…); positions are relative to the
+    /// structure's top-left corner (uids are assigned when placing).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<crate::entity::EntityInstance>,
 }
 
 impl Database {
@@ -665,6 +696,9 @@ impl Database {
     }
     pub fn sound(&self, id: &str) -> Option<&SoundDef> {
         self.sounds.iter().find(|d| d.id == id)
+    }
+    pub fn structure(&self, id: &str) -> Option<&StructureDef> {
+        self.structures.iter().find(|d| d.id == id)
     }
 
     /// Ids of all definitions of a kind (for editor dropdowns).

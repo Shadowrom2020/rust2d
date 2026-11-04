@@ -19,6 +19,7 @@ pub mod runtime;
 pub mod script;
 pub mod script_refs;
 pub mod state;
+pub mod structure;
 
 pub use macroquad;
 

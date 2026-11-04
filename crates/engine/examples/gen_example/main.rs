@@ -15,6 +15,7 @@ use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
 use rust2d_engine::state::Sex;
 
 mod art;
+mod structures;
 use art::*;
 
 // ------------------------------------------------------------------ sounds
@@ -873,6 +874,7 @@ fn database() -> Database {
     hero.max_hp = 12; // 6 hearts
     hero.damage = 1;
     let mut db = Database {
+        structures: structures::example_structures(),
         tilesets: vec![TilesetDef {
             id: "terrain".into(),
             image: "tilesets/terrain.png".into(),
@@ -1267,6 +1269,7 @@ fn write_starter_pack(project: &Project) {
     b.db.sheets.extend(extra.db.sheets.into_iter().filter(|d| !sheets.contains(&d.id)));
     b.db.props.extend(extra.db.props);
     b.db.characters.extend(extra.db.characters.into_iter().filter(|d| !chars.contains(&d.id)));
+    b.db.structures.extend(structures::library_structures());
     for (path, bytes) in extra.files {
         b.files.entry(path).or_insert(bytes);
     }

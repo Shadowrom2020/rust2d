@@ -30,13 +30,11 @@ impl Tile {
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
-    /// `(tileset_slot, tile_index)`, or `None` for the empty tile.
+    /// `(tileset_slot, tile_index)`, or `None` for the empty tile (and for values without a
+    /// tileset slot, which only bad data contains).
     pub fn parts(self) -> Option<(usize, u32)> {
-        if self.0 == 0 {
-            None
-        } else {
-            Some((((self.0 >> Self::INDEX_BITS) - 1) as usize, self.0 & Self::INDEX_MASK))
-        }
+        let slot = self.0 >> Self::INDEX_BITS;
+        (slot > 0).then(|| ((slot - 1) as usize, self.0 & Self::INDEX_MASK))
     }
 }
 
