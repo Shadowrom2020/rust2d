@@ -52,6 +52,9 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
 
 ### Gameplay
+- **Hide the interface**: H hides / shows the HUD (status frame, clock, quick bar, buttons);
+  dialogs and windows the player opens still show. Scripts: `hide_ui()`, `show_ui()`;
+  triggers: the new action *Show / hide UI* (e.g. for cut-scenes). Not saved.
 - **Status frame** (HUD, top left): a framed panel with a small portrait of the hero, the hero's
   name, the hearts, the mana bar, the defense and the ammo of an equipped ranged weapon. The
   weapon box in the bottom-left corner is gone (the held weapon is drawn on the hero).

@@ -140,8 +140,14 @@ impl Game {
                     // Head and shoulders with a bag at the side: character, inventory, skills.
                     let c = Color::new(0.85, 0.8, 0.6, 1.0);
                     draw_circle(r.x + 22.0, r.y + 18.0, 8.0, c);
-                    draw_circle(r.x + 22.0, r.y + 42.0, 15.0, c);
-                    draw_rectangle(r.x + 4.0, r.y + 42.0, 44.0, 10.0, Color::new(0.06, 0.06, 0.12, 1.0));
+                    // Shoulders: the upper half of a disc, ending at the button's bottom edge.
+                    let (cx, cy, rad) = (r.x + 22.0, r.y + 46.0, 15.0);
+                    let n = 16;
+                    for k in 0..n {
+                        let a0 = std::f32::consts::PI * (1.0 + k as f32 / n as f32);
+                        let a1 = std::f32::consts::PI * (1.0 + (k + 1) as f32 / n as f32);
+                        draw_triangle(vec2(cx, cy), vec2(cx + a0.cos() * rad, cy + a0.sin() * rad), vec2(cx + a1.cos() * rad, cy + a1.sin() * rad), c);
+                    }
                     let bag = Color::new(0.65, 0.45, 0.25, 1.0);
                     draw_circle(r.x + 38.0, r.y + 30.0, 7.0, bag);
                     draw_rectangle(r.x + 34.5, r.y + 20.0, 7.0, 5.0, bag);
@@ -585,7 +591,8 @@ impl Game {
         let m = input::mouse_pos();
         let (click, rclick) = (input::mouse_pressed(MouseButton::Left), input::mouse_pressed(MouseButton::Right));
         if !self.inv.is_open() {
-            if click {
+            // A hidden HUD: its buttons and the quick bar can't be clicked (keys still work).
+            if click && !self.ui_hidden {
                 if let Some((b, _)) = self.hud_buttons().into_iter().find(|(_, r)| r.contains(m)) {
                     match b {
                         HudButton::Window => {
@@ -604,7 +611,7 @@ impl Game {
                     return (true, false);
                 }
             }
-            if click || rclick {
+            if (click || rclick) && !self.ui_hidden {
                 if let Some(k) = quick_rects().iter().position(|r| r.contains(m)) {
                     self.use_quick(k);
                     return (false, true);
@@ -760,11 +767,11 @@ impl Game {
 
     pub(super) fn draw_inventory_ui(&mut self) {
         let m = input::mouse_pos();
-        if !self.ui.dialog_open() || self.inv.is_open() {
+        if (!self.ui.dialog_open() && !self.ui_hidden) || self.inv.is_open() {
             self.draw_quickbar();
         }
         if !self.inv.is_open() {
-            if !self.ui.dialog_open() && !self.skills_open() {
+            if !self.ui.dialog_open() && !self.skills_open() && !self.ui_hidden {
                 self.draw_hud_buttons();
             }
             return;

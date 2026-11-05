@@ -313,6 +313,9 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
+    // The HUD (status frame, clock, quick bar, buttons), e.g. for cut-scenes.
+    engine.register_fn("hide_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: false })));
+    engine.register_fn("show_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: true })));
     engine.register_fn("set_state", with!(ctx, |c, t: &str, s: &str| c.actions.push(Action::SetState { target: t.into(), state: s.into() })));
     engine.register_fn("move_by", with!(ctx, |c, t: &str, dx: i64, dy: i64| c.actions.push(Action::Move {
         target: t.into(),

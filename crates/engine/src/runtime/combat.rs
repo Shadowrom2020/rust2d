@@ -116,6 +116,7 @@ impl Game {
     /// Starts over with a fresh world at the project's start map / spawn.
     pub(super) fn new_game(&mut self) {
         self.reset_world();
+        self.ui_hidden = false;
         let (map, spawn) = (self.project.config.start_map.clone(), self.project.config.start_spawn.clone());
         self.transition(&map, Arrival::Spawn(spawn));
     }

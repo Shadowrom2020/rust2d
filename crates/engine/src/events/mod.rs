@@ -430,6 +430,9 @@ pub enum Action {
     GiveItemTo { target: TargetName, item: String, count: u32 },
     /// Takes items from what a character carries.
     TakeItemFrom { target: TargetName, item: String, count: u32 },
+    /// Hides or shows the game's HUD (status frame, clock, quick bar, buttons), e.g. for a
+    /// cut-scene; dialogs and windows the player opens still show. The player toggles it with H.
+    SetUiVisible { visible: bool },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -502,6 +505,7 @@ impl Action {
             Action::Unequip { .. } => "Unequip slot",
             Action::GiveItemTo { .. } => "Give item to character",
             Action::TakeItemFrom { .. } => "Take item from character",
+            Action::SetUiVisible { .. } => "Show / hide UI",
         }
     }
 
@@ -548,6 +552,7 @@ impl Action {
             Action::Unequip { target: "self".into(), slot: crate::defs::EquipSlot::Weapon },
             Action::GiveItemTo { target: "self".into(), item: s(), count: 1 },
             Action::TakeItemFrom { target: "self".into(), item: s(), count: 1 },
+            Action::SetUiVisible { visible: false },
         ]
     }
 }
