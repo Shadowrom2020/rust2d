@@ -15,6 +15,7 @@ use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
 use rust2d_engine::skills::{SkillDef, SpellDef};
 
 mod art;
+mod music;
 mod structures;
 use art::*;
 
@@ -73,26 +74,9 @@ fn midi(n: i32) -> f32 {
     440.0 * 2f32.powf((n - 69) as f32 / 12.0)
 }
 
-/// A looping tune: melody (square) over a bass line (triangle).
-fn song(melody: &[i32], bass: &[i32], step: f32) -> Vec<f32> {
-    let len = (melody.len() as f32 * step * RATE as f32) as usize;
-    let mut out = vec![0.0; len];
-    let at = |i: usize| (i as f32 * step * RATE as f32) as usize;
-    for (i, &n) in melody.iter().enumerate() {
-        if n > 0 {
-            mix(&mut out, &tone(midi(n), midi(n), step * 0.95, Wave::Square, 0.18, 3.0), at(i));
-        }
-    }
-    let per = melody.len() / bass.len().max(1);
-    for (i, &n) in bass.iter().enumerate() {
-        mix(&mut out, &tone(midi(n), midi(n), step * per as f32 * 0.98, Wave::Triangle, 0.35, 0.8), at(i * per));
-    }
-    out
-}
-
 type SoundFn = fn() -> Vec<f32>;
 
-const SOUNDS: [(&str, SoundFn); 14] = [
+const SOUNDS: [(&str, SoundFn); 12] = [
     // A bright, bell-like arpeggio for magic (the forest shrine).
     ("chime", || {
         let mut out = vec![0.0; (1.6 * RATE as f32) as usize];
@@ -115,14 +99,6 @@ const SOUNDS: [(&str, SoundFn); 14] = [
     ("fireball", || tone(500.0, 1600.0, 0.22, Wave::Noise, 0.35, 7.0)),
     ("explosion", || concat(&[tone(2000.0, 200.0, 0.12, Wave::Noise, 0.55, 6.0), tone(400.0, 40.0, 0.5, Wave::Noise, 0.6, 3.0)])),
     ("door", || concat(&[tone(150.0, 110.0, 0.12, Wave::Triangle, 0.6, 8.0), tone(200.0, 140.0, 0.15, Wave::Triangle, 0.5, 8.0)])),
-    ("music_village", || {
-        let m = [72, 76, 79, 76, 77, 76, 74, 0, 71, 74, 77, 74, 76, 74, 72, 0, 72, 76, 79, 84, 81, 79, 77, 76, 74, 77, 76, 74, 72, 0, 0, 0];
-        song(&m, &[48, 43, 41, 43, 48, 45, 43, 48], 0.25)
-    }),
-    ("music_forest", || {
-        let m = [69, 0, 72, 74, 76, 0, 74, 72, 71, 0, 67, 0, 69, 0, 0, 0, 69, 72, 76, 79, 77, 76, 74, 72, 71, 72, 74, 71, 69, 0, 0, 0];
-        song(&m, &[45, 41, 43, 40, 45, 41, 43, 45], 0.3)
-    }),
 ];
 
 // ------------------------------------------------------------------ maps
@@ -1020,7 +996,11 @@ fn database() -> Database {
                 stages: vec!["Defeat slimes in Whisperwood ({pest_slimes}/5).".into(), "Return to Tilda's shop for the reward.".into()],
             },
         ],
-        sounds: SOUNDS.iter().map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.wav"), volume: if id.starts_with("music") { 0.35 } else { 0.6 } }).collect(),
+        sounds: SOUNDS
+            .iter()
+            .map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.wav"), volume: 0.6 })
+            .chain(music::TRACKS.iter().map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.ogg"), volume: 0.5 }))
+            .collect(),
         sheets: vec![
             SheetDef { kind: SheetKind::Body, ..SheetDef::new("slime", "sprites/slime.png", 32, 32) },
             SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_cap", "sprites/ov_cap.png", 32, 48) },
@@ -1593,6 +1573,13 @@ fn main() {
     std::fs::create_dir_all(out.join("sounds")).unwrap();
     for (id, make) in SOUNDS {
         std::fs::write(out.join(format!("sounds/{id}.wav")), wav_bytes(&make(), RATE)).unwrap();
+    }
+    // The music: composed and rendered in music.rs, Ogg Vorbis.
+    for (id, title) in music::TRACKS {
+        let (l, r) = music::render(id);
+        let bytes = music::ogg(id, &l, &r);
+        println!("{title}: {:.1} s, {} KiB", l.len() as f32 / music::SR as f32, bytes.len() / 1024);
+        std::fs::write(out.join(format!("sounds/{id}.ogg")), bytes).unwrap();
     }
 
     let project = Project {

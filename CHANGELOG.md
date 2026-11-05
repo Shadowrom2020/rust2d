@@ -3,6 +3,31 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.1.0 — 2026-11-05
+
+### Saving and defeat
+- **Defeat menu**: a defeated player no longer reloads the quicksave automatically. After the
+  red fade a menu offers *Continue from last save* (the newest save of any slot), *Start over*
+  (a new game from the start as the same hero: name, sex and look stay) and *Quit to main
+  menu*. Without a save, *Continue* is greyed out and *Start over* is selected.
+- **Autosave**: every map change saves to the new *Autosave* slot, once the new map's *Map
+  enter* triggers and cut-scenes have finished ("Autosaved" toast). It shows in the load
+  lists as *Autosave* and doesn't change the slot *Save and quit* writes to.
+- **`autosave()` / *Autosave* action**: scripts and triggers ask for an autosave; it is written
+  as soon as the running event (dialogs, waits, cut-scene) is over.
+
+### Audio
+- **Ogg Vorbis music**: sounds and music can be WAV or Ogg Vorbis files (`.ogg`); the Sounds
+  form and the README say so, and a file in a format the game can't play (Opus, FLAC, MP3)
+  is reported by name when the project loads instead of just "could not decode".
+- **New music**: the example project's and the starter library's two tracks are replaced by
+  composed, rendered pieces — *Market Day* (a lilting lute, recorder and tabor dance for the
+  village) and *Whisperwood* (a slow drone, harp, recorder and bells for the forest) — saved as
+  Ogg Vorbis at 44.1 kHz and looping seamlessly. They are written by the example generator's
+  new `music.rs` (a small synthesizer and note notation) instead of the old square-wave loops.
+- **Stop button**: the Sounds form (Database and the Asset Library window) has *Stop* next to
+  *Play*; Play previews a file once and a new preview stops the previous one.
+
 ## 0.0.9 — 2026-11-05
 
 ### Characters and equipment

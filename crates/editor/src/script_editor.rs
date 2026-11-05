@@ -127,6 +127,7 @@ pub const API: &[ApiFn] = api! {
     "disable_spawners"(map: Map, zone: Text) "Switches off one spawner zone of a map by name (queued)";
     "enable_spawners"(map: Map) "Switches a map's spawners on again (queued)";
     "defeat_enemies"() "Defeats every hostile character on the current map at once: loot drops, their Defeated triggers run (queued)";
+    "autosave"() "Saves to the Autosave slot once the running event (dialogs, cut-scene) has finished (queued)";
     "enable_spawners"(map: Map, zone: Text) "Switches one spawner zone switched off by name on again (queued)";
     "heal"(amount: Num) "Heals the player (queued)";
     "play_sound"(sound: Sound) "Plays a sound (queued)";

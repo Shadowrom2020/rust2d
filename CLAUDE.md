@@ -70,7 +70,8 @@ crates/engine/src/      library: everything shared by game and editor
                         lighting.rs = day/night ambient, LightPass light map, tile_lights)
   library.rs            asset library + .r2dpack bundles; refactor.rs = id renames / refs_of_*
   migrate.rs            converts old 16 px projects; release.rs = standalone game export
-  examples/gen_example/ generates example_project/ and the editor's starter.r2dpack
+  examples/gen_example/ generates example_project/ and the editor's starter.r2dpack; music.rs
+                        composes and renders the two music tracks (tiny synth, Ogg Vorbis via vorbis_rs)
 crates/game/src/main.rs game binary: CLI args, window, RUST2D_AUTOPLAY script runner
 crates/editor/src/      editor binary
   main.rs               loop + RUST2D_EDITOR_SCRIPT command runner
@@ -155,7 +156,7 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
 
 - **Game:** `RUST2D_AUTOPLAY="wait 1; press e; hold right 0.5; rclick 6 3; type Name; shop buy 0; close; status; shot /path/a.png; quit" target/debug/rust2d-game <project> [--no-title] [--map M --spawn S | --pos X,Y]` (`--pos` is in pixels: tile × 32 + 16).
   Commands: `wait`, `press` (`press shift+g` holds Shift), `hold`, `click`/`rclick X Y` (tiles), `clickenemy`, `slot`,
-  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `settime H`, `skillpoint|learn|cast|call ID` (call runs a script function), `opt ROW prev|next|row` (Options page arrows), `hud window|map` (the character window button / map), `wintab character|skills|spells` (click a tab of the open character window; keys `c`, `i`, `k`, `l`, `tab` too), `press h` (hide / show the HUD; status prints `ui_hidden=`; `cutscene=` the playing cut-scene; start with `--cutscene FN` to preview one without the map's Map enter triggers), `mapbtn close|zoomin|zoomout|center`, `drag X1 Y1 X2 Y2` / `wheel DY` (screen pixels), `status`,
+  `slotdrag` (`slotdrag player 1 out` drags a stack out of the window), `shop buy|sell N`, `type`, `close` (window close button), `settime H`, `skillpoint|learn|cast|call ID` (call runs a script function), `opt ROW prev|next|row` (Options page arrows), `hud window|map` (the character window button / map), `wintab character|skills|spells` (click a tab of the open character window; keys `c`, `i`, `k`, `l`, `tab` too), `press h` (hide / show the HUD; status prints `ui_hidden=`; `menu=` the open menu page, e.g. `defeated` after a death, and `autosave=` none / pending / saved; `cutscene=` the playing cut-scene; start with `--cutscene FN` to preview one without the map's Map enter triggers), `mapbtn close|zoomin|zoomout|center`, `drag X1 Y1 X2 Y2` / `wheel DY` (screen pixels), `status`,
   `spawners`, `shot`, `quit`. `status` prints player, creator, quests, shop, map, tile, hp,
   vars, inventory, flags. Load a crafted save with `press f9` from `<project>/saves/quick.ron`
   (a minimal `WorldState` RON) to start in a specific situation; loading never fires *Map enter*
@@ -168,6 +169,7 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
   `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), `addaction LABEL` (append an action template to the selected entity's trigger), `entequip ITEM` / `entskin RRGGBB` (selected NPC's own equipment / look), pixel editor (`px…`),
   character builder (`charnew [ID NAME]`, `charcustom` = selected NPC, `charset body|hair|beard|skin|haircolor|clothing|head|armor|weapon|offhand|carry|id|name VALUE` on the open builder else the selected character, `charrandom`, `chartemplate ID` (project or library character), `charcreate` / `charapply`, `charcancel`, `charreset`, `playable SHEET on|off`; `status` prints `builder=`),
+  sounds (`sndplay [ID]` / `sndstop [ID]` = the Sounds form's Play / Stop, default the selected sound; `status` prints `preview=` and `music=`),
   template chooser (`model def|inst|builder`, `modelpick`, `modeluse`), wizard (`newwizard`, `wiz`,
   `wizcreate`), `scriptsel`, `probe X Y` (egui layer at a point), `status`, `dump`.
 - **Asset Library window:** run `rust2d-editor --library` (with `RUST2D_LIBRARY=<scratch>/lib`)

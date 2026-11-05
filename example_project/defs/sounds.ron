@@ -61,12 +61,12 @@
     ),
     (
         id: "music_village",
-        file: "sounds/music_village.wav",
-        volume: 0.35,
+        file: "sounds/music_village.ogg",
+        volume: 0.5,
     ),
     (
         id: "music_forest",
-        file: "sounds/music_forest.wav",
-        volume: 0.35,
+        file: "sounds/music_forest.ogg",
+        volume: 0.5,
     ),
 ]

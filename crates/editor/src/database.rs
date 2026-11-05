@@ -74,7 +74,7 @@ struct Cx<'a> {
     tex: &'a Textures,
     assets: &'a mut Assets,
     refs: &'a Refs,
-    audio: &'a Audio,
+    audio: &'a mut Audio,
     rename: &'a mut RenameUi,
     anim_target: &'a mut Option<usize>,
     /// Read-only copy of the definitions (for item icons / stack sizes).
@@ -410,7 +410,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     tex: &ed.tex,
                     assets: &mut ed.assets,
                     refs: &ed.refs,
-                    audio: &ed.audio,
+                    audio: &mut ed.audio,
                     rename: &mut ed.db.rename,
                     anim_target: &mut ed.db.anim_target,
                     browse: &mut ed.browse_request,
@@ -1470,11 +1470,19 @@ fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {
         ui.add(egui::Slider::new(&mut d.volume, 0.0..=1.0));
         ui.end_row();
     });
-    ui.weak("WAV or OGG, path relative to the project. Use \u{E036} Reload assets after changing the file or volume.");
+    ui.weak("WAV or Ogg Vorbis (.ogg), path relative to the project; 44.1 kHz plays best. Use \u{E036} Reload assets after changing the file or volume.");
     ui.horizontal(|ui| {
         if cx.audio.has(&d.id) {
-            if ui.button("\u{E3D0} Play").clicked() {
-                cx.audio.play(&d.id);
+            if ui.button("\u{E3D0} Play").on_hover_text("Plays the file once (a new preview stops the previous one)").clicked() {
+                cx.audio.play_preview(&d.id);
+            }
+            // Stop covers the preview and the map music preview; a short effect may already be over.
+            let playing = cx.audio.previewing() == Some(d.id.as_str()) || cx.audio.current_music() == Some(d.id.as_str());
+            if ui.add_enabled(playing, egui::Button::new("\u{E46C} Stop")).on_hover_text("Stops this sound").clicked() {
+                cx.audio.stop(&d.id);
+            }
+            if playing {
+                ui.weak("playing");
             }
         } else {
             ui.colored_label(Color32::LIGHT_RED, "Not loaded — reload assets (see terminal for errors).");
