@@ -84,6 +84,9 @@ pub struct AppSpec {
     pub bin: Vec<(String, String)>,
     /// PNG.
     pub icon: Vec<u8>,
+    /// SPDX license of the application for its AppStream metadata ("" = none stated, e.g. a
+    /// game whose creator didn't choose one).
+    pub license: String,
 }
 
 impl AppSpec {
@@ -263,6 +266,7 @@ fn flatpak_in(work: &Path, spec: &AppSpec, path: &Path) -> Result<()> {
 /// AppStream metadata (shown by software centers when the bundle is opened).
 fn metainfo(spec: &AppSpec) -> String {
     let (id, name, summary) = (&spec.app_id, xml_escape(&spec.name), xml_escape(&spec.comment));
+    let license = if spec.license.is_empty() { String::new() } else { format!("  <project_license>{}</project_license>\n", xml_escape(&spec.license)) };
     let cats: String = spec.categories.split(';').filter(|c| !c.is_empty()).map(|c| format!("<category>{c}</category>")).collect();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -271,7 +275,7 @@ fn metainfo(spec: &AppSpec) -> String {
   <name>{name}</name>
   <summary>{summary}</summary>
   <metadata_license>CC0-1.0</metadata_license>
-  <description><p>{summary}.</p></description>
+{license}  <description><p>{summary}.</p></description>
   <launchable type="desktop-id">{id}.desktop</launchable>
   <categories>{cats}</categories>
   <content_rating type="oars-1.1"/>
@@ -611,6 +615,7 @@ mod tests {
             files: vec![Entry { dest: "lib/knight-tales/knight-tales".into(), src: Source::Bytes(b"\x7fELF game".to_vec()), exec: true }],
             bin: vec![("knight-tales".into(), "lib/knight-tales/knight-tales".into())],
             icon: emblem().encode().unwrap(),
+            license: String::new(),
         };
         s.add_dir(&tmp.join("data"), "lib/knight-tales/data", &|_| false).unwrap();
         s
@@ -656,6 +661,9 @@ mod tests {
         assert!(d.contains("Exec=knight-tales\n") && d.contains("Icon=org.rust2d.knight_tales\n") && d.contains("Categories=Game;RolePlaying;\n"));
         let m = metainfo(&s);
         assert!(m.contains("<category>Game</category><category>RolePlaying</category>"));
+        assert!(!m.contains("project_license"), "no license claimed for a game");
+        let m = metainfo(&AppSpec { license: "MIT".into(), ..s });
+        assert!(m.contains("<project_license>MIT</project_license>"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

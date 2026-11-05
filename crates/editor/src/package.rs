@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rust2d_engine::imageio::Rgba;
 use rust2d_engine::project::Project;
-use rust2d_engine::release::DATA_DIR;
+use rust2d_engine::release::{DATA_DIR, ENGINE_LICENSE, ENGINE_LICENSE_FILE};
 use rust2d_packaging::{AppSpec, Entry, Source};
 
 pub use rust2d_packaging::{check_app_id, flatpak_available, glibc_needed, FLATPAK_RUNTIMES};
@@ -47,9 +47,14 @@ fn game_spec(folder: &Path, slug: &str, name: &str, app_id: &str, runtime: &str,
         runtime: runtime.into(),
         // Window (X11; Wayland desktops run it through XWayland), GPU, sound - nothing else.
         finish_args: ["--share=ipc", "--socket=x11", "--socket=pulseaudio", "--device=dri"].map(String::from).to_vec(),
-        files: vec![Entry { dest: format!("{lib}/{slug}"), src: Source::Path(folder.join(slug)), exec: true }],
+        files: vec![
+            Entry { dest: format!("{lib}/{slug}"), src: Source::Path(folder.join(slug)), exec: true },
+            // The engine's license (the game runner is rust2d); the game's own license is its creator's choice.
+            Entry { dest: format!("share/licenses/{slug}/{ENGINE_LICENSE_FILE}"), src: Source::Bytes(ENGINE_LICENSE.as_bytes().to_vec()), exec: false },
+        ],
         bin: vec![(slug.into(), format!("{lib}/{slug}"))],
         icon: icon.to_vec(),
+        license: String::new(),
     };
     spec.add_dir(&folder.join(DATA_DIR), &format!("{lib}/{DATA_DIR}"), &|_| false)?;
     Ok(spec)
@@ -111,7 +116,11 @@ mod tests {
         std::fs::write(folder.join("README.txt"), b"readme").unwrap();
         let s = game_spec(&folder, "knight-tales", "Knight Tales", "org.rust2d.knight_tales", "25.08", b"png").unwrap();
         let dests: Vec<(&str, bool)> = s.files.iter().map(|e| (e.dest.as_str(), e.exec)).collect();
-        assert_eq!(dests, [("lib/knight-tales/knight-tales", true), ("lib/knight-tales/data/maps/start.map", false)], "the game and its data, no README");
+        assert_eq!(
+            dests,
+            [("lib/knight-tales/knight-tales", true), ("share/licenses/knight-tales/rust2d-LICENSE.txt", false), ("lib/knight-tales/data/maps/start.map", false)],
+            "the game, the engine's license and the data; no README"
+        );
         assert_eq!(s.bin, [("knight-tales".to_string(), "lib/knight-tales/knight-tales".to_string())]);
         let _ = std::fs::remove_dir_all(&tmp);
     }

@@ -128,6 +128,7 @@ releases/<game-name>/
   <game-name>      the game executable (run it to play)
   data/            project.ron, defs/, maps/, scripts/ and only the images / sounds in use
   README.txt
+  rust2d-LICENSE.txt   the MIT license of the rust2d engine (the game executable)
 releases/<game-name>-linux.zip          (optional, to share)
 releases/<game-name>-x86_64.AppImage    (optional, Linux package)
 releases/<game-name>.flatpak            (optional, Linux package)
@@ -305,3 +306,9 @@ RUST2D_EDITOR_SCRIPT="tool brush; brush 2 0 1 1; drag 2 2 20 2; dump 0 10 2; ren
 
 - Enemies placed directly on a map stay dead once defeated; use a spawner zone for respawning enemies.
 - Native file dialogs need a running xdg-desktop-portal (standard on GNOME/KDE desktops); paths can always be typed by hand.
+
+## License
+
+rust2d is released under the [MIT License](LICENSE), Copyright (c) 2026 Jürgen Herrmann — the engine, the game runner, the editor and the example project with its generated art and music. The license file ships with the AppImage and the Flatpak of rust2d.
+
+**Games made with rust2d** are licensed however their creators decide; rust2d sets no terms for your maps, art, scripts or story. Since an exported game's executable is the rust2d game runner, every export includes the engine's license as `rust2d-LICENSE.txt` (next to the game, in its zip, and in its AppImage / Flatpak under `share/licenses/`), which is all the MIT License asks for.

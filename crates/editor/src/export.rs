@@ -134,6 +134,7 @@ impl Editor {
         let (_, check) = release::check(&self.project);
         egui::Window::new("Export game").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
             ui.label("Creates a standalone copy of the game that runs without the editor: the game executable plus the project's data (maps, definitions, scripts and the images and sounds in use; never save games).");
+            ui.weak("rust2d-LICENSE.txt (the MIT license of the rust2d engine in the game executable) is included in every export and package. Your game's own license is up to you.");
             egui::Grid::new("export").num_columns(2).show(ui, |ui| {
                 ui.label("Game name");
                 ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(260.0));
