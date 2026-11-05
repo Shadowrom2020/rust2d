@@ -18,6 +18,11 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   `give_item_to`, `take_item_from` change them (saved).
 - The **character creator** offers skin color, hair style, hair color and, for men, a **beard**
   (lists set in the editor); the pre-drawn looks are gone.
+- **Playable bodies**: body sheets have a *Playable* flag; the creator's new **Body** row offers
+  the playable bodies of the chosen sex (e.g. human or goblin; never a slime). Set it in the
+  character builder, the sprite sheet form or *Project › Character creator*. The example and
+  the starter library mark people's bodies playable and monsters' not; existing libraries get
+  the flag when the editor applies the new starter set.
 - The player character's equipment and carried items are what a new game starts with; saves from
   before clothing get the player's clothing once.
 
@@ -44,7 +49,7 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   slim limbs, rounder chin, fitted outfits). The guard holds a spear and wears a helmet, goblin
   archers and the new **goblin scouts** (female, in the wilds) carry a crude bow (and drop it
   with their rags), the villager carries apples, Tilda sells green and red tunics, the creator
-  offers 5 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
+  offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
 
 ### Gameplay
 - **Scripted spell effects**: new script functions (also trigger actions) `aim(fn)` (magic

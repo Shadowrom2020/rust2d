@@ -9,7 +9,6 @@ use rust2d_engine::events::TriggerOn;
 use rust2d_engine::imageio::Rgba;
 use rust2d_engine::refactor::RefKind;
 use rust2d_engine::render::Assets;
-use rust2d_engine::state::Equipment;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -1365,6 +1364,9 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
             ui.label("Female body");
             ui.checkbox(&mut d.female, "wears the female cut of outfits").on_hover_text("Clothing items can have a second overlay sheet for female bodies");
             ui.end_row();
+            ui.label("Playable");
+            ui.checkbox(&mut d.playable, "players may choose it in the character creator").on_hover_text("People yes, a slime or a ghost usually not. The creator offers the playable bodies of the chosen sex.");
+            ui.end_row();
         }
         ui.label("Image");
         ui.horizontal(|ui| {
@@ -1580,16 +1582,25 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     {
         let bcx = crate::builder::Cx { db: &ed.project.db, tex: &ed.tex, assets: &ed.assets };
         let player = ed.project.db.character(&c.player).map(|d| (d.appearance.clone(), d.equipment.clone())).unwrap_or_default();
-        ui.label("Player bodies (the player character's own body when empty):");
         let base = Appearance { hair: String::new(), beard: String::new(), ..player.0.clone() };
-        for (label, v) in [("Male", &mut cc.body_male), ("Female", &mut cc.body_female)] {
+        let bodies: Vec<String> = ed.project.db.sheets.iter().filter(|s| s.kind == SheetKind::Body).map(|s| s.id.clone()).collect();
+        ui.label(format!("Playable bodies (click to switch on / off; {} = playable): players choose among those of their sex.", ph::GAME_CONTROLLER));
+        if let Some(b) = crate::builder::body_cards(ui, &bcx, &bodies, None, &base, "") {
+            let on = !ed.project.db.sheet(&b).is_some_and(|s| s.playable);
+            crate::builder::request_playable(&b, on);
+        }
+        ui.label("Default body for each sex (shown first; empty = the player character's own body):");
+        for (label, female, v) in [("Male", false, &mut cc.body_male), ("Female", true, &mut cc.body_female)] {
+            let ids: Vec<String> = ed.project.db.playable_bodies(female).iter().map(|s| s.id.clone()).collect();
             ui.horizontal_top(|ui| {
                 ui.label(label);
-                let pick = crate::builder::sheet_cards(ui, &bcx, SheetKind::Body, Some("Own body"), (&base, &Equipment::default()), v, &|a, id| a.body = id.to_string());
-                if let Some(p) = pick {
+                if let Some(p) = crate::builder::body_cards(ui, &bcx, &ids, Some("Own body"), &base, v) {
                     *v = p;
                 }
             });
+            if !v.is_empty() && !ids.contains(v) {
+                ui.colored_label(Color32::YELLOW, format!("The default {} body '{v}' isn't marked playable (it is still offered).", label.to_lowercase()));
+            }
         }
         ui.label("Skin colors (empty = no choice):");
         let colors = |ui: &mut egui::Ui, list: &mut Vec<[u8; 3]>, presets: &[[u8; 3]]| {

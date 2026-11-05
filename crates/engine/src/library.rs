@@ -513,6 +513,16 @@ impl Bundle {
                 upgraded.push(a);
             }
         }
+        // Body sheets the newer set marks playable get the flag when they are otherwise the
+        // same (the flag was added later; an edited sheet stays as it is).
+        for n in self.db.sheets.iter().filter(|n| n.playable) {
+            if let Some(o) = db.sheets.iter_mut().find(|o| o.id == n.id && !o.playable) {
+                if (SheetDef { playable: true, ..o.clone() }) == *n {
+                    o.playable = true;
+                    upgraded.push((RefKind::Sheet, n.id.clone()));
+                }
+            }
+        }
         let new = |k: RefKind, id: &str| !exists(db, &(k, id.to_string()));
         self.db.tilesets.retain(|d| new(RefKind::Tileset, &d.id));
         self.db.sheets.retain(|d| new(RefKind::Sheet, &d.id));
@@ -757,7 +767,7 @@ pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
             let mut b = Bundle::from_pack(bytes).context("reading the starter assets")?;
             b.rescale(TILE_SIZE)?;
             let report = b.add_missing(&mut lib.db, dir)?;
-            if !report.added.is_empty() {
+            if !report.added.is_empty() || !report.upgraded.is_empty() {
                 lib.save_defs()?;
             }
             std::fs::write(&stamp_file, s)?;
@@ -768,8 +778,9 @@ pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
 
 /// File in the library recording which starter set was last applied.
 const STARTER_STAMP: &str = "starter.stamp";
-/// Version of the rules for applying starter sets (2: images that only grew are upgraded).
-const STARTER_RULES: u32 = 3;
+/// Version of the rules for applying starter sets (2: images that only grew are upgraded;
+/// 4: bodies get the playable flag).
+const STARTER_RULES: u32 = 4;
 
 /// 64-bit FNV-1a hash (a cheap fingerprint of the starter pack).
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -825,7 +836,7 @@ mod tests {
         let mut bow = item("bow");
         bow.weapon = Some(Weapon::ranged(1, 0.5, Ranged { projectile: SpriteRef::new("items", 1), speed: 100.0, range: 6.0, ammo: "arrows".into() }));
         let db = Database {
-            sheets: vec![SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false }],
+            sheets: vec![SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false }],
             items: vec![item("arrows"), bow],
             ..Default::default()
         };
@@ -876,7 +887,7 @@ mod tests {
         use crate::skills::{SpellDef, SpellEffect};
         let (root, mut db) = source("scripts");
         std::fs::write(root.join("sprites/boom.png"), png(16, 16, [9, 9, 9, 255])).unwrap();
-        db.sheets.push(SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false });
+        db.sheets.push(SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false });
         db.spells.push(SpellDef::new("fireball", "Fireball", "", SpriteRef::new("items", 0), 5, 1.0, SpellEffect::Script { function: "cast_fireball".into() }));
         std::fs::create_dir_all(root.join("scripts")).unwrap();
         let src = "// Fireball: aim first.\n// (two comment lines)\nfn cast_fireball() {\n    aim(\"fireball_at\");\n}\n\nfn fireball_at(x, y) { if x > 0 { helper(); } effect(\"boom\", x, y); }\n\n// unrelated\nfn helper() { say(\"hi\"); }\n\nfn shop_talk() { say(\"{ not a brace }\"); }\n";
@@ -919,7 +930,7 @@ mod tests {
         let other = tmp("scripts_other");
         std::fs::create_dir_all(other.join("sprites")).unwrap();
         std::fs::write(other.join("sprites/boom.png"), png(8, 8, [1, 1, 1, 255])).unwrap();
-        let mut odb = Database { sheets: vec![SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 8, frame_h: 8, kind: Default::default(), female: false }], ..Default::default() };
+        let mut odb = Database { sheets: vec![SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 8, frame_h: 8, kind: Default::default(), female: false, playable: false }], ..Default::default() };
         again.merge_into(&mut odb, &other).unwrap();
         let merged = std::fs::read_to_string(other.join("scripts").join(LIBRARY_SCRIPT)).unwrap();
         assert!(merged.contains("effect(\"boom_2\", x, y)"), "{merged}");
@@ -973,11 +984,20 @@ mod tests {
         // A newer starter set: only assets with new ids are added, existing ones stay as they are.
         let mut db2 = db.clone();
         db2.items[0].name = "Changed arrows".into();
-        db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false });
+        db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false });
         std::fs::write(root.join("sprites/extra.png"), png(16, 16, [1, 2, 3, 255])).unwrap();
         let pack2 = Bundle::collect(&db2, &root, 16, "starter", &all_assets(&db2)).unwrap().to_pack().unwrap();
         let lib = open_library(&dir, Some(&pack2)).unwrap();
         assert!(lib.db.sheet("extra").is_some(), "new sheet added");
+        // A newer set marking a body playable flags the library's (otherwise unchanged) copy.
+        let mut db3 = db2.clone();
+        for s in &mut db3.sheets {
+            s.playable = s.id == "extra";
+        }
+        let pack3 = Bundle::collect(&db3, &root, 16, "starter", &all_assets(&db3)).unwrap().to_pack().unwrap();
+        let lib = open_library(&dir, Some(&pack3)).unwrap();
+        assert!(lib.db.sheet("extra").unwrap().playable, "playable flag added");
+        assert!(!lib.db.sheet("items").unwrap().playable);
         // A newer set whose "items" image only grew (frames added on the right) upgrades it;
         // one that changed existing pixels doesn't.
         let old = Rgba::decode(&std::fs::read(dir.join("sprites/items.png")).unwrap()).unwrap();

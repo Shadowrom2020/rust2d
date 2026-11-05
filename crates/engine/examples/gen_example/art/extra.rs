@@ -1384,21 +1384,23 @@ fn characters(x: &mut Extras) {
     // a shared body and hair in their colors, wearing an outfit (one clothing item per
     // character, in both cuts) and a helmet if any.
     let layered: Vec<&(&str, &str, Look)> = people.iter().filter(|p| !p.2.skeleton).collect();
-    let mut sheets: Vec<(String, Canvas, u32, SheetKind, bool)> = people.iter().filter(|p| p.2.skeleton).map(|(id, _, look)| (id.to_string(), person_sheet(look), FH, SheetKind::Body, look.female)).collect();
-    sheets.push(("bat".into(), bat_sheet(), 32, SheetKind::Body, false));
-    sheets.push(("ghost".into(), ghost_sheet(), FH, SheetKind::Body, false));
-    sheets.extend(shared_layers().into_iter().map(|(id, c, k, f)| (id, c, FH, k, f)));
+    // (id, canvas, frame height, kind, female, playable): people's bodies are playable,
+    // monsters' (skeletons, bat, ghost) are not.
+    let mut sheets: Vec<(String, Canvas, u32, SheetKind, bool, bool)> = people.iter().filter(|p| p.2.skeleton).map(|(id, _, look)| (id.to_string(), person_sheet(look), FH, SheetKind::Body, look.female, false)).collect();
+    sheets.push(("bat".into(), bat_sheet(), 32, SheetKind::Body, false, false));
+    sheets.push(("ghost".into(), ghost_sheet(), FH, SheetKind::Body, false, false));
+    sheets.extend(shared_layers().into_iter().map(|(id, c, k, f)| (id, c, FH, k, f, k == SheetKind::Body)));
     for (id, _, look) in &layered {
         for (sheet, canvas) in outfit_cuts(id, look) {
-            sheets.push((sheet, canvas, FH, SheetKind::Outfit, false));
+            sheets.push((sheet, canvas, FH, SheetKind::Outfit, false, false));
         }
     }
     let icons = outfit_icons(&layered.iter().map(|p| p.2.clone()).collect::<Vec<_>>());
-    sheets.push(("library_outfit_icons".into(), icons, 32, SheetKind::Sprite, false));
-    for (id, canvas, fh, kind, female) in sheets {
+    sheets.push(("library_outfit_icons".into(), icons, 32, SheetKind::Sprite, false, false));
+    for (id, canvas, fh, kind, female, playable) in sheets {
         let image = format!("sprites/{id}.png");
         x.files.insert(image.clone(), canvas.png());
-        x.db.sheets.push(SheetDef { kind, female, ..SheetDef::new(&id, &image, FW, fh) });
+        x.db.sheets.push(SheetDef { kind, female, playable, ..SheetDef::new(&id, &image, FW, fh) });
     }
     for (k, (id, name, _)) in layered.iter().enumerate() {
         x.db.items.push(clothing_item(&format!("outfit_{id}"), &format!("{name} Outfit"), &format!("The clothes of the {name}."), "library_outfit_icons", k as u32, id, 10));

@@ -30,6 +30,32 @@ pub struct Cx<'a> {
     pub assets: &'a Assets,
 }
 
+thread_local! {
+    /// A body sheet's playable flag changed in a builder (applied by `apply_builder_requests`;
+    /// the builder only sees a read-only copy of the definitions).
+    static PLAYABLE: std::cell::RefCell<Option<(String, bool)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Asks the editor to set body sheet `sheet` playable (or not).
+pub fn request_playable(sheet: &str, on: bool) {
+    PLAYABLE.with(|r| *r.borrow_mut() = Some((sheet.to_string(), on)));
+}
+
+/// Cards of the body sheets `ids` ("" = `none`), each shown on `base`; playable bodies are
+/// marked with a controller icon. Returns the clicked id.
+pub fn body_cards(ui: &mut Ui, cx: &Cx, ids: &[String], none: Option<&str>, base: &Appearance, current: &str) -> Option<String> {
+    let mut entries: Vec<(String, String)> = none.map(|n| (String::new(), n.to_string())).into_iter().collect();
+    for id in ids {
+        let label = cx.db.sheet(id).map_or(id.clone(), |s| if s.playable { format!("{} {}", ph::GAME_CONTROLLER, s.label()) } else { s.label() });
+        entries.push((id.clone(), label));
+    }
+    let eq = Equipment::default();
+    cards(ui, THUMB, &entries, Some(&current.to_string()), &|ui, id, r| {
+        let a = Appearance { body: id.clone(), ..base.clone() };
+        !id.is_empty() && paint(ui, cx, &character::layers(cx.db, &a, &eq, Facing::Down, 0, false), r)
+    })
+}
+
 /// What happened in the builder this frame.
 #[derive(Default)]
 pub struct Out {
@@ -208,10 +234,17 @@ pub fn builder_ui(ui: &mut Ui, id: &str, p: Parts, cx: &Cx) -> Out {
                 egui::CollapsingHeader::new(title).id_salt((id, title)).default_open(open).show(ui, |ui| body(ui));
             };
             section(ui, "Body", true, &mut |ui| {
-                let eq_bare = Equipment::default();
-                if let Some(b) = sheet_cards(ui, cx, SheetKind::Body, None, (a, &eq_bare), &a.body, &|a, id| a.body = id.to_string()) {
+                let ids: Vec<String> = cx.db.sheets.iter().filter(|s| s.kind == SheetKind::Body).map(|s| s.id.clone()).collect();
+                if let Some(b) = body_cards(ui, cx, &ids, None, a, &a.body) {
                     a.body = b;
                     out.changed = true;
+                }
+                if let Some(s) = cx.db.sheet(&a.body).filter(|s| s.kind == SheetKind::Body) {
+                    let mut on = s.playable;
+                    let label = crate::ui::t(ph::GAME_CONTROLLER, &format!("Playable: players may choose the {} body in the character creator", s.label().to_lowercase()));
+                    if ui.checkbox(&mut on, label).on_hover_text("For the whole project (a slime or a ghost usually isn't). The creator offers the playable bodies of the chosen sex.").changed() {
+                        request_playable(&s.id, on);
+                    }
                 }
                 if cx.db.sheets.iter().all(|s| s.kind != SheetKind::Body) {
                     ui.colored_label(Color32::YELLOW, "No body sheets in this project: add some from the asset library (sprite sheets of kind \"Character body\").");
@@ -353,6 +386,17 @@ pub struct Builder {
 }
 
 impl Editor {
+    /// Applies a playable flag changed in a builder (see [`request_playable`]).
+    pub fn apply_builder_requests(&mut self) {
+        let Some((sheet, on)) = PLAYABLE.with(|r| r.borrow_mut().take()) else { return };
+        if let Some(s) = self.project.db.sheets.iter_mut().find(|s| s.id == sheet) {
+            s.playable = on;
+            self.defs_dirty = true;
+            let what = if on { "can now be chosen" } else { "can no longer be chosen" };
+            self.set_status(format!("Body '{sheet}' {what} in the character creator. Save the definitions to keep it."));
+        }
+    }
+
     /// Opens the builder window for `target`.
     pub fn open_builder(&mut self, target: Target) {
         let db = &self.project.db;

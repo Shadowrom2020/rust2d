@@ -45,7 +45,8 @@ crates/engine/src/      library: everything shared by game and editor
                         order (held behind, body, clothing, body armor, hair, beard, head armor,
                         held in front; outfits have a female cut, Armor::overlay_f, worn by
                         female body sheets); render/recolor.rs = skin (magenta) / hair (cyan)
-                        reference ramps recolored to the chosen colors. Old projects: a
+                        reference ramps recolored to the chosen colors. SheetDef.playable = body offered
+                        by the creator (Database::playable_bodies). Old projects: a
                         character's legacy `sheet` becomes its body (Database::upgrade_characters)
   fog.rs                fog of war: Explored (tiles per map, saved as a compact string), REVEAL_RADIUS
   state.rs              WorldState = save game (flags, vars, inventory, quests, shops,
@@ -164,7 +165,7 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
   `stcapture X Y W H ID`, `stinfo`; structure editor: `stnew`, `stsize W H`, `stlayer N`,
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
   `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), `addaction LABEL` (append an action template to the selected entity's trigger), `entequip ITEM` / `entskin RRGGBB` (selected NPC's own equipment / look), pixel editor (`px…`),
-  character builder (`charnew [ID NAME]`, `charcustom` = selected NPC, `charset body|hair|beard|skin|haircolor|clothing|head|armor|weapon|offhand|carry|id|name VALUE` on the open builder else the selected character, `charrandom`, `chartemplate ID` (project or library character), `charcreate` / `charapply`, `charcancel`, `charreset`; `status` prints `builder=`),
+  character builder (`charnew [ID NAME]`, `charcustom` = selected NPC, `charset body|hair|beard|skin|haircolor|clothing|head|armor|weapon|offhand|carry|id|name VALUE` on the open builder else the selected character, `charrandom`, `chartemplate ID` (project or library character), `charcreate` / `charapply`, `charcancel`, `charreset`, `playable SHEET on|off`; `status` prints `builder=`),
   template chooser (`model def|inst|builder`, `modelpick`, `modeluse`), wizard (`newwizard`, `wiz`,
   `wizcreate`), `scriptsel`, `probe X Y` (egui layer at a point), `status`, `dump`.
 - **Asset Library window:** run `rust2d-editor --library` (with `RUST2D_LIBRARY=<scratch>/lib`)

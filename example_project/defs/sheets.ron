@@ -64,6 +64,7 @@
         frame_w: 32,
         frame_h: 48,
         kind: Body,
+        playable: true,
     ),
     (
         id: "body_female",
@@ -72,6 +73,7 @@
         frame_h: 48,
         kind: Body,
         female: true,
+        playable: true,
     ),
     (
         id: "body_goblin",
@@ -79,6 +81,7 @@
         frame_w: 32,
         frame_h: 48,
         kind: Body,
+        playable: true,
     ),
     (
         id: "body_goblin_female",
@@ -87,6 +90,7 @@
         frame_h: 48,
         kind: Body,
         female: true,
+        playable: true,
     ),
     (
         id: "hair_short",
