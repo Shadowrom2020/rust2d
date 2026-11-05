@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.0.9 — 2026-11-05
 
 ### Characters and equipment
 - **Layered characters**: every character is a body (people: in underwear, with recolorable
@@ -26,35 +26,7 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 - The player character's equipment and carried items are what a new game starts with; saves from
   before clothing get the player's clothing once.
 
-### Editor
-- **Character builder**: characters are assembled visually — a walking preview (facing buttons
-  or turning, the four idle directions) beside rows of clickable cards for the body, skin
-  swatches, hair style, hair color, beard, clothing (shown worn), head / body armor, weapon,
-  left hand, plus the carried items; *Randomize* and *Start from…* (copy the look and equipment
-  of a character of the project or the asset library — library sheets and items are brought
-  along). It is the *Look & equipment* part of the Characters form (project and library),
-  opens as a window for **New character…** (id, name, *Create*) and for a placed NPC's own
-  look (*Customize this one…* in the map inspector, *Use the definition's* clears it). Items get
-  a *Held sprite* and outfits a *Female cut* sheet, sheets a *Kind* and bodies a *Female body*
-  flag, the armor slot *Clothing*; the Project tab sets the creator's bodies and its skin, hair
-  style, hair color and beard choices with the same cards. The New-asset wizard no longer makes
-  characters. Editor-script commands `charnew`, `charset`, `charrandom`, `chartemplate`,
-  `charcreate` / `charapply`, `charcancel`, `charcustom`, `charreset`, `entequip`, `entskin`.
-
-### Example project and starter library
-- Every character is a layered model: shared bodies (male, female, goblin, **female goblin**),
-  short / long / **ponytail** hair, **full beard and goatee**; outfits as clothing items in both
-  cuts; held sprites for sword, spear, axe, bow, crossbow, shield, lantern and torch; slimes,
-  skeletons, bats and ghosts are bodies. **Female bodies are more feminine** (narrow waist, bust,
-  slim limbs, rounder chin, fitted outfits). The guard holds a spear and wears a helmet, goblin
-  archers and the new **goblin scouts** (female, in the wilds) carry a crude bow (and drop it
-  with their rags), the villager carries apples, Tilda sells green and red tunics, the creator
-  offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
-
 ### Gameplay
-- Fix: arriving on a map (edge, spawn, transition, loaded save) inside something solid - e.g.
-  a gate post at the village's east edge when coming back from the forest - left the player
-  stuck; the player now arrives on the nearest free tile.
 - **Cut-scenes**: the action *Play cutscene* / `cutscene("fn")` plays a script function as a
   cut-scene (HUD hidden, black bars, everyone else waits; the HUD comes back afterwards).
   New actions and script functions *Walk to tile* `walk_to`, *Walk up to character* `approach`
@@ -64,11 +36,6 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 - **More for scenes**: `dim(amount, seconds)` / action *Dim the scene* (lights show by day),
   `disable_spawners(map[, zone])` / `enable_spawners(...)` / action *Spawners on / off* (saved),
   `defeat_enemies()` / action *Defeat all enemies*, a light `color` for effects; effects and timed lights keep playing during cut-scenes.
-- Example: the forest shrine is a 3x2 monolith with lamp pillars on a larger stone platform
-  (both statues on it); touching it on the elder's quest plays a cut-scene with light effects
-  (new `magic_burst` sheet, `chime` sound), defeats the monsters left in the forest and switches
-  off its spawners. Tilda's slime hunt is done then (she rewards it); not yet taken, she only
-  thanks the hero.
 - **Hide the interface**: H hides / shows the HUD (status frame, clock, quick bar, buttons);
   dialogs and windows the player opens still show. Scripts: `hide_ui()`, `show_ui()`;
   triggers: the new action *Show / hide UI* (e.g. for cut-scenes). Not saved.
@@ -93,6 +60,28 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   `player_facing()`, `player_max_hp()`. `player_light` and `damage_around` accept integers and
   decimals in any mix (before, `player_light(5, 30.5)` failed).
 
+### Editor
+- **Character builder**: characters are assembled visually — a walking preview (facing buttons
+  or turning, the four idle directions) beside rows of clickable cards for the body, skin
+  swatches, hair style, hair color, beard, clothing (shown worn), head / body armor, weapon,
+  left hand, plus the carried items; *Randomize* and *Start from…* (copy the look and equipment
+  of a character of the project or the asset library — library sheets and items are brought
+  along). It is the *Look & equipment* part of the Characters form (project and library),
+  opens as a window for **New character…** (id, name, *Create*) and for a placed NPC's own
+  look (*Customize this one…* in the map inspector, *Use the definition's* clears it). Items get
+  a *Held sprite* and outfits a *Female cut* sheet, sheets a *Kind* and bodies a *Female body*
+  flag, the armor slot *Clothing*; the Project tab sets the creator's bodies and its skin, hair
+  style, hair color and beard choices with the same cards. The New-asset wizard no longer makes
+  characters. Editor-script commands `charnew`, `charset`, `charrandom`, `chartemplate`,
+  `charcreate` / `charapply`, `charcancel`, `charcustom`, `charreset`, `entequip`, `entskin`.
+- Trigger actions *Aim (then run script)*, *Fly sprite to point*, *Play effect*, *Damage area*,
+  *Light at point*, *Heal area*; *Light around player* gained color and flicker. The script editor
+  completes all new functions (sprite sheets for `fly` / `effect`), and `queue_set_var`, which was
+  missing; a test now fails when an engine function is missing from the completion table.
+- Script editor: the parameter hint also works for the project's own script functions, and right
+  after `(` or `,` an id argument (item, map, spawn point, sheet, script function, ...) opens its
+  suggestions at once, inserted with quotes.
+
 ### Asset library
 - **Scripted skills and spells in the library and packages**: *Add to library* / *Export…* of
   assets that use scripts open a *Script functions* dialog; the functions the assets need
@@ -103,6 +92,33 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   id (sprite sheets, sounds, items) come along. The starter library now has the Fireball spell
   and the Scavenging skill with their functions.
 
+### Example project and starter library
+- Every character is a layered model: shared bodies (male, female, goblin, **female goblin**),
+  short / long / **ponytail** hair, **full beard and goatee**; outfits as clothing items in both
+  cuts; held sprites for sword, spear, axe, bow, crossbow, shield, lantern and torch; slimes,
+  skeletons, bats and ghosts are bodies. **Female bodies are more feminine** (narrow waist, bust,
+  slim limbs, rounder chin, fitted outfits). The guard holds a spear and wears a helmet, goblin
+  archers and the new **goblin scouts** (female, in the wilds) carry a crude bow (and drop it
+  with their rags), the villager carries apples, Tilda sells green and red tunics, the creator
+  offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
+- The forest shrine is a 3x2 monolith with lamp pillars on a larger stone platform
+  (both statues on it); touching it on the elder's quest plays a cut-scene with light effects
+  (new `magic_burst` sheet, `chime` sound), defeats the monsters left in the forest and switches
+  off its spawners. Tilda's slime hunt is done then (she rewards it); not yet taken, she only
+  thanks the hero.
+- **Fireball** spell (Tome of the Fireball, sold by Tilda; needs Arcana 3): click a target, a
+  fireball flies there and explodes, damaging everything within 2 tiles; embers glow on briefly. New sprite sheets
+  `fireball` and `explosion` (also in the starter library) and sounds `fireball`, `explosion`.
+
+### Documentation
+- `Documentation/scripting.md`: the complete scripting guide and API reference (how scripts
+  are run, immediate vs. queued functions, state, targets, units, every function, recipes,
+  limits, a Rhai primer). Tests keep it complete and its examples compiling.
+
+### Fixes
+- Fix: arriving on a map (edge, spawn, transition, loaded save) inside something solid - e.g.
+  a gate post at the village's east edge when coming back from the forest - left the player
+  stuck; the player now arrives on the nearest free tile.
 - Fix: boulders showed a stray dark mark at their upper left (the open double gate's post cap
   spilled into the boulder's cells on the props sheet).
 - Fix: spell, skill, scroll and book icons were blank in libraries created before those icons
@@ -110,26 +126,7 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   an existing sprite sheet or tileset image when the new one only adds frames and leaves the
   existing part unchanged; images the user edited stay as they are. Existing libraries apply
   this once on the next start.
-
-### Documentation
-- `Documentation/scripting.md`: the complete scripting guide and API reference (how scripts
-  are run, immediate vs. queued functions, state, targets, units, every function, recipes,
-  limits, a Rhai primer). Tests keep it complete and its examples compiling.
-- `wait()` accepts whole numbers too (`wait(1)` used to be a script error).
-
-### Editor
-- Trigger actions *Aim (then run script)*, *Fly sprite to point*, *Play effect*, *Damage area*,
-  *Light at point*, *Heal area*; *Light around player* gained color and flicker. The script editor
-  completes all new functions (sprite sheets for `fly` / `effect`), and `queue_set_var`, which was
-  missing; a test now fails when an engine function is missing from the completion table.
-- Script editor: the parameter hint also works for the project's own script functions, and right
-  after `(` or `,` an id argument (item, map, spawn point, sheet, script function, ...) opens its
-  suggestions at once, inserted with quotes.
-
-### Example project
-- **Fireball** spell (Tome of the Fireball, sold by Tilda; needs Arcana 3): click a target, a
-  fireball flies there and explodes, damaging everything within 2 tiles; embers glow on briefly. New sprite sheets
-  `fireball` and `explosion` (also in the starter library) and sounds `fireball`, `explosion`.
+- Fix: `wait()` accepts whole numbers too (`wait(1)` used to be a script error).
 
 ## 0.0.8 — 2026-11-04
 
