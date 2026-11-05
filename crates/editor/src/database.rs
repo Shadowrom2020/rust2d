@@ -653,6 +653,13 @@ fn weapon_ui(ui: &mut egui::Ui, id: &str, w: &mut Option<Weapon>, cx: &mut Cx, c
             }
         }
     });
+    widgets::optional_effect_ui(
+        ui,
+        &format!("{id}/fx"),
+        "On hit:",
+        "A status effect for whoever this weapon hits (melee swings and projectiles), e.g. a poisoned dagger or a freezing bolt",
+        &mut w.effect,
+    );
     if let Some(r) = &mut w.ranged {
         ui.label("Projectile sprite (drawn pointing right, rotated in flight):");
         widgets::sprite_picker(ui, &format!("{id}/proj"), &mut r.projectile, cx.tex, cx.assets);
@@ -1106,6 +1113,13 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
         ui.end_row();
     });
     ui.weak("1 heart = 2 HP. For the player character, Damage is the bare-handed attack strength. Defeated characters fire 'Defeated' triggers.");
+    widgets::optional_effect_ui(
+        ui,
+        "chr_touch_fx",
+        "On touch:",
+        "A status effect its touch gives the player along with the contact damage (hostile characters), e.g. a poisonous slime. Without one, a melee weapon it holds gives that weapon's effect.",
+        &mut d.touch_effect,
+    );
     ui.label("Ranged attack (hostile characters shoot at the player when in range and in sight):");
     weapon_ui(ui, "chr_weapon", &mut d.weapon, cx, true);
     ui.separator();

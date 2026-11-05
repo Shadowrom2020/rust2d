@@ -373,7 +373,7 @@ impl Game {
             }
             let r = crate::defs::Ranged { projectile: projectile.clone(), speed: *speed, range: *range, ammo: String::new() };
             let dmg = (*damage as f32 * self.spell_damage_factor()).round() as i32;
-            self.shoot(origin, dir, &r, dmg, true, None);
+            self.shoot(origin, dir, &r, dmg, true, None, None);
             self.ui.toast(d.name);
             return;
         };

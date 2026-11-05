@@ -437,6 +437,44 @@ fn trainer_talk() {
 }
 ```
 
+### Status effects
+
+Timed effects on the player or a character. Weapons can give them on hit and hostile characters
+on touch (set in the Database); these functions start and end them from scripts, like the
+*Apply effect* / *Cure effect* actions. The player's effects are saved; a character's last until
+the map is left. Applying an effect that is already running restarts it with the longer duration
+and the stronger strength.
+
+| Effect | `strength` means |
+|---|---|
+| `"poison"`, `"burn"` | HP lost per second (fractions add up; defense doesn't help) |
+| `"regen"` | HP regained per second |
+| `"slow"`, `"haste"` | percent slower / faster movement |
+| `"strength"`, `"weakness"` | percent more / less damage dealt |
+| `"shield"` | extra defense |
+| `"stun"` | (unused) can't move or attack |
+
+| Function | Description |
+|---|---|
+| `apply_effect(target, effect, strength, seconds)` | Starts an effect on `"player"`, `"self"` or a character's name. *(queued)* |
+| `cure(target, effect)` | Ends one effect, e.g. `cure("player", "poison")`. *(queued)* |
+| `cure(target)` | Ends all of the target's effects. *(queued)* |
+| `has_effect(effect)` | Whether the player has the effect right now. |
+
+```rust
+fn swamp_gas() {
+    if !has_effect("poison") {
+        say("The air here burns in your throat.");
+    }
+    apply_effect("player", "poison", 1, 5);   // 1 HP per second for 5 seconds
+}
+
+fn holy_water() {
+    cure("player");                              // every effect
+    apply_effect("player", "regen", 0.5, 10);
+}
+```
+
 ### Spell effects: targeting, flying sprites, animations, damage
 
 Use these to build spells (and traps, cut-scenes, …) in scripts.

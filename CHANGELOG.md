@@ -13,6 +13,14 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   the level and the XP to the next one, and a message announces each level. New: the *Give
   experience* action, the *Player level* condition and the script functions `give_xp(n)`, `xp()` and
   `level()`. Older projects keep it off; older saves start at level 1. The example project uses it.
+- **Status effects**: poison, burning, regeneration, slow, haste, stun, strength, weakness and
+  shield, timed, on the player and on characters. Weapons apply one on hit (*On hit* in the weapon
+  form), hostile characters on touch (*On touch* in the character form, or the effect of a melee
+  weapon they hold); the *Apply effect* / *Cure effect* actions, the *Player has effect* condition
+  and the script functions `apply_effect`, `cure` and `has_effect` do the rest. Badges with the
+  seconds left in the status frame, markers over characters, tints for poison / burning / stun;
+  the player's effects are saved. Example: poisonous slimes, an *Antidote*, an *Elixir of
+  Strength* and a *Swiftness Potion* at Tilda's (new icons); skeletons in the starter library slow.
 
 ### Maintenance
 - **Faster, cheaper CI**: pull requests into develop run only the branch policy (now seconds:

@@ -92,7 +92,7 @@ the toast; `status` shows `level=2`, raised `hp=`, +1 skill point; save, `press 
 Editor script: project form and character form screenshots with the new fields. A v0.2.0 copy
 of the example with its save loads with defaults and no log errors.
 
-### [ ] Status effects — `feature/status-effects`
+### [x] Status effects — `feature/status-effects`
 
 **Goal.** Timed effects on the player and NPCs (poison, burning, regeneration, slow, haste,
 stun, strength, weakness, shield) from potions, weapons, enemy touch, spells and scripts;
@@ -127,6 +127,14 @@ visible as badges in the HUD and tints on sprites; saved.
   immediate `has_effect("poison")`.
 - Editor: `weapon_ui` gets an *On hit* effect row, the character form an *On touch* row,
   `widgets.rs` the action / condition fields (kind combo, strength, seconds, target).
+
+- Decided while building: the kinds and math live in `crates/engine/src/effects.rs` (used by
+  definitions and the save game alike), the runtime part in `runtime/effects.rs`; the actions
+  carry a whole spec (`ApplyEffect { target, effect: EffectSpec }`); a character without a
+  *touch_effect* passes on the effect of a melee weapon it holds; stun also blocks interacting;
+  stunned characters neither move, shoot nor hurt by contact; effects don't run while the game
+  is frozen (dialogs, windows); NPC markers are colored squares above the head (no text in world
+  space); the skeleton's slow is its *touch* (skeletons are starter-library characters).
 
 **Touch points.** `defs.rs`, `state.rs`, `runtime/{effects (new),combat,equipment,mod,
 npc_items}.rs`, `events/mod.rs`, `script.rs`, editor `script_editor.rs`, `widgets.rs`,

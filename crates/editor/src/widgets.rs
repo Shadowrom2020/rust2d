@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui};
 use rust2d_engine::defs::{ContainerSpec, LockSpec, LootEntry, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
+use rust2d_engine::effects::{EffectKind, EffectSpec};
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::entity::Facing;
 use rust2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, TriggerOwner, VarOp};
@@ -889,6 +890,10 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                     });
                     ui.add(egui::DragValue::new(value).range(1..=999));
                 }
+                Cond::HasEffect { kind } => {
+                    ui.label("player has");
+                    effect_kind_combo(ui, &format!("{id}/fx"), kind);
+                }
                 Cond::KnowsSpell { spell } => {
                     ui.label("knows");
                     suggest(ui, &format!("{id}/sp"), spell, &refs.spells, 120.0);
@@ -1254,6 +1259,22 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "experience", |ui| {
                 ui.add(egui::DragValue::new(amount).range(-1_000_000..=1_000_000))
                     .on_hover_text("Experience points for the player (Project › Experience and levels). Negative takes them away; the level never drops.");
+            });
+        }
+        Action::ApplyEffect { target, effect } => {
+            target_field(ui, id, target, refs);
+            effect_spec_ui(ui, &format!("{id}/fx"), effect);
+        }
+        Action::CureEffect { target, kind } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "effect", |ui| {
+                let text = kind.map_or("all effects", |k| k.label());
+                egui::ComboBox::from_id_salt(format!("{id}/cure")).selected_text(text).show_ui(ui, |ui| {
+                    ui.selectable_value(kind, None, "all effects");
+                    for k in EffectKind::ALL {
+                        ui.selectable_value(kind, Some(k), k.label());
+                    }
+                });
             });
         }
         Action::Autosave => {
@@ -1722,6 +1743,49 @@ pub fn character_preview(ui: &mut Ui, tex: &Textures, assets: &Assets, db: &rust
             if !paint_character(ui, tex, assets, &layers, rect.shrink(2.0)) {
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "?", egui::FontId::default(), Color32::RED);
             }
+        }
+    });
+}
+
+/// A combo box of the status effect kinds.
+pub fn effect_kind_combo(ui: &mut egui::Ui, id: &str, kind: &mut EffectKind) -> bool {
+    let before = *kind;
+    egui::ComboBox::from_id_salt(id).selected_text(kind.label()).show_ui(ui, |ui| {
+        for k in EffectKind::ALL {
+            ui.selectable_value(kind, k, k.label()).on_hover_text(k.unit());
+        }
+    });
+    *kind != before
+}
+
+/// A status effect: kind, strength (unless it has none) and duration.
+pub fn effect_spec_ui(ui: &mut egui::Ui, id: &str, spec: &mut EffectSpec) {
+    ui.horizontal(|ui| {
+        if effect_kind_combo(ui, id, &mut spec.kind) {
+            *spec = EffectSpec { seconds: spec.seconds, ..EffectSpec::template(spec.kind) };
+        }
+        if spec.kind != EffectKind::Stun {
+            ui.add(egui::DragValue::new(&mut spec.strength).range(0.0..=1000.0).speed(0.1)).on_hover_text(spec.kind.unit());
+            ui.weak(match spec.kind {
+                EffectKind::Poison | EffectKind::Burn | EffectKind::Regen => "HP/s",
+                EffectKind::Shield => "def",
+                _ => "%",
+            });
+        }
+        ui.label("for");
+        ui.add(egui::DragValue::new(&mut spec.seconds).range(0.1..=3600.0).speed(0.1).suffix(" s"));
+    });
+}
+
+/// An optional status effect with a checkbox (weapons: on hit, characters: on touch).
+pub fn optional_effect_ui(ui: &mut egui::Ui, id: &str, label: &str, hint: &str, effect: &mut Option<EffectSpec>) {
+    ui.horizontal(|ui| {
+        let mut on = effect.is_some();
+        if ui.checkbox(&mut on, label).on_hover_text(hint).changed() {
+            *effect = on.then(|| EffectSpec::template(EffectKind::Poison));
+        }
+        if let Some(spec) = effect {
+            effect_spec_ui(ui, id, spec);
         }
     });
 }

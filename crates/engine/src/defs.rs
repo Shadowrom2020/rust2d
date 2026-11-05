@@ -275,6 +275,9 @@ pub struct Weapon {
     /// Needs both hands: nothing can be held in the left hand at the same time.
     #[serde(default)]
     pub two_handed: bool,
+    /// A status effect for whoever the weapon hits (melee or projectile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<crate::effects::EffectSpec>,
 }
 
 fn default_reach() -> f32 {
@@ -290,7 +293,7 @@ fn default_knockback() -> f32 {
 impl Weapon {
     /// A melee weapon with default reach / arc / knockback.
     pub fn melee(damage: i32, cooldown: f32) -> Self {
-        Weapon { damage, cooldown, ranged: None, reach: default_reach(), arc: default_arc(), knockback: default_knockback(), two_handed: false }
+        Weapon { damage, cooldown, ranged: None, reach: default_reach(), arc: default_arc(), knockback: default_knockback(), two_handed: false, effect: None }
     }
     pub fn ranged(damage: i32, cooldown: f32, ranged: Ranged) -> Self {
         Weapon { ranged: Some(ranged), ..Weapon::melee(damage, cooldown) }
@@ -704,6 +707,9 @@ pub struct CharacterDef {
     /// Experience the player gains for defeating the character (with experience and levels on).
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub xp: u32,
+    /// A status effect its touch gives the player (hostile characters, with contact damage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touch_effect: Option<crate::effects::EffectSpec>,
     #[serde(default)]
     pub triggers: Vec<Trigger>,
     /// Makes the character a merchant (placed instances can override it).

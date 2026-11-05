@@ -28,6 +28,8 @@ pub(super) struct Projectile {
     /// Entity that fired it (never hit by its own shot).
     shooter: Option<u32>,
     sprite: SpriteRef,
+    /// A status effect for whoever it hits.
+    effect: Option<crate::effects::EffectSpec>,
 }
 
 pub(super) struct PlayerCombat {
@@ -168,13 +170,18 @@ impl Game {
         // Contact damage from hostile characters.
         if self.combat.invuln <= 0.0 {
             let me = inflate(self.player.rect(), 1.0);
+            // Stunned characters don't hurt; strength / weakness change the damage.
             let hit = self
                 .loaded
                 .entities
                 .iter()
-                .find(|e| e.active && e.hostile && e.damage > 0 && e.body.rect().overlaps(&me))
-                .map(|e| (e.damage, e.body.pos));
-            if let Some((dmg, from)) = hit {
+                .position(|e| e.active && e.hostile && e.damage > 0 && !crate::effects::stunned(&e.effects) && e.body.rect().overlaps(&me));
+            if let Some(i) = hit {
+                let e = &self.loaded.entities[i];
+                let (dmg, from) = (crate::effects::scale_damage(&e.effects, e.damage), e.body.pos);
+                if let Some(fx) = self.touch_effect(i) {
+                    self.apply_player_effect(&fx);
+                }
                 self.hurt_player(dmg, from);
             }
         }
@@ -183,7 +190,7 @@ impl Game {
     /// Attacks with the equipped weapon (or bare hands). `aim` (world point) sets the
     /// direction; otherwise the player's facing is used.
     pub(super) fn attack_at(&mut self, aim: Option<Vec2>) {
-        if !self.combat.enabled() || self.combat.cooldown > 0.0 {
+        if !self.combat.enabled() || self.combat.cooldown > 0.0 || self.player_stunned() {
             return;
         }
         let weapon = self.attack_weapon();
@@ -209,7 +216,7 @@ impl Game {
             };
             self.combat.cooldown = cooldown;
             self.audio.play(&self.project.config.sfx.attack);
-            self.shoot(origin, dir, &r, damage, true, None);
+            self.shoot(origin, dir, &r, damage, true, None, weapon.effect);
             return;
         }
         // Melee: everything within reach inside the swing arc.
@@ -243,6 +250,9 @@ impl Game {
             .collect();
         let from = self.player.pos;
         for i in targets {
+            if let Some(fx) = &weapon.effect {
+                crate::effects::apply(&mut self.loaded.entities[i].effects, fx);
+            }
             self.damage_entity(i, damage, from, weapon.knockback);
         }
     }
@@ -258,7 +268,8 @@ impl Game {
         to.length() - radius <= w.reach.max(0.3) * ts * 0.9
     }
 
-    pub(super) fn shoot(&mut self, origin: Vec2, dir: Vec2, r: &Ranged, damage: i32, from_player: bool, shooter: Option<u32>) {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn shoot(&mut self, origin: Vec2, dir: Vec2, r: &Ranged, damage: i32, from_player: bool, shooter: Option<u32>, effect: Option<crate::effects::EffectSpec>) {
         self.projectiles.push(Projectile {
             pos: origin + dir * 4.0,
             vel: dir * r.speed.max(10.0),
@@ -268,6 +279,7 @@ impl Game {
             from_player,
             shooter,
             sprite: r.projectile.clone(),
+            effect,
         });
     }
 
@@ -278,7 +290,7 @@ impl Game {
         let mut shots = Vec::new();
         for i in 0..self.loaded.entities.len() {
             let e = &mut self.loaded.entities[i];
-            if !e.active || !e.hostile {
+            if !e.active || !e.hostile || crate::effects::stunned(&e.effects) {
                 continue;
             }
             let Some(w) = &e.weapon else { continue };
@@ -291,7 +303,7 @@ impl Game {
             if origin.distance(target) > r.range * ts {
                 continue;
             }
-            let (r, dmg, uid, cd) = (r.clone(), w.damage, e.uid, w.cooldown);
+            let (r, dmg, uid, cd, fx) = (r.clone(), crate::effects::scale_damage(&e.effects, w.damage), e.uid, w.cooldown, w.effect);
             if !self.line_clear(origin, target) {
                 continue;
             }
@@ -299,11 +311,11 @@ impl Game {
             e.attack_cd = cd.max(0.3) + rand::gen_range(0.0, 0.6);
             let dir = (target - origin).normalize_or_zero();
             e.body.facing = Facing::from_vec(dir.x, dir.y).unwrap_or(e.body.facing);
-            shots.push((origin, dir, r, dmg, uid));
+            shots.push((origin, dir, r, dmg, uid, fx));
         }
-        for (origin, dir, r, dmg, uid) in shots {
+        for (origin, dir, r, dmg, uid, fx) in shots {
             self.audio.play(&self.project.config.sfx.attack);
-            self.shoot(origin, dir, &r, dmg, false, Some(uid));
+            self.shoot(origin, dir, &r, dmg, false, Some(uid), fx);
         }
     }
 
@@ -338,7 +350,10 @@ impl Game {
                         }
                     });
                     if let Some(t) = target {
-                        let (dmg, from) = (p.damage, pos - p.vel.normalize_or_zero() * 8.0);
+                        let (dmg, from, fx) = (p.damage, pos - p.vel.normalize_or_zero() * 8.0, p.effect);
+                        if let Some(fx) = fx {
+                            crate::effects::apply(&mut self.loaded.entities[t].effects, &fx);
+                        }
                         self.damage_entity(t, dmg, from, 1.0);
                         alive = false;
                         break;
@@ -348,7 +363,10 @@ impl Game {
                     let body = Rect::new(r.x, r.y - ts * 0.8, r.w, r.h + ts * 0.8);
                     if body.overlaps(&hit_box) {
                         if self.combat.invuln <= 0.0 {
-                            let (dmg, from) = (p.damage, pos - p.vel.normalize_or_zero() * 8.0);
+                            let (dmg, from, fx) = (p.damage, pos - p.vel.normalize_or_zero() * 8.0, p.effect);
+                            if let Some(fx) = fx {
+                                self.apply_player_effect(&fx);
+                            }
                             self.hurt_player(dmg, from);
                         }
                         alive = false;
@@ -384,7 +402,7 @@ impl Game {
     pub(super) fn damage_entity(&mut self, i: usize, dmg: i32, from: Vec2, knockback: f32) {
         let u = self.u();
         let e = &mut self.loaded.entities[i];
-        e.hp -= (dmg - e.defense).max(1);
+        e.hp -= (dmg - e.defense - crate::effects::defense_bonus(&e.effects)).max(1);
         e.invuln = HIT_INVULN;
         e.flash = 0.15;
         e.body.move_target = None;
@@ -413,7 +431,7 @@ impl Game {
         hostile.len()
     }
 
-    fn defeat(&mut self, i: usize) {
+    pub(super) fn defeat(&mut self, i: usize) {
         self.defeat_with(i, true);
     }
 
@@ -465,10 +483,15 @@ impl Game {
         self.combat.knock = away * KNOCKBACK * self.u();
         self.audio.play(&self.project.config.sfx.hurt);
         if hp == 0 {
-            self.game_over = Some(0.0);
-            self.runner.clear();
-            self.audio.stop_music();
+            self.player_defeated();
         }
+    }
+
+    /// The player's HP reached 0: the game-over screen, then the defeat menu.
+    pub(super) fn player_defeated(&mut self) {
+        self.game_over = Some(0.0);
+        self.runner.clear();
+        self.audio.stop_music();
     }
 
     /// Positive amounts heal, negative amounts hurt (without knockback).
@@ -586,6 +609,11 @@ impl Game {
             draw_rectangle(x - u, y - u, w + 2.0 * u, 4.0 * u, Color::new(0.0, 0.0, 0.0, 0.7));
             draw_rectangle(x, y, w * e.hp as f32 / e.max_hp as f32, 2.0 * u, Color::new(0.9, 0.2, 0.2, 1.0));
         }
+        // Status effects: small colored squares above the health bar.
+        for e in self.loaded.entities.iter().filter(|e| e.active && !e.effects.is_empty()) {
+            // Above the head of a full-height (1.5 tiles) character.
+            self.draw_npc_effects(e.body.pos.x, e.body.pos.y - ts * 1.5 - 2.0 * u, &e.effects);
+        }
         for p in &self.projectiles {
             let angle = p.vel.y.atan2(p.vel.x);
             if !self.assets.draw_frame_rotated(&p.sprite.sheet, p.sprite.frame, p.pos, angle, WHITE) {
@@ -633,8 +661,10 @@ impl Game {
         let hearts_w = hearts as f32 * STEP;
         let bar_w = hearts_w.max(120.0);
         let level_w = measure_text(&level_text, None, 15, 1.0).width + 6.0;
+        let badges_w = self.effect_badges_width();
         let col_w = (name_w + def_w)
             .max(hearts_w)
+            .max(badges_w)
             .max(if magic { bar_w + 34.0 } else { 0.0 })
             .max(if levels { bar_w + level_w } else { 0.0 })
             .max(if ammo.is_some() { 80.0 } else { 0.0 });
@@ -644,6 +674,9 @@ impl Game {
         }
         if levels {
             h += 14.0;
+        }
+        if !self.world.effects.is_empty() {
+            h += 20.0;
         }
         if ammo.is_some() {
             h += 22.0;
@@ -693,6 +726,9 @@ impl Game {
             }
         }
         y += HEART + 6.0;
+
+        // Status effects: a badge each, with the seconds left.
+        y += self.draw_effect_badges(tx, y - 1.0);
 
         // Mana bar.
         if magic {
