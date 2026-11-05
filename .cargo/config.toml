@@ -1,3 +1,5 @@
 [alias]
-# Project tasks: `cargo xtask dist`, `check-version`, `check-branch`, `release-notes` (crates/xtask).
+# Project tasks (crates/xtask): `cargo xtask check-version | check-branch | release-notes` build
+# without the engine (seconds); `cargo xtask-dist` packages the toolkit (AppImage + Flatpak).
 xtask = "run --quiet --package xtask --"
+xtask-dist = "run --quiet --package xtask --features dist -- dist"

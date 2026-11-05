@@ -1,5 +1,5 @@
 name: Build rust2d packages
-description: Release build, AppImage + Flatpak of the rust2d toolkit (cargo xtask dist) and a smoke test of both binaries under Xvfb.
+description: Release build, AppImage + Flatpak of the rust2d toolkit (cargo xtask-dist) and a smoke test of both binaries under Xvfb.
 runs:
   using: composite
   steps:
@@ -13,7 +13,7 @@ runs:
       run: cargo build --release --locked -p rust2d-editor -p rust2d-game
     - name: AppImage and Flatpak
       shell: bash
-      run: cargo xtask dist --out dist
+      run: cargo xtask-dist --out dist
     - name: Smoke test (game and editor from the AppImage)
       shell: bash
       run: |

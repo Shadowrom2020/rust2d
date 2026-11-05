@@ -2,7 +2,7 @@
 //! distributions) and **Flatpak bundle** (sandboxed, `flatpak install --user X.flatpak`).
 //!
 //! Used by the editor's *Export game* (a game: its executable next to `data/`) and by
-//! `cargo xtask dist` (the rust2d toolkit: editor, game runner and the example project).
+//! `cargo xtask-dist` (the rust2d toolkit: editor, game runner and the example project).
 //!
 //! Both formats get the same tree below their prefix (`usr/` in the AppImage, `/app` in the
 //! Flatpak), commands as symlinks in `bin/`, a desktop entry and an icon:
