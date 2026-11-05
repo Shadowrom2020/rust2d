@@ -285,7 +285,13 @@ fn dist(args: &[String]) -> Result<()> {
         ],
         bin: vec![("rust2d-editor".into(), "lib/rust2d/rust2d-editor".into()), ("rust2d-game".into(), "lib/rust2d/rust2d-game".into())],
         icon,
+        license: "MIT".into(),
     };
+    let license = root.join("LICENSE");
+    if !license.is_file() {
+        bail!("LICENSE is missing: the packages must carry rust2d's license");
+    }
+    spec.files.push(Entry { dest: format!("share/licenses/{APP_ID}/LICENSE"), src: Source::Path(license), exec: false });
     // The example project without the developer's save games.
     let before = spec.files.len();
     spec.add_dir(&example, "share/rust2d/example_project", &|_| false)?;

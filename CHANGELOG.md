@@ -5,6 +5,12 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 
 ## Unreleased
 
+### Project
+- **MIT License** (Copyright (c) 2026 Jürgen Herrmann): the project has a `LICENSE` file (it was
+  declared MIT in Cargo.toml only). It ships in the rust2d AppImage and Flatpak, and every
+  exported game includes it as `rust2d-LICENSE.txt` for the engine inside (also in the game's
+  zip, AppImage and Flatpak); the license of the game itself stays the creator's choice.
+
 ### Development and releases
 - **GitHub workflow**: CI on every pull request (branch policy, build + clippy + tests, version
   check, AppImage / Flatpak packaging with a smoke test); `master` and `develop` are protected
