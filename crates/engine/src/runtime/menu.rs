@@ -31,6 +31,8 @@ enum Page {
     ConfirmClose(Option<Box<Page>>),
     /// Player options (graphics, sound, text).
     Options,
+    /// The player was defeated: continue from the last save, start over or quit.
+    Defeated,
 }
 
 /// An entry of the Options page.
@@ -98,6 +100,12 @@ enum Row {
     ExitNoSave,
     OptionsMenu,
     Opt(Opt),
+    /// Defeat menu: load the newest save.
+    LastSave,
+    /// Defeat menu: a new game as the same hero.
+    StartOver,
+    /// Defeat menu: back to the title screen.
+    ToTitle,
 }
 
 pub(super) fn now_secs() -> u64 {
@@ -111,7 +119,11 @@ fn sanitize(name: &str) -> String {
 }
 
 fn display_name(slot: &str) -> String {
-    if slot == "quick" { "Quicksave".to_string() } else { slot.to_string() }
+    match slot {
+        "quick" => "Quicksave".to_string(),
+        super::AUTOSAVE => "Autosave".to_string(),
+        _ => slot.to_string(),
+    }
 }
 
 fn ago(secs: u64) -> String {
@@ -162,7 +174,13 @@ impl Game {
                 })
                 .collect()
         };
+        let latest_save = |m: &Menu| m.saves.first().map(|s| format!("{} · {} · {}", display_name(&s.slot), s.map, ago(s.saved)));
         match &self.menu.page {
+            Page::Defeated => vec![
+                (Row::LastSave, "Continue from last save".into(), latest_save(&self.menu).unwrap_or("no saved game yet".into())),
+                (Row::StartOver, "Start over".into(), "A new game from the beginning, as the same hero".into()),
+                (Row::ToTitle, "Quit to main menu".into(), String::new()),
+            ],
             Page::Title => {
                 let latest = self.menu.saves.first().map_or("no saved game yet".to_string(), |s| {
                     format!("{} · {} · {}", display_name(&s.slot), s.map, ago(s.saved))
@@ -185,7 +203,8 @@ impl Game {
             ],
             Page::Save => {
                 let mut v = vec![(Row::NewSave, "+ New save...".into(), String::new())];
-                v.extend(save_rows(&self.menu).into_iter().filter(|r| r.0 != Row::Slot("quick".into())));
+                // The quick save (F5) and the autosave have their own keys / moments.
+                v.extend(save_rows(&self.menu).into_iter().filter(|r| r.0 != Row::Slot("quick".into()) && r.0 != Row::Slot(super::AUTOSAVE.into())));
                 v
             }
             Page::Load => save_rows(&self.menu),
@@ -226,6 +245,7 @@ impl Game {
             Page::ConfirmQuit => "Quit without saving?".into(),
             Page::ConfirmClose(_) => "Exit the game?".into(),
             Page::Options => "Options".into(),
+            Page::Defeated => "You were defeated".into(),
         }
     }
 
@@ -243,7 +263,7 @@ impl Game {
     }
 
     fn go(&mut self, page: Page) {
-        if matches!(page, Page::Main | Page::Save | Page::Load | Page::Title) {
+        if matches!(page, Page::Main | Page::Save | Page::Load | Page::Title | Page::Defeated) {
             self.scan_saves();
         }
         self.menu.page = page;
@@ -253,7 +273,8 @@ impl Game {
 
     fn back(&mut self) {
         match self.menu.page.clone() {
-            Page::Title => {}
+            // Esc / a click outside don't leave these.
+            Page::Title | Page::Defeated => {}
             Page::Main => self.menu.open = false,
             Page::Load if self.menu.title => {
                 self.go(Page::Title);
@@ -295,6 +316,8 @@ impl Game {
         self.reset_world();
         let (map, spawn) = (self.project.config.start_map.clone(), self.project.config.start_spawn.clone());
         self.finish_transition(map, Arrival::Spawn(spawn));
+        // The fresh game behind the title screen isn't worth an autosave.
+        self.autosave_pending = false;
         self.fade = Fade::In { t: FADE_TIME };
         self.open_title();
     }
@@ -363,6 +386,18 @@ impl Game {
                 }
             }
             (_, Row::ExitNoSave) => self.menu.quit = true,
+            (_, Row::LastSave) => match self.menu.saves.first().map(|s| s.slot.clone()) {
+                Some(slot) => match self.load_game(&slot) {
+                    Ok(()) => self.menu = Menu::default(),
+                    Err(e) => self.menu.message = Some(format!("Load failed: {e}")),
+                },
+                None => self.menu.message = Some("There is no saved game yet.".into()),
+            },
+            (_, Row::StartOver) => {
+                self.menu = Menu::default();
+                self.start_over();
+            }
+            (_, Row::ToTitle) => self.quit_to_title(),
             (Page::ConfirmQuit, Row::Yes) => self.quit_to_title(),
             (_, Row::NewSave) => {
                 let n = (1..).find(|n| !self.menu.saves.iter().any(|s| s.slot == format!("Save {n}"))).unwrap();
@@ -511,6 +546,28 @@ impl Game {
 
     pub(super) fn on_title(&self) -> bool {
         self.menu.title
+    }
+
+    /// Opens the defeat menu (after the game-over fade). The selection starts on *Continue
+    /// from last save* if there is one.
+    pub(super) fn open_defeat_menu(&mut self) {
+        if self.defeat_menu_open() {
+            return;
+        }
+        self.menu = Menu { open: true, ..Default::default() };
+        self.go(Page::Defeated);
+        if self.menu.saves.is_empty() {
+            self.menu.sel = 1;
+        }
+    }
+
+    pub(super) fn defeat_menu_open(&self) -> bool {
+        self.menu.open && self.menu.page == Page::Defeated
+    }
+
+    /// For `Game::status()`: the open menu page ("-" = closed).
+    pub(super) fn menu_status(&self) -> String {
+        if self.menu.open { format!("{:?}", self.menu.page).to_lowercase() } else { "-".into() }
     }
 
     /// Handles Esc and the open menu. Returns true while the game is paused by it.
@@ -691,7 +748,7 @@ impl Game {
                 draw_rectangle(r.x, r.y, r.w, r.h, Color::new(1.0, 1.0, 1.0, 0.12));
                 draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, GOLD);
             }
-            let disabled = self.menu.page == Page::Title && idx == 1 && self.menu.saves.is_empty();
+            let disabled = self.menu.saves.is_empty() && ((self.menu.page == Page::Title && idx == 1) || (self.menu.page == Page::Defeated && idx == 0));
             let c = if disabled { GRAY } else if selected { GOLD } else { WHITE };
             if self.menu.page == Page::Options {
                 draw_text(label, r.x + 14.0, r.y + 26.0, 24.0, c);
@@ -727,6 +784,7 @@ impl Game {
             Page::Load => "Enter / click: load · Del: delete · Esc: back",
             Page::Name => "Type a name · Enter: save · Esc: back",
             Page::Options => "Left/Right or click < >: change · saved right away · Esc: back",
+            Page::Defeated => "Up/Down: choose · Enter / click: confirm",
             _ => "Enter / click · Esc: back",
         };
         if let Some(msg) = &self.menu.message {

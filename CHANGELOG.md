@@ -5,6 +5,17 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 
 ## Unreleased
 
+### Saving and defeat
+- **Defeat menu**: a defeated player no longer reloads the quicksave automatically. After the
+  red fade a menu offers *Continue from last save* (the newest save of any slot), *Start over*
+  (a new game from the start as the same hero: name, sex and look stay) and *Quit to main
+  menu*. Without a save, *Continue* is greyed out and *Start over* is selected.
+- **Autosave**: every map change saves to the new *Autosave* slot, once the new map's *Map
+  enter* triggers and cut-scenes have finished ("Autosaved" toast). It shows in the load
+  lists as *Autosave* and doesn't change the slot *Save and quit* writes to.
+- **`autosave()` / *Autosave* action**: scripts and triggers ask for an autosave; it is written
+  as soon as the running event (dialogs, waits, cut-scene) is over.
+
 ### Audio
 - **Ogg Vorbis music**: sounds and music can be WAV or Ogg Vorbis files (`.ogg`); the Sounds
   form and the README say so, and a file in a format the game can't play (Opus, FLAC, MP3)

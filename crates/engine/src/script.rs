@@ -326,6 +326,7 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("disable_spawners", with!(ctx, |c, map: &str, zone: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: zone.into(), active: false })));
     engine.register_fn("enable_spawners", with!(ctx, |c, map: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: String::new(), active: true })));
     engine.register_fn("defeat_enemies", with!(ctx, |c| c.actions.push(Action::DefeatEnemies)));
+    engine.register_fn("autosave", with!(ctx, |c| c.actions.push(Action::Autosave)));
     engine.register_fn("enable_spawners", with!(ctx, |c, map: &str, zone: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: zone.into(), active: true })));
     engine.register_fn("walk_to", with!(ctx, |c, t: &str, x: Dynamic, y: Dynamic| c.actions.push(Action::WalkTo {
         target: t.into(),
@@ -508,7 +509,7 @@ mod tests {
                 Action::SetUiVisible { visible: true },
             ]
         );
-        host.load_source(r#"fn calm() { dim(0.8, 1.5); dim(2, -1); disable_spawners("forest"); enable_spawners("", "den"); defeat_enemies(); }"#).unwrap();
+        host.load_source(r#"fn calm() { dim(0.8, 1.5); dim(2, -1); disable_spawners("forest"); enable_spawners("", "den"); defeat_enemies(); autosave(); }"#).unwrap();
         assert_eq!(
             host.call(&mut w, "calm", None),
             vec![
@@ -517,6 +518,7 @@ mod tests {
                 Action::SetSpawners { map: "forest".into(), zone: String::new(), active: false },
                 Action::SetSpawners { map: String::new(), zone: "den".into(), active: true },
                 Action::DefeatEnemies,
+                Action::Autosave,
             ]
         );
         assert_eq!(host.call(&mut w, "pause", None), vec![Action::Wait { seconds: 1.0 }, Action::Wait { seconds: 0.5 }]);
