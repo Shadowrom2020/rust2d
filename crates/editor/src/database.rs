@@ -173,7 +173,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     if library && matches!(ed.db.tab, Tab::Quests | Tab::Project | Tab::Scripts) {
         ed.db.tab = Tab::Items;
     }
-    ui.horizontal(|ui| {
+    // Wraps onto a second line in narrow windows (instead of widening the forms below).
+    ui.horizontal_wrapped(|ui| {
         let tabs = [
             (Tab::Items, "Items"),
             (Tab::Props, "Props"),
@@ -572,6 +573,13 @@ pub fn rename_row(ui: &mut egui::Ui, kind: RefKind, id: &str, rn: &mut RenameUi)
     });
 }
 
+/// A multi-line text box as wide as the visible form, minus a margin for the scroll bar (the
+/// form's content may be wider than the window).
+fn text_box(ui: &mut egui::Ui, text: &mut String, rows: usize, hint: &str) -> egui::Response {
+    let w = (ui.clip_rect().right() - ui.cursor().left() - 18.0).clamp(200.0, ui.available_width());
+    ui.add(egui::TextEdit::multiline(text).desired_rows(rows).desired_width(w).hint_text(hint))
+}
+
 fn name_row(ui: &mut egui::Ui, name: &mut String) {
     ui.horizontal(|ui| {
         ui.label("Name");
@@ -671,7 +679,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     rename_row(ui, RefKind::Item, &d.id, cx.rename);
     name_row(ui, &mut d.name);
     ui.label("Description");
-    ui.add(egui::TextEdit::multiline(&mut d.description).desired_rows(2).desired_width(f32::INFINITY));
+    text_box(ui, &mut d.description, 2, "");
     ui.checkbox(&mut d.consumable, "Consumed when used (if a trigger ran)");
     ui.horizontal(|ui| {
         ui.label("Stack size");
@@ -1040,6 +1048,8 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     ui.heading("Character");
     rename_row(ui, RefKind::Character, &d.id, cx.rename);
     name_row(ui, &mut d.name);
+    ui.label("Description").on_hover_text("What the bestiary (journal, J) says about it once the player has defeated one. Placeholders like {player} work.");
+    text_box(ui, &mut d.description, 3, "Shown in the bestiary once the player has defeated one");
     // The look: assembled in the character builder (body, colors, hair, clothes, gear).
     ui.separator();
     ui.heading("Look & equipment");
@@ -1195,7 +1205,7 @@ fn quest_form(ui: &mut egui::Ui, d: &mut rust2d_engine::quest::QuestDef, _cx: &m
         ui.end_row();
     });
     ui.label("Description (shown in the journal)");
-    ui.add(egui::TextEdit::multiline(&mut d.description).desired_rows(3).desired_width(f32::INFINITY));
+    text_box(ui, &mut d.description, 3, "");
     ui.separator();
     ui.heading("Stages");
     ui.weak("One objective per stage. The journal shows the objectives reached so far: earlier ones ticked, the current one open. \
@@ -2169,7 +2179,7 @@ fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &m
     rename_row(ui, RefKind::Skill, &d.id, cx.rename);
     name_row(ui, &mut d.name);
     ui.label("Description");
-    ui.add(egui::TextEdit::multiline(&mut d.description).desired_rows(2).desired_width(f32::INFINITY));
+    text_box(ui, &mut d.description, 2, "");
     ui.horizontal(|ui| {
         ui.label("Max level");
         ui.add(egui::DragValue::new(&mut d.max_level).range(1..=99));
@@ -2228,7 +2238,7 @@ fn spell_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SpellDef, cx: &m
     rename_row(ui, RefKind::Spell, &d.id, cx.rename);
     name_row(ui, &mut d.name);
     ui.label("Description");
-    ui.add(egui::TextEdit::multiline(&mut d.description).desired_rows(2).desired_width(f32::INFINITY));
+    text_box(ui, &mut d.description, 2, "");
     egui::Grid::new("spell_cost").num_columns(2).show(ui, |ui| {
         ui.label("Mana");
         ui.add(egui::DragValue::new(&mut d.mana).range(0..=9999));

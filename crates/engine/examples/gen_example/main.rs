@@ -940,6 +940,7 @@ fn database() -> Database {
         defense: 0,
         xp: 0,
         touch_effect: None,
+        description: String::new(),
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -982,6 +983,7 @@ fn database() -> Database {
     slime.damage = 2;
     slime.hostile = true;
     slime.xp = 5;
+    slime.description = "A wobbling lump of green jelly from the Whisperwood dens. Slow and harmless-looking, but its touch is poisonous - keep an antidote handy.".into();
     // A slime's touch poisons: half a heart over six seconds (antidotes cure it).
     slime.touch_effect = Some(EffectSpec::new(EffectKind::Poison, 0.5, 6.0));
     slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
@@ -993,11 +995,18 @@ fn database() -> Database {
     goblin.damage = 1;
     goblin.hostile = true;
     goblin.xp = 12;
+    goblin.description = "Goblin archers guard a camp south of the forest path. They shoot from a distance, back off when you close in and run once wounded - but never far from their camp.".into();
     goblin.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 150.0 * R, range: 6.0, ammo: String::new() }));
     // Goblin archers drop arrows (and sometimes coins) from their loot table.
     goblin.loot = vec![LootEntry::new("arrows", 70.0, 2, 4), LootEntry::new("coin", 25.0, 1, 2)];
     // Goblin scouts (female) roam the wilds with the archers.
-    let goblin_f = CharacterDef { id: "goblin_f".into(), name: "Goblin Scout".into(), speed: 42.0 * R, ..goblin.clone() };
+    let goblin_f = CharacterDef {
+        id: "goblin_f".into(),
+        name: "Goblin Scout".into(),
+        speed: 42.0 * R,
+        description: "Quicker than the archers, goblin scouts roam the wilds in small bands, bows ready.".into(),
+        ..goblin.clone()
+    };
     // The bandits' camp in the south-east of Whisperwood: the chief calls two outlaws when hurt
     // (an 'HP below 50 %' trigger on the placed chief).
     let mut chief = ch("bandit_chief", "Bandit Chief", "", 40.0, Behavior::Chase { sight: 6.0, leash: 9.0, flee_below: 0.0, keep_distance: 0.0 });
@@ -1005,12 +1014,14 @@ fn database() -> Database {
     chief.damage = 2;
     chief.hostile = true;
     chief.xp = 60;
+    chief.description = "The leader of the bandits in south-east Whisperwood: tough, armed with an axe, and quick to call his outlaws for help when a fight turns against him.".into();
     chief.loot = vec![LootEntry::new("coin", 100.0, 10, 20), LootEntry::new("potion", 100.0, 1, 1), LootEntry::new("elixir_strength", 50.0, 1, 1)];
     let mut outlaw = ch("outlaw", "Outlaw", "", 46.0, Behavior::Chase { sight: 7.0, leash: 12.0, flee_below: 0.3, keep_distance: 0.0 });
     outlaw.max_hp = 4;
     outlaw.damage = 2;
     outlaw.hostile = true;
     outlaw.xp = 20;
+    outlaw.description = "The Bandit Chief's men. They hide in the woods until he calls, fight with swords and flee when the fight goes badly.".into();
     outlaw.loot = vec![LootEntry::new("coin", 60.0, 2, 6)];
     let mut hero = ch("hero", "Hero", "", 70.0, Behavior::Static);
     hero.max_hp = 12; // 6 hearts

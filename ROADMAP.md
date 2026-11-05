@@ -192,7 +192,7 @@ two hidden bandits are set active.
 returning and back at home; hurt a goblin below 25 % → fleeing mark; the bandit chief's dialog
 appears exactly once; archers stay about 4 tiles away in two screenshots.
 
-### [ ] Bestiary — `feature/bestiary`
+### [x] Bestiary — `feature/bestiary`
 
 **Goal.** A monster book in the journal (J) that fills up with every character kind defeated
 at least once: portrait (paperdoll of the definition), name, description, HP, damage, XP, loot.
@@ -203,6 +203,11 @@ at least once: portrait (paperdoll of the definition), name, description, HP, da
 window); the list shows unlocked entries, the right side the portrait and stats via
 `paperdoll`. Script immediate `defeated_count("slime")`; `Cond::Defeated { character, op, count }`
 (appended) for "kill ten slimes" quests without script. `status()`: `bestiary=`.
+
+**Decided while building.** The journal's tabs are its own (Tab, Left / Right, click), not the
+character window's; `wintab quests|bestiary` clicks them while the journal is open. Every defeat
+counts, also scripted ones (*Defeat all enemies*). Scripts got a character id kind
+(`IdKind::Character`) so `defeated_count` ids are checked, completed and renamed.
 
 **Verify.** Defeat a slime, `press j`, `wintab bestiary` (new autoplay tab name), screenshot;
 `status` shows the count; save / load keeps it.

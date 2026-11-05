@@ -118,6 +118,10 @@ impl Game {
 
     /// Screen center of a tab (automated play-throughs): "character", "skills", "spells".
     pub fn window_tab_pos(&self, name: &str) -> Option<Vec2> {
+        // The open journal's tabs (quests / bestiary).
+        if self.journal_open() {
+            return self.journal_tab_pos(name);
+        }
         let t = WinTab::parse(name)?;
         self.tab_rects().into_iter().find(|(x, _)| *x == t).map(|(_, r)| r.center())
     }

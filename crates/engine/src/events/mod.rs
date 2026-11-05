@@ -259,6 +259,8 @@ pub enum Cond {
     Level { op: CmpOp, value: i64 },
     /// The player has a status effect.
     HasEffect { kind: crate::effects::EffectKind },
+    /// How many characters of a definition the player has defeated, compared with a number.
+    Defeated { character: String, op: CmpOp, count: i64 },
 }
 
 /// Whether `hour` lies in `from..to` (hours 0..24; `from > to` wraps around midnight).
@@ -287,6 +289,7 @@ impl Cond {
             Cond::KnowsSpell { .. } => "Knows spell",
             Cond::Level { .. } => "Player level",
             Cond::HasEffect { .. } => "Player has effect",
+            Cond::Defeated { .. } => "Defeated count",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -304,6 +307,7 @@ impl Cond {
             Cond::KnowsSpell { spell: String::new() },
             Cond::Level { op: CmpOp::Ge, value: 2 },
             Cond::HasEffect { kind: crate::effects::EffectKind::Poison },
+            Cond::Defeated { character: String::new(), op: CmpOp::Ge, count: 10 },
         ]
     }
 }
@@ -336,6 +340,7 @@ impl Condition {
             Cond::KnowsSpell { spell } => world.spells.contains(spell),
             Cond::Level { op, value } => op.apply(world.player_level() as i64, *value),
             Cond::HasEffect { kind } => world.effects.iter().any(|e| e.kind == *kind),
+            Cond::Defeated { character, op, count } => op.apply(world.defeated(character) as i64, *count),
         };
         v != self.negate
     }
@@ -768,6 +773,10 @@ mod tests {
         assert!(!met(&poisoned, &w, &mut no_script));
         crate::effects::apply(&mut w.effects, &crate::effects::EffectSpec::new(crate::effects::EffectKind::Poison, 1.0, 3.0));
         assert!(met(&poisoned, &w, &mut no_script));
+        let slimes = |count| [Condition::new(Cond::Defeated { character: "slime".into(), op: CmpOp::Ge, count })];
+        assert!(met(&slimes(0), &w, &mut no_script) && !met(&slimes(1), &w, &mut no_script));
+        w.bestiary.insert("slime".into(), 3);
+        assert!(met(&slimes(3), &w, &mut no_script) && !met(&slimes(4), &w, &mut no_script));
     }
 
     #[test]

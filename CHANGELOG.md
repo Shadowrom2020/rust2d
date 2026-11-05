@@ -28,10 +28,16 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   trigger (characters) and `hp_of(target)` for scripts let bosses react to their HP. Example: goblin
   archers keep their distance, flee once wounded and stay near their camp; a *Bandit Chief* in the
   south-east of Whisperwood calls two outlaws at half his HP.
+- **Bestiary**: the journal (J) has a second tab listing every kind of character the player has
+  defeated, with the count, a portrait, the new *Description* of characters, health, damage,
+  defense, experience, weapon, touch effect and drops. The *Defeated count* condition and
+  `defeated_count(character)` read the counts (saved). The example's monsters have descriptions.
 
 ### Fixes
 - Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage
   area*, `damage_around()` or *Defeat all enemies* (e.g. quest counters) now run, as documented.
+- Editor: the Database tab bar wraps onto a second line in narrow windows; it used to widen the
+  forms below it past the window's right border (description boxes, separators, hints).
 
 ### Maintenance
 - **Faster, cheaper CI**: pull requests into develop run only the branch policy (now seconds:
