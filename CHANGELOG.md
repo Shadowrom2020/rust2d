@@ -5,6 +5,15 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 
 ## Unreleased
 
+### Gameplay
+- **Experience and levels** (optional per project, *Database › Project › Experience and levels*):
+  defeated characters give the XP set in their definition (*Combat › Experience*), completed quests
+  their *Experience reward*. Levels raise max HP, mana and skill points; the XP each level needs
+  grows by a factor per level. The status frame shows the level and an XP bar, the character window
+  the level and the XP to the next one, and a message announces each level. New: the *Give
+  experience* action, the *Player level* condition and the script functions `give_xp(n)`, `xp()` and
+  `level()`. Older projects keep it off; older saves start at level 1. The example project uses it.
+
 ### Maintenance
 - **Faster, cheaper CI**: pull requests into develop run only the branch policy (now seconds:
   xtask builds without the engine unless `--features dist`, `cargo xtask-dist`) and one

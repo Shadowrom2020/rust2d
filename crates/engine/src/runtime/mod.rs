@@ -11,6 +11,7 @@ mod skills;
 mod lights;
 mod creator;
 mod patrol;
+mod progression;
 mod paperdoll;
 mod npc_items;
 mod shop_ui;
@@ -1337,7 +1338,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1347,6 +1348,7 @@ impl Game {
             self.fx_status(),
             self.world_map_status(),
             self.skills_status(),
+            self.progression_status(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),
@@ -1449,7 +1451,7 @@ impl Game {
         self.autosave_pending = false;
         self.combat.reset();
         if self.world.player_hp.is_none_or(|hp| hp <= 0) {
-            self.world.player_hp = Some(self.combat.max_hp);
+            self.world.player_hp = Some(self.player_max_hp());
         }
         // Rebuild the map from scratch so entity states from the save apply.
         self.cache.clear();
@@ -1889,6 +1891,10 @@ impl ActionHost for Game {
             Action::Autosave => {
                 // The event that queued it is still running; it saves once that is done.
                 self.autosave_pending = true;
+                Step::Continue
+            }
+            Action::GiveXp { amount } => {
+                self.give_xp(*amount);
                 Step::Continue
             }
             Action::OpenShop { target } => {

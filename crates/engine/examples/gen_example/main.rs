@@ -912,6 +912,7 @@ fn database() -> Database {
         hostile: false,
         weapon: None,
         defense: 0,
+        xp: 0,
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -953,12 +954,14 @@ fn database() -> Database {
     slime.max_hp = 3;
     slime.damage = 2;
     slime.hostile = true;
+    slime.xp = 5;
     slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
     slime.loot = vec![LootEntry::new("coin", 50.0, 1, 3), LootEntry::new("apple", 10.0, 1, 1)];
     let mut goblin = ch("goblin", "Goblin Archer", "", 38.0, Behavior::Chase { sight: 7.0 });
     goblin.max_hp = 2;
     goblin.damage = 1;
     goblin.hostile = true;
+    goblin.xp = 12;
     goblin.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 150.0 * R, range: 6.0, ammo: String::new() }));
     // Goblin archers drop arrows (and sometimes coins) from their loot table.
     goblin.loot = vec![LootEntry::new("arrows", 70.0, 2, 4), LootEntry::new("coin", 25.0, 1, 2)];
@@ -988,12 +991,14 @@ fn database() -> Database {
                     "Open the east gate and find the old shrine deep in Whisperwood.".into(),
                     "Return to Elder Rowan.".into(),
                 ],
+                xp: 80,
             },
             QuestDef {
                 id: "pest_control".into(),
                 title: "Pest Control".into(),
                 description: "Slimes from Whisperwood keep eating Tilda's deliveries. She promised 30 coins and a potion if I get rid of five of them.".into(),
                 stages: vec!["Defeat slimes in Whisperwood ({pest_slimes}/5).".into(), "Return to Tilda's shop for the reward.".into()],
+                xp: 40,
             },
         ],
         sounds: SOUNDS
@@ -1617,6 +1622,8 @@ fn main() {
             },
         day_minutes: 24.0, start_hour: 8.0,
         skills: rust2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
+        // Experience and levels: a few levels over the example's quests and fights.
+        progression: rust2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
         },
         db: database(),
     };

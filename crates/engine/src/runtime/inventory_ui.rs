@@ -919,16 +919,20 @@ impl Game {
             }
         }
         let st = self.stats();
-        let hp = self.world.player_hp.unwrap_or(self.combat.max_hp);
+        let hp = self.hp();
         let reach = if st.ranged { format!("Range       {:.0} tiles", st.reach) } else { format!("Reach       {:.1} tiles", st.reach) };
-        let lines = [
-            format!("Health      {} / {}", hp, self.combat.max_hp),
+        let mut lines = vec![
+            format!("Health      {} / {}", hp, self.player_max_hp()),
             format!("Attack      {}", st.attack),
             format!("Defense     {}", st.defense),
             format!("Speed       {:.0}", st.speed),
             format!("Attack time {:.2}s", st.cooldown),
             reach,
         ];
+        if self.progression_on() {
+            let (have, need) = self.xp_progress();
+            lines.insert(0, format!("Level       {}  (XP {have} / {need})", self.world.player_level()));
+        }
         let y0 = p.y + 50.0 + EQUIP_SLOTS.len() as f32 * EQUIP_STEP + 20.0;
         draw_line(p.x + PAD, y0 - 12.0, p.x + p.w - PAD, y0 - 12.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
         for (n, l) in lines.iter().enumerate() {

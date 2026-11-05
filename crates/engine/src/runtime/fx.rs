@@ -93,7 +93,7 @@ impl Game {
     /// Tells the script engine where the player is (player_x() / player_y() / ...).
     pub(super) fn sync_script_player(&mut self) {
         let ts = self.ts();
-        let info = crate::script::PlayerInfo { x: self.player.pos.x / ts, y: self.player.pos.y / ts, max_hp: self.combat.max_hp, facing: self.player.facing };
+        let info = crate::script::PlayerInfo { x: self.player.pos.x / ts, y: self.player.pos.y / ts, max_hp: self.player_max_hp(), facing: self.player.facing };
         self.scripts.set_player(info);
     }
 

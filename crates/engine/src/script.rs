@@ -210,6 +210,10 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("skill_points", with!(ctx, |c| c.world.skill_points as i64));
     engine.register_fn("knows_spell", with!(ctx, |c, id: &str| c.world.spells.contains(id)));
     engine.register_fn("mana", with!(ctx, |c| c.world.mana as f64));
+    // Experience and levels.
+    engine.register_fn("xp", with!(ctx, |c| c.world.xp.min(i64::MAX as u64) as i64));
+    engine.register_fn("level", with!(ctx, |c| c.world.player_level() as i64));
+    engine.register_fn("give_xp", with!(ctx, |c, n: i64| c.actions.push(Action::GiveXp { amount: n })));
     engine.register_fn("set_skill", with!(ctx, |c, id: &str, l: i64| c.actions.push(Action::SetSkill { skill: id.into(), level: l.max(0) as u32 })));
     engine.register_fn("give_skill_points", with!(ctx, |c, n: i64| c.actions.push(Action::GiveSkillPoints { amount: n as i32 })));
     engine.register_fn("learn_spell", with!(ctx, |c, id: &str| c.actions.push(Action::LearnSpell { spell: id.into() })));

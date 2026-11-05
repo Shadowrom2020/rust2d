@@ -118,7 +118,7 @@ impl Game {
             SkillEffect::Mana { points } => (*points * l) as f32,
             _ => 0.0,
         });
-        self.project.config.skills.max_mana + bonus as u32
+        self.project.config.skills.max_mana + bonus as u32 + self.level_mana()
     }
     fn mana_regen(&self) -> f32 {
         self.project.config.skills.mana_regen

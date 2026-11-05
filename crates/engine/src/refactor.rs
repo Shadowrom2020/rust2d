@@ -445,6 +445,7 @@ mod tests {
             creation: Default::default(),
         day_minutes: 24.0, start_hour: 8.0,
         skills: Default::default(),
+        progression: Default::default(),
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);

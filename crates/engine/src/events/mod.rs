@@ -244,6 +244,8 @@ pub enum Cond {
     Skill { skill: String, op: CmpOp, level: i64 },
     /// The player has learned the spell.
     KnowsSpell { spell: String },
+    /// The player's level (experience and levels) compared with a value.
+    Level { op: CmpOp, value: i64 },
 }
 
 /// Whether `hour` lies in `from..to` (hours 0..24; `from > to` wraps around midnight).
@@ -270,6 +272,7 @@ impl Cond {
             Cond::TimeBetween { .. } => "Time of day",
             Cond::Skill { .. } => "Skill level",
             Cond::KnowsSpell { .. } => "Knows spell",
+            Cond::Level { .. } => "Player level",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -285,6 +288,7 @@ impl Cond {
             Cond::TimeBetween { from: 20.0, to: 6.0 },
             Cond::Skill { skill: String::new(), op: CmpOp::Ge, level: 1 },
             Cond::KnowsSpell { spell: String::new() },
+            Cond::Level { op: CmpOp::Ge, value: 2 },
         ]
     }
 }
@@ -315,6 +319,7 @@ impl Condition {
             Cond::TimeBetween { from, to } => hour_between(world.hour, *from, *to),
             Cond::Skill { skill, op, level } => op.apply(world.skill_level(skill) as i64, *level),
             Cond::KnowsSpell { spell } => world.spells.contains(spell),
+            Cond::Level { op, value } => op.apply(world.player_level() as i64, *value),
         };
         v != self.negate
     }
@@ -460,6 +465,8 @@ pub enum Action {
     /// Saves the game to the autosave slot as soon as the running event (dialogs, cut-scene)
     /// has finished.
     Autosave,
+    /// Gives the player experience (negative takes it away; the level never drops).
+    GiveXp { amount: i64 },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -544,6 +551,7 @@ impl Action {
             Action::SetSpawners { .. } => "Spawners on / off",
             Action::DefeatEnemies => "Defeat all enemies",
             Action::Autosave => "Autosave",
+            Action::GiveXp { .. } => "Give experience",
         }
     }
 
@@ -599,6 +607,7 @@ impl Action {
             Action::SetSpawners { map: s(), zone: s(), active: false },
             Action::DefeatEnemies,
             Action::Autosave,
+            Action::GiveXp { amount: 10 },
         ]
     }
 }
@@ -714,6 +723,12 @@ mod tests {
         ));
         let mut yes = |f: &str| f == "ok";
         assert!(met(&[Condition::new(Cond::Script { function: "ok".into() })], &w, &mut yes));
+        // A fresh world (and an old save) is level 1.
+        let level = |op, value| Condition::new(Cond::Level { op, value });
+        assert!(met(&[level(CmpOp::Eq, 1)], &w, &mut no_script));
+        w.level = 3;
+        assert!(met(&[level(CmpOp::Ge, 3)], &w, &mut no_script));
+        assert!(!met(&[level(CmpOp::Lt, 3)], &w, &mut no_script));
     }
 
     #[test]
