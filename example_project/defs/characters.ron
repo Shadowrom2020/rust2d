@@ -151,6 +151,11 @@
         weapon: None,
         defense: 0,
         xp: 5,
+        touch_effect: Some((
+            kind: Poison,
+            strength: 0.5,
+            seconds: 6.0,
+        )),
         triggers: [
             (
                 on: Defeat,

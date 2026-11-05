@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod defs;
+pub mod effects;
 pub mod entity;
 pub mod events;
 pub mod fog;

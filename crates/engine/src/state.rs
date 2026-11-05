@@ -183,6 +183,9 @@ pub struct WorldState {
     /// The player's level; 0 in old saves and fresh worlds means 1 (see [`WorldState::player_level`]).
     #[serde(default)]
     pub level: u32,
+    /// The player's running status effects (poison, haste, ...).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<crate::effects::ActiveEffect>,
 }
 
 /// Worn and carried items of an NPC (saved once they differ from the map / definition).
@@ -424,9 +427,12 @@ mod tests {
         assert!(old.quickbar.is_empty());
         // Saves from before experience and levels start at level 1 without XP.
         assert_eq!((old.xp, old.player_level()), (0, 1));
-        let w = WorldState { xp: 250, level: 3, ..Default::default() };
+        assert!(old.effects.is_empty());
+        let mut w = WorldState { xp: 250, level: 3, ..Default::default() };
+        crate::effects::apply(&mut w.effects, &crate::effects::EffectSpec::new(crate::effects::EffectKind::Haste, 30.0, 12.5));
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert_eq!((back.xp, back.player_level()), (250, 3));
+        assert_eq!(back.effects, w.effects);
         let w = WorldState { quickbar: vec!["potion".into(), String::new()], ..Default::default() };
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert_eq!(back.quickbar, w.quickbar);

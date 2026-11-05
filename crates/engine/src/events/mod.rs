@@ -246,6 +246,8 @@ pub enum Cond {
     KnowsSpell { spell: String },
     /// The player's level (experience and levels) compared with a value.
     Level { op: CmpOp, value: i64 },
+    /// The player has a status effect.
+    HasEffect { kind: crate::effects::EffectKind },
 }
 
 /// Whether `hour` lies in `from..to` (hours 0..24; `from > to` wraps around midnight).
@@ -273,6 +275,7 @@ impl Cond {
             Cond::Skill { .. } => "Skill level",
             Cond::KnowsSpell { .. } => "Knows spell",
             Cond::Level { .. } => "Player level",
+            Cond::HasEffect { .. } => "Player has effect",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -289,6 +292,7 @@ impl Cond {
             Cond::Skill { skill: String::new(), op: CmpOp::Ge, level: 1 },
             Cond::KnowsSpell { spell: String::new() },
             Cond::Level { op: CmpOp::Ge, value: 2 },
+            Cond::HasEffect { kind: crate::effects::EffectKind::Poison },
         ]
     }
 }
@@ -320,6 +324,7 @@ impl Condition {
             Cond::Skill { skill, op, level } => op.apply(world.skill_level(skill) as i64, *level),
             Cond::KnowsSpell { spell } => world.spells.contains(spell),
             Cond::Level { op, value } => op.apply(world.player_level() as i64, *value),
+            Cond::HasEffect { kind } => world.effects.iter().any(|e| e.kind == *kind),
         };
         v != self.negate
     }
@@ -467,6 +472,10 @@ pub enum Action {
     Autosave,
     /// Gives the player experience (negative takes it away; the level never drops).
     GiveXp { amount: i64 },
+    /// Starts a status effect on the player or a character.
+    ApplyEffect { target: TargetName, effect: crate::effects::EffectSpec },
+    /// Ends a status effect (`None` = all of them) on the player or a character.
+    CureEffect { target: TargetName, kind: Option<crate::effects::EffectKind> },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -552,6 +561,8 @@ impl Action {
             Action::DefeatEnemies => "Defeat all enemies",
             Action::Autosave => "Autosave",
             Action::GiveXp { .. } => "Give experience",
+            Action::ApplyEffect { .. } => "Apply effect",
+            Action::CureEffect { .. } => "Cure effect",
         }
     }
 
@@ -608,6 +619,8 @@ impl Action {
             Action::DefeatEnemies,
             Action::Autosave,
             Action::GiveXp { amount: 10 },
+            Action::ApplyEffect { target: "player".into(), effect: crate::effects::EffectSpec::template(crate::effects::EffectKind::Poison) },
+            Action::CureEffect { target: "player".into(), kind: Some(crate::effects::EffectKind::Poison) },
         ]
     }
 }
@@ -729,6 +742,10 @@ mod tests {
         w.level = 3;
         assert!(met(&[level(CmpOp::Ge, 3)], &w, &mut no_script));
         assert!(!met(&[level(CmpOp::Lt, 3)], &w, &mut no_script));
+        let poisoned = [Condition::new(Cond::HasEffect { kind: crate::effects::EffectKind::Poison })];
+        assert!(!met(&poisoned, &w, &mut no_script));
+        crate::effects::apply(&mut w.effects, &crate::effects::EffectSpec::new(crate::effects::EffectKind::Poison, 1.0, 3.0));
+        assert!(met(&poisoned, &w, &mut no_script));
     }
 
     #[test]

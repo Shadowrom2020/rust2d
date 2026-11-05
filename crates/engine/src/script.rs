@@ -214,6 +214,19 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("xp", with!(ctx, |c| c.world.xp.min(i64::MAX as u64) as i64));
     engine.register_fn("level", with!(ctx, |c| c.world.player_level() as i64));
     engine.register_fn("give_xp", with!(ctx, |c, n: i64| c.actions.push(Action::GiveXp { amount: n })));
+    // Status effects.
+    engine.register_fn("apply_effect", with!(ctx, |c, t: &str, kind: &str, s: Dynamic, secs: Dynamic| {
+        if let Some(k) = effect_kind(kind) {
+            c.actions.push(Action::ApplyEffect { target: t.into(), effect: crate::effects::EffectSpec::new(k, num(&s), num(&secs)) });
+        }
+    }));
+    engine.register_fn("cure", with!(ctx, |c, t: &str, kind: &str| {
+        if let Some(k) = effect_kind(kind) {
+            c.actions.push(Action::CureEffect { target: t.into(), kind: Some(k) });
+        }
+    }));
+    engine.register_fn("cure", with!(ctx, |c, t: &str| c.actions.push(Action::CureEffect { target: t.into(), kind: None })));
+    engine.register_fn("has_effect", with!(ctx, |c, kind: &str| effect_kind(kind).is_some_and(|k| c.world.effects.iter().any(|e| e.kind == k))));
     engine.register_fn("set_skill", with!(ctx, |c, id: &str, l: i64| c.actions.push(Action::SetSkill { skill: id.into(), level: l.max(0) as u32 })));
     engine.register_fn("give_skill_points", with!(ctx, |c, n: i64| c.actions.push(Action::GiveSkillPoints { amount: n as i32 })));
     engine.register_fn("learn_spell", with!(ctx, |c, id: &str| c.actions.push(Action::LearnSpell { spell: id.into() })));
@@ -381,6 +394,16 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
 }
 
 /// A script number (integer or float) as `f32` (anything else: 0).
+/// An effect kind by its script name ("poison", "haste", ...); unknown names are logged.
+fn effect_kind(name: &str) -> Option<crate::effects::EffectKind> {
+    let k = crate::effects::EffectKind::from_id(name);
+    if k.is_none() {
+        let names: Vec<&str> = crate::effects::EffectKind::ALL.iter().map(|k| k.id()).collect();
+        eprintln!("[script] unknown effect '{name}' (one of: {})", names.join(", "));
+    }
+    k
+}
+
 fn num(d: &Dynamic) -> f32 {
     d.as_float().map(|f| f as f32).or_else(|_| d.as_int().map(|i| i as f32)).unwrap_or(0.0)
 }

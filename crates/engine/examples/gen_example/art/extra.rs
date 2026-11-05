@@ -1418,6 +1418,7 @@ fn characters(x: &mut Extras) {
         weapon: None,
         defense: 0,
         xp: 0,
+        touch_effect: None,
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -1436,7 +1437,12 @@ fn characters(x: &mut Extras) {
     for (id, name, _) in &people {
         let d = match *id {
             "bandit" | "bandit_f" => foe(ch(id, name, 90.0, Behavior::Chase { sight: 6.0 }), 4, 2, 20),
-            "skeleton" | "skeleton_f" => foe(ch(id, name, 70.0, Behavior::Chase { sight: 5.0 }), 3, 2, 20),
+            "skeleton" | "skeleton_f" => {
+                // A skeleton's cold touch slows for a few seconds.
+                let mut d = foe(ch(id, name, 70.0, Behavior::Chase { sight: 5.0 }), 3, 2, 20);
+                d.touch_effect = Some(rust2d_engine::effects::EffectSpec::new(rust2d_engine::effects::EffectKind::Slow, 40.0, 3.0));
+                d
+            }
             "goblin_f" => {
                 // Like the example's goblin archer.
                 let mut d = foe(ch(id, name, 76.0, Behavior::Chase { sight: 7.0 }), 2, 1, 12);

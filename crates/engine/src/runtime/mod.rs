@@ -3,6 +3,7 @@
 mod charwin;
 mod combat;
 mod cutscene;
+mod effects;
 mod equipment;
 mod fx;
 mod inventory_ui;
@@ -143,6 +144,8 @@ struct RtEntity {
     /// Characters: what they wear and hold, and carry (dropped when defeated).
     equipment: crate::state::Equipment,
     inventory: Vec<crate::inventory::ItemStack>,
+    /// Running status effects (not saved, like the HP).
+    effects: Vec<crate::effects::ActiveEffect>,
 }
 
 struct Loaded {
@@ -406,6 +409,7 @@ impl Game {
             appearance: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.appearance.clone()).unwrap_or_default(),
             equipment: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.equipment.clone()).unwrap_or_default(),
             inventory: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.inventory.clone()).unwrap_or_default(),
+            effects: Vec::new(),
         };
         npc_items::apply_gear(&self.project.db, &mut rt);
         rt
@@ -941,6 +945,7 @@ impl Game {
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
         if !frozen && !self.on_title() {
             self.update_skills(dt);
+            self.tick_effects(dt);
         }
         self.update_player(dt, frozen, consumed);
         self.reveal_fog();
@@ -980,6 +985,12 @@ impl Game {
             return;
         }
         if self.apply_player_knockback(dt) {
+            return;
+        }
+        // Stunned: no moving, attacking or interacting until it wears off.
+        if self.player_stunned() {
+            self.player.moving = false;
+            self.order = None;
             return;
         }
 
@@ -1288,7 +1299,17 @@ impl Game {
                 self.loaded.entities[i].body.moving = false;
                 continue;
             }
-            if self.entity_knockback(i, dt) || self.chase(i, dt) || self.patrol_step(i, dt) {
+            if self.entity_knockback(i, dt) {
+                continue;
+            }
+            // Slow / haste scale the time the character moves in; stunned ones stand still.
+            let f = self.npc_speed_factor(i);
+            if f <= 0.0 {
+                self.loaded.entities[i].body.moving = false;
+                continue;
+            }
+            let dt = dt * f;
+            if self.chase(i, dt) || self.patrol_step(i, dt) {
                 continue;
             }
             let e = &self.loaded.entities[i];
@@ -1338,7 +1359,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1349,6 +1370,7 @@ impl Game {
             self.world_map_status(),
             self.skills_status(),
             self.progression_status(),
+            self.effects_status(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),
@@ -1528,7 +1550,7 @@ impl Game {
                     let col = if self.player.moving { (self.player.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
                     // During a melee swing the weapon is drawn along the swing instead.
                     let swinging = self.combat.swing > 0.0;
-                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, WHITE, swinging));
+                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, Self::effect_tint(&self.world.effects).unwrap_or(WHITE), swinging));
                     if !drawn {
                         let r = self.player.rect();
                         draw_rectangle(r.x, r.y - ts * 0.5, r.w, r.h + ts * 0.5, YELLOW);
@@ -1615,7 +1637,7 @@ impl Game {
     fn draw_entity(&self, e: &RtEntity, t: f32) {
         let ts = self.ts();
         let db = &self.project.db;
-        let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { WHITE };
+        let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { Self::effect_tint(&e.effects).unwrap_or(WHITE) };
         let drawn = match e.kind {
             EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE)),
             EntityKind::Character => db.character(&e.def).is_some() && {
@@ -1895,6 +1917,14 @@ impl ActionHost for Game {
             }
             Action::GiveXp { amount } => {
                 self.give_xp(*amount);
+                Step::Continue
+            }
+            Action::ApplyEffect { target, effect } => {
+                self.apply_effect(target, ctx.owner, effect);
+                Step::Continue
+            }
+            Action::CureEffect { target, kind } => {
+                self.cure_effect(target, ctx.owner, *kind);
                 Step::Continue
             }
             Action::OpenShop { target } => {

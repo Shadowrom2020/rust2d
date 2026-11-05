@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use rust2d_engine::defs::*;
+use rust2d_engine::effects::{EffectKind, EffectSpec};
 use rust2d_engine::entity::{EntityInstance, EntityKind};
 use rust2d_engine::events::*;
 use rust2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
@@ -499,6 +500,9 @@ fn shop() -> Map {
             ShopEntry { unlimited: true, ..ShopEntry::new("torch", 0, 0) },
             ShopEntry::new("wooden_shield", 1, 0),
             ShopEntry::new("scroll_heal", 2, 0),
+            ShopEntry::new("antidote", 5, 0),
+            ShopEntry::new("elixir_strength", 2, 0),
+            ShopEntry::new("swiftness", 2, 0),
             ShopEntry::new("scroll_light", 1, 0),
             ShopEntry::new("tunic_green", 1, 0),
             ShopEntry::new("tunic_red", 1, 0),
@@ -913,6 +917,7 @@ fn database() -> Database {
         weapon: None,
         defense: 0,
         xp: 0,
+        touch_effect: None,
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -955,6 +960,8 @@ fn database() -> Database {
     slime.damage = 2;
     slime.hostile = true;
     slime.xp = 5;
+    // A slime's touch poisons: half a heart over six seconds (antidotes cure it).
+    slime.touch_effect = Some(EffectSpec::new(EffectKind::Poison, 0.5, 6.0));
     slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
     slime.loot = vec![LootEntry::new("coin", 50.0, 1, 3), LootEntry::new("apple", 10.0, 1, 1)];
     let mut goblin = ch("goblin", "Goblin Archer", "", 38.0, Behavior::Chase { sight: 7.0 });
@@ -1070,6 +1077,16 @@ fn database() -> Database {
             teach(stack(item("tome_fireball", "Tome of the Fireball", "Teaches Fireball: aim it at a spot and it explodes there. Needs Arcana 3.", it::BOOK, false, vec![]), 1), "fireball"),
             teach(stack(item("tome_fire", "Tome of Fire", "Fire Burst: flames around you. Needs a trained arcanist.", it::BOOK, false, vec![]), 1), "fire_burst"),
             stack(item("mana_potion", "Blue Potion", "Restores 20 mana.", it::MANA_POTION, true, use_trig(vec![Action::AddMana { amount: 20 }])), 10),
+            // Status effect potions.
+            stack(item("antidote", "Antidote", "Cures poison.", it::ANTIDOTE, true, use_trig(vec![Action::CureEffect { target: "player".into(), kind: Some(EffectKind::Poison) }])), 10),
+            stack(
+                item("elixir_strength", "Elixir of Strength", "Your blows hit 30% harder for a minute.", it::ELIXIR, true, use_trig(vec![Action::ApplyEffect { target: "player".into(), effect: EffectSpec::new(EffectKind::Strength, 30.0, 60.0) }])),
+                10,
+            ),
+            stack(
+                item("swiftness", "Swiftness Potion", "You move 30% faster for half a minute.", it::SWIFTNESS, true, use_trig(vec![Action::ApplyEffect { target: "player".into(), effect: EffectSpec::new(EffectKind::Haste, 30.0, 30.0) }])),
+                10,
+            ),
             stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new(), overlay_f: String::new() }), 1),
             stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
         ],
@@ -1194,6 +1211,9 @@ fn database() -> Database {
         ("tunic_green", 25),
         ("tunic_red", 25),
         ("mana_potion", 12),
+        ("antidote", 8),
+        ("elixir_strength", 25),
+        ("swiftness", 20),
     ] {
         db.items.iter_mut().find(|i| i.id == id).expect(id).value = v;
     }

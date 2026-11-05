@@ -2249,6 +2249,12 @@ pub mod it {
     pub const SPARK_SHOT: u32 = 29;
     pub const STAR: u32 = 30;
     pub const LOCKPICK: u32 = 31;
+    /// Status effect potions: antidote (green), elixir of strength (orange), swiftness (cyan).
+    pub const ANTIDOTE: u32 = 32;
+    pub const ELIXIR: u32 = 33;
+    pub const SWIFTNESS: u32 = 34;
+    /// Number of icons in the strip.
+    pub const COUNT: u32 = 35;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -2268,11 +2274,11 @@ fn arrow(c: &mut Canvas, x0: i32, y: i32, len: i32, feathers: bool) {
 }
 
 pub fn items(out: &Path) {
-    let mut c = Canvas::new(TS * 32, TS);
+    let mut c = Canvas::new(TS * it::COUNT, TS);
     let n = TS as i32;
     let steel = [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6];
     let string = hex(0xe8e0c8);
-    for i in 0..32u32 {
+    for i in 0..it::COUNT {
         c.at(i * TS, 0);
         match i {
             it::KEY | it::BRONZE_KEY => {
@@ -2456,6 +2462,31 @@ pub fn items(out: &Path) {
                 c.rect(24, 10, 3, 14, hex(GOLD[1]));
                 c.shade_disc(16.0, 17.0, 5.0, [0x4a8aa0, 0x6ab0c8, 0x9adcf0, 0xe0fbff]);
                 c.px(16, 14, hex(0xffffff));
+            }
+            it::ANTIDOTE | it::ELIXIR | it::SWIFTNESS => {
+                let liquid = match i {
+                    it::ANTIDOTE => [0x1b5e20, 0x2e7d32, 0x43a047, 0xa5d6a7],
+                    it::ELIXIR => [0x8a3a00, 0xc25e00, 0xf57c00, 0xffcc80],
+                    _ => [0x006064, 0x00838f, 0x26c6da, 0xb2ebf2],
+                };
+                c.shade_box(13, 3, 6, 4, WOOD); // cork
+                c.rect(14, 7, 4, 5, hex(0xcfe8ff));
+                c.shade_disc(16.0, 20.0, 10.0, [0x7fa8c8, 0xa8cbe8, 0xcfe8ff, 0xffffff]);
+                c.shade_disc(16.0, 21.0, 8.0, liquid);
+                c.hline(9, 17, 14, hex(liquid[3]));
+                c.rect(11, 14, 2, 4, hex(0xffffff));
+                // A small mark per potion: a leaf, a fist-like block, a streak.
+                match i {
+                    it::ANTIDOTE => {
+                        c.rect(15, 20, 2, 5, hex(0xe8f5e9));
+                        c.rect(13, 21, 6, 2, hex(0xe8f5e9));
+                    }
+                    it::ELIXIR => c.rect(14, 19, 5, 5, hex(0xfff3e0)),
+                    _ => {
+                        c.hline(12, 20, 8, hex(0xe0f7fa));
+                        c.hline(14, 23, 7, hex(0xe0f7fa));
+                    }
+                }
             }
             it::MANA_POTION => {
                 c.shade_box(13, 3, 6, 4, WOOD); // cork
