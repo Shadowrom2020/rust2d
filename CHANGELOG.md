@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.2.0 — 2026-11-05
 
 ### Project
 - **MIT License** (Copyright (c) 2026 Jürgen Herrmann): the project has a `LICENSE` file (it was
