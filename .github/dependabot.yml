@@ -12,9 +12,13 @@ updates:
       cargo-minor:
         update-types: [minor, patch]
     ignore:
-      # Pinned stack (CLAUDE.md): macroquad / egui-macroquad move together, by hand.
+      # Pinned stack (CLAUDE.md): macroquad / egui-macroquad move together, by hand. egui and
+      # egui-phosphor follow egui-macroquad: every egui-phosphor after 0.9 needs a newer egui
+      # than egui-macroquad 0.17.3 (egui 0.31) provides.
       - dependency-name: macroquad
       - dependency-name: egui-macroquad
+      - dependency-name: egui
+      - dependency-name: egui-phosphor
   - package-ecosystem: github-actions
     directory: /
     target-branch: develop

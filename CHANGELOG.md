@@ -3,6 +3,15 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Maintenance
+- **png 0.18** for reading and writing images in the engine (pixel editor, asset library,
+  package icons); an image too large to decode is reported instead of panicking. New tests decode
+  every example image and check lossless round trips.
+- Dependabot no longer proposes egui / egui-phosphor updates: they follow egui-macroquad, which
+  is still on egui 0.31 (egui-phosphor 0.14 needs egui 0.36).
+
 ## 0.2.0 — 2026-11-05
 
 ### Project
