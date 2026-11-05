@@ -28,6 +28,9 @@ before merging, commit messages — are in AGENTS.md and apply in full:
 - The user's own data must not be changed without a backup: their projects (e.g. `~/Test`),
   released games (`~/releases`), the asset library (`~/.local/share/rust2d/library`) and
   `example_project/saves/`. Test on copies in the session scratchpad instead.
+- `ROADMAP.md` holds the planned releases and their work items with design notes. When the
+  user asks for the next feature or names a roadmap item, start from its block, follow *How to
+  work from this roadmap* there and keep the item's status up to date.
 - Keep `README.md` up to date with every user-visible feature (controls table, editor
   section, scripting API), and `Documentation/scripting.md` with every script API change
   (tests fail when an engine script function is missing there or in the editor's `API` table,
