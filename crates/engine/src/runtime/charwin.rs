@@ -5,7 +5,8 @@
 use macroquad::prelude::*;
 
 use super::inventory_ui::Side;
-use super::{input, ui::panel, Game};
+use super::input::{self, Act};
+use super::{ui::panel, Game};
 
 /// Height of the tab strip above the content.
 const TAB_H: f32 = 34.0;
@@ -137,20 +138,28 @@ impl Game {
         let tabs = self.win_tabs();
         if !key_consumed {
             let mut want = None;
-            if input::any_pressed(&[KeyCode::C, KeyCode::I]) {
+            // Tab / RB: next tab, LB: previous one (both open the window when it is closed).
+            let step = if input::act_pressed(Act::NextTab) {
+                1
+            } else if input::act_pressed(Act::PrevTab) {
+                tabs.len() - 1
+            } else {
+                0
+            };
+            if input::act_pressed(Act::Character) {
                 want = Some(WinTab::Character);
-            } else if input::pressed(KeyCode::K) && tabs.contains(&WinTab::Skills) {
+            } else if input::act_pressed(Act::Skills) && tabs.contains(&WinTab::Skills) {
                 want = Some(WinTab::Skills);
-            } else if input::pressed(KeyCode::L) && tabs.contains(&WinTab::Spells) {
+            } else if input::act_pressed(Act::Spells) && tabs.contains(&WinTab::Spells) {
                 want = Some(WinTab::Spells);
-            } else if input::pressed(KeyCode::Tab) {
+            } else if step > 0 {
                 want = Some(match open {
                     None => WinTab::Character,
-                    Some(t) => tabs[(tabs.iter().position(|x| *x == t).unwrap_or(0) + 1) % tabs.len()],
+                    Some(t) => tabs[(tabs.iter().position(|x| *x == t).unwrap_or(0) + step) % tabs.len()],
                 });
             }
             if let Some(t) = want {
-                if open == Some(t) && !input::pressed(KeyCode::Tab) {
+                if open == Some(t) && step == 0 {
                     self.close_window();
                 } else {
                     self.open_tab(t);

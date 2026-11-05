@@ -5,7 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Arrival, Fade, Game, FADE_TIME};
+use super::input::{self, Act, Pad};
+use super::{ui::panel, Arrival, Fade, Game, FADE_TIME};
 use crate::settings::{Settings, TEXT_SPEEDS, ZOOMS};
 
 const W: f32 = 520.0;
@@ -573,7 +574,7 @@ impl Game {
     /// Handles Esc and the open menu. Returns true while the game is paused by it.
     pub(super) fn update_menu(&mut self, can_open: bool) -> bool {
         if !self.menu.open {
-            if can_open && input::pressed(KeyCode::Escape) {
+            if can_open && input::act_pressed(Act::Pause) {
                 self.menu = Menu { open: true, ..Default::default() };
                 self.go(Page::Main);
                 return true;
@@ -593,9 +594,10 @@ impl Game {
             if input::pressed(KeyCode::Backspace) {
                 self.menu.name.pop();
             }
-            if input::pressed(KeyCode::Escape) {
+            // A text field: Enter / Escape (or the gamepad's A / B), not E or Space, which type.
+            if input::act_pressed(Act::Cancel) {
                 self.back();
-            } else if input::pressed(KeyCode::Enter) || (input::mouse_pressed(MouseButton::Left) && self.name_ok_rect().contains(m)) {
+            } else if input::pressed(KeyCode::Enter) || input::pad_pressed(Pad::South) || (input::mouse_pressed(MouseButton::Left) && self.name_ok_rect().contains(m)) {
                 let slot = sanitize(&self.menu.name);
                 if slot.is_empty() {
                     self.menu.message = Some("Please enter a name.".into());
@@ -609,15 +611,15 @@ impl Game {
         }
 
         let n = rows.len();
-        if input::pressed(KeyCode::Escape) {
+        if input::act_pressed(Act::Cancel) {
             self.back();
             return true;
         }
         if n > 0 {
-            if input::pressed(KeyCode::Up) || input::pressed(KeyCode::W) {
+            if input::act_pressed(Act::Up) {
                 self.menu.sel = (self.menu.sel + n - 1) % n;
             }
-            if input::pressed(KeyCode::Down) || input::pressed(KeyCode::S) {
+            if input::act_pressed(Act::Down) {
                 self.menu.sel = (self.menu.sel + 1) % n;
             }
             // Keep the selection visible.
@@ -638,13 +640,13 @@ impl Game {
             }
             if self.menu.page == Page::Options {
                 let opt = OPTS[self.menu.sel.min(n - 1)];
-                if input::any_pressed(&[KeyCode::Left, KeyCode::A]) {
+                if input::act_pressed(Act::Left) {
                     self.change_opt(opt, -1, false);
-                } else if input::any_pressed(&[KeyCode::Right, KeyCode::D]) {
+                } else if input::act_pressed(Act::Right) {
                     self.change_opt(opt, 1, false);
                 }
             }
-            if input::any_pressed(&[KeyCode::Enter, KeyCode::Space, KeyCode::E]) {
+            if input::act_pressed(Act::Confirm) {
                 self.activate_row(rows[self.menu.sel.min(n - 1)].0.clone());
             } else if input::mouse_pressed(MouseButton::Left) {
                 match hovered {
@@ -670,7 +672,7 @@ impl Game {
                 }
             }
             // Delete a save from the load list.
-            if self.menu.page == Page::Load && input::pressed(KeyCode::Delete) {
+            if self.menu.page == Page::Load && (input::pressed(KeyCode::Delete) || input::pad_pressed(Pad::West)) {
                 if let Row::Slot(s) = &rows[self.menu.sel.min(n - 1)].0 {
                     self.go(Page::ConfirmDelete(s.clone()));
                 }

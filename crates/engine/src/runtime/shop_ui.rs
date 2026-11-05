@@ -6,7 +6,8 @@
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Game};
+use super::input::{self, Act};
+use super::{ui::panel, Game};
 use crate::defs::{ShopEntry, ShopSpec};
 use crate::render::wrap_text;
 
@@ -281,7 +282,7 @@ impl Game {
     }
 
     fn trade(&mut self, side: ShopSide, k: usize) {
-        let n = if input::down(KeyCode::LeftShift) || input::down(KeyCode::RightShift) { 10 } else { 1 };
+        let n = if input::act_down(Act::Run) { 10 } else { 1 };
         match side {
             ShopSide::Merchant => self.buy(k, n),
             ShopSide::Player => self.sell(k, n),
@@ -340,24 +341,24 @@ impl Game {
         }
         let l = layout();
         let m = input::mouse_pos();
-        if input::any_pressed(&[KeyCode::Escape, KeyCode::I]) || (input::mouse_pressed(MouseButton::Left) && l.close.contains(m)) {
+        if input::any_act_pressed(&[Act::Cancel, Act::Character]) || (input::mouse_pressed(MouseButton::Left) && l.close.contains(m)) {
             self.shop.close();
             return (true, true);
         }
         let side = self.shop.side.unwrap_or(ShopSide::Merchant);
-        if input::any_pressed(&[KeyCode::Tab, KeyCode::Left, KeyCode::Right, KeyCode::A, KeyCode::D]) {
+        if input::any_act_pressed(&[Act::NextTab, Act::PrevTab, Act::Left, Act::Right]) {
             self.shop.side = Some(side.other());
         }
         let side = self.shop.side.unwrap_or(ShopSide::Merchant);
         let s = side.idx();
-        if input::any_pressed(&[KeyCode::Down, KeyCode::S]) {
+        if input::act_pressed(Act::Down) {
             self.shop.sel[s] += 1;
         }
-        if input::any_pressed(&[KeyCode::Up, KeyCode::W]) {
+        if input::act_pressed(Act::Up) {
             self.shop.sel[s] = self.shop.sel[s].saturating_sub(1);
         }
         self.clamp_selection();
-        if input::any_pressed(&[KeyCode::Enter, KeyCode::E, KeyCode::Space]) && !self.shop_rows(side).is_empty() {
+        if input::act_pressed(Act::Confirm) && !self.shop_rows(side).is_empty() {
             self.trade(side, self.shop.sel[s]);
         }
 

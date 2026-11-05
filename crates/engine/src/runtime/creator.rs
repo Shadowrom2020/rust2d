@@ -8,7 +8,8 @@
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Game};
+use super::input::{self, Act, Pad};
+use super::{ui::panel, Game};
 use crate::defs::Appearance;
 use crate::state::Sex;
 
@@ -237,7 +238,8 @@ impl Game {
         if input::pressed(KeyCode::Backspace) {
             c.name.pop();
         }
-        if input::pressed(KeyCode::Escape) {
+        // The name field takes typed text: arrows and Enter / Escape (or the gamepad) navigate.
+        if input::act_pressed(Act::Cancel) {
             self.creator = None;
             return true;
         }
@@ -251,13 +253,13 @@ impl Game {
             if fixed && rows[k] == Row::Sex { (k + d) % n } else { k }
         };
         let mut row = c.row.min(n - 1);
-        if input::pressed(KeyCode::Down) {
+        if input::nav_pressed(Act::Down) {
             row = step(row, 1);
         }
-        if input::pressed(KeyCode::Up) {
+        if input::nav_pressed(Act::Up) {
             row = step(row, n - 1);
         }
-        let (left, right) = (input::pressed(KeyCode::Left), input::pressed(KeyCode::Right));
+        let (left, right) = (input::nav_pressed(Act::Left), input::nav_pressed(Act::Right));
         if let Some(c) = &mut self.creator {
             c.row = row;
         }
@@ -270,7 +272,7 @@ impl Game {
             r if right => self.change_row(r, 1),
             _ => {}
         }
-        if input::pressed(KeyCode::Enter) {
+        if input::pressed(KeyCode::Enter) || input::pad_pressed(Pad::South) {
             let row = self.creator.as_ref().map_or(0, |c| c.row);
             if rows.get(row) == Some(&Row::Back) {
                 self.creator = None;

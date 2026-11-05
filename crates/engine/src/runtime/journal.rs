@@ -6,7 +6,8 @@
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Game};
+use super::input::{self, Act};
+use super::{ui::panel, Game};
 use crate::quest::{QuestChange, QuestOp, QuestStatus};
 use crate::render::wrap_text;
 
@@ -157,7 +158,7 @@ impl Game {
             return (false, false);
         }
         if !self.journal.open {
-            if !key_consumed && input::pressed(KeyCode::J) {
+            if !key_consumed && input::act_pressed(Act::Journal) {
                 self.journal.open = true;
                 self.journal.tab = JournalTab::Quests;
                 self.journal.log_scroll = 0;
@@ -172,15 +173,15 @@ impl Game {
         let r = rect();
         let m = input::mouse_pos();
         let close = Rect::new(r.x + r.w - 30.0, r.y + 8.0, 22.0, 22.0);
-        if input::any_pressed(&[KeyCode::J, KeyCode::Escape]) || (input::mouse_pressed(MouseButton::Left) && close.contains(m)) {
+        if input::any_act_pressed(&[Act::Journal, Act::Cancel]) || (input::mouse_pressed(MouseButton::Left) && close.contains(m)) {
             self.journal.open = false;
             return (true, true);
         }
         // Switching tabs (the dialog log opens at the newest line).
         let before = self.journal.tab;
-        if input::any_pressed(&[KeyCode::Tab, KeyCode::Right, KeyCode::D]) {
+        if input::any_act_pressed(&[Act::NextTab, Act::Right]) {
             self.journal.tab = self.journal.tab.step(1);
-        } else if input::any_pressed(&[KeyCode::Left, KeyCode::A]) {
+        } else if input::any_act_pressed(&[Act::PrevTab, Act::Left]) {
             self.journal.tab = self.journal.tab.step(-1);
         }
         if input::mouse_pressed(MouseButton::Left) {
@@ -196,10 +197,10 @@ impl Game {
             let max = self.journal.log_max.get().min(self.world.dialog_log.len().saturating_sub(1));
             let s = &mut self.journal.log_scroll;
             let wheel = input::wheel();
-            if input::any_pressed(&[KeyCode::Up, KeyCode::W]) || wheel > 0.0 {
+            if input::act_pressed(Act::Up) || wheel > 0.0 {
                 *s += 1;
             }
-            if input::any_pressed(&[KeyCode::Down, KeyCode::S]) || wheel < 0.0 {
+            if input::act_pressed(Act::Down) || wheel < 0.0 {
                 *s = s.saturating_sub(1);
             }
             if input::pressed(KeyCode::PageUp) {
@@ -219,10 +220,10 @@ impl Game {
         }
         if self.journal.tab == JournalTab::Bestiary {
             let n = self.bestiary_entries().len();
-            if input::any_pressed(&[KeyCode::Down, KeyCode::S]) {
+            if input::act_pressed(Act::Down) {
                 self.journal.best_sel = (self.journal.best_sel + 1).min(n.saturating_sub(1));
             }
-            if input::any_pressed(&[KeyCode::Up, KeyCode::W]) {
+            if input::act_pressed(Act::Up) {
                 self.journal.best_sel = self.journal.best_sel.saturating_sub(1);
             }
             if input::mouse_pressed(MouseButton::Left) {
@@ -234,10 +235,10 @@ impl Game {
         }
         let entries = self.journal_entries();
         let rows = Self::quest_rows(&entries);
-        if input::any_pressed(&[KeyCode::Down, KeyCode::S]) {
+        if input::act_pressed(Act::Down) {
             self.journal.sel = (self.journal.sel + 1).min(rows.len().saturating_sub(1));
         }
-        if input::any_pressed(&[KeyCode::Up, KeyCode::W]) {
+        if input::act_pressed(Act::Up) {
             self.journal.sel = self.journal.sel.saturating_sub(1);
         }
         if input::mouse_pressed(MouseButton::Left) {

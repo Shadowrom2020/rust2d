@@ -35,6 +35,12 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 - **Dialog log**: the journal's third tab, *Dialogs*, shows the last 1000 dialog lines of the game
   (speaker, text, and the options the player picked), newest at the bottom; scroll with Up / Down,
   the mouse wheel, PgUp / PgDn and Home / End. The log is saved with the game.
+- **Gamepads**: any controller Linux knows works next to keyboard and mouse - stick / d-pad to move
+  and navigate, A interact / confirm, B back, X attack, Y character window, RB / LB tabs, LT run,
+  RT switch weapon, Start pause, Select map (full table in the README). The game reads named actions
+  now instead of fixed keys (the groundwork for rebinding); keyboard controls are unchanged.
+  Flatpaks of games and of rust2d get `--device=all` (gamepads need /dev/input). Building rust2d
+  needs `libudev-dev` (the game links `libudev`, present on every desktop Linux).
 
 ### Fixes
 - Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage

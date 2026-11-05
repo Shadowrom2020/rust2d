@@ -49,7 +49,7 @@ jobs:
         if: steps.v.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
         with:
           shared-key: release
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev libudev-dev
         if: steps.v.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
       - uses: ./.github/actions/packages
         if: steps.v.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'

@@ -36,9 +36,9 @@ pub fn dist(args: &[String]) -> Result<()> {
         categories: "Development;Game;".into(),
         app_id: APP_ID.into(),
         runtime: rust2d_packaging::FLATPAK_RUNTIMES[0].into(),
-        // Window, GPU and sound; projects anywhere in home; network for the AppImage runtime of
+        // Window, sound, devices (GPU, gamepads for play-tests); projects anywhere in home; network for the AppImage runtime of
         // game exports; the host's flatpak for Flatpak game exports.
-        finish_args: ["--share=ipc", "--socket=x11", "--socket=pulseaudio", "--device=dri", "--share=network", "--filesystem=home", "--talk-name=org.freedesktop.Flatpak"]
+        finish_args: ["--share=ipc", "--socket=x11", "--socket=pulseaudio", "--device=all", "--share=network", "--filesystem=home", "--talk-name=org.freedesktop.Flatpak"]
             .map(String::from)
             .to_vec(),
         files: vec![
