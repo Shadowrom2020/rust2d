@@ -11,7 +11,7 @@ use crate::settings::{Settings, TEXT_SPEEDS, ZOOMS};
 
 const W: f32 = 520.0;
 const ROW_H: f32 = 40.0;
-const MAX_ROWS: usize = 9;
+const MAX_ROWS: usize = 10;
 const MAX_NAME: usize = 32;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -32,6 +32,8 @@ enum Page {
     ConfirmClose(Option<Box<Page>>),
     /// Player options (graphics, sound, text).
     Options,
+    /// The keys of every action (Options › Controls).
+    Controls,
     /// The player was defeated: continue from the last save, start over or quit.
     Defeated,
 }
@@ -46,11 +48,13 @@ enum Opt {
     Music,
     Effects,
     TextSpeed,
+    /// Opens the Controls page.
+    Controls,
     Reset,
     Back,
 }
 
-const OPTS: [Opt; 9] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::TextSpeed, Opt::Reset, Opt::Back];
+const OPTS: [Opt; 10] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::TextSpeed, Opt::Controls, Opt::Reset, Opt::Back];
 
 struct SaveInfo {
     slot: String,
@@ -71,11 +75,13 @@ pub(super) struct Menu {
     pub quit: bool,
     /// Showing the title screen (instead of the pause menu).
     title: bool,
+    /// Controls page: waiting for a key for this action.
+    capture: Option<Act>,
 }
 
 impl Default for Menu {
     fn default() -> Self {
-        Menu { open: false, page: Page::Main, sel: 0, scroll: 0, saves: Vec::new(), name: String::new(), message: None, quit: false, title: false }
+        Menu { open: false, page: Page::Main, sel: 0, scroll: 0, saves: Vec::new(), name: String::new(), message: None, quit: false, title: false, capture: None }
     }
 }
 
@@ -107,6 +113,12 @@ enum Row {
     StartOver,
     /// Defeat menu: back to the title screen.
     ToTitle,
+    /// Controls page: an action's keys (Enter adds one, Del clears them).
+    Bind(Act),
+    /// Controls page: every action back to its default keys.
+    ResetKeys,
+    /// Controls page: back to the Options page.
+    BackToOptions,
 }
 
 pub(super) fn now_secs() -> u64 {
@@ -228,6 +240,19 @@ impl Game {
                 (Row::No, "Cancel".into(), "Back to the game".into()),
             ],
             Page::Options => OPTS.iter().map(|o| (Row::Opt(*o), Self::opt_label(*o).into(), self.opt_value(*o))).collect(),
+            Page::Controls => {
+                let mut v: Vec<(Row, String, String)> = Act::ALL
+                    .into_iter()
+                    .filter(|a| a.rebindable())
+                    .map(|a| {
+                        let keys: Vec<String> = input::keys_of(a).into_iter().map(input::key_label).collect();
+                        (Row::Bind(a), a.label().into(), if keys.is_empty() { "-".into() } else { keys.join(", ") })
+                    })
+                    .collect();
+                v.push((Row::ResetKeys, "Reset to defaults".into(), String::new()));
+                v.push((Row::BackToOptions, "Back".into(), String::new()));
+                v
+            }
             Page::ConfirmOverwrite(_) | Page::ConfirmDelete(_) => {
                 vec![(Row::Yes, "Yes".into(), String::new()), (Row::No, "No".into(), String::new())]
             }
@@ -246,6 +271,7 @@ impl Game {
             Page::ConfirmQuit => "Quit without saving?".into(),
             Page::ConfirmClose(_) => "Exit the game?".into(),
             Page::Options => "Options".into(),
+            Page::Controls => "Controls".into(),
             Page::Defeated => "You were defeated".into(),
         }
     }
@@ -295,6 +321,10 @@ impl Game {
             Page::Options => {
                 self.go(if self.menu.title { Page::Title } else { Page::Main });
                 self.menu.sel = 3; // back on "Options"
+            }
+            Page::Controls => {
+                self.go(Page::Options);
+                self.menu.sel = OPTS.iter().position(|o| *o == Opt::Controls).unwrap();
             }
             Page::ConfirmClose(back) => match back {
                 Some(p) => self.go(*p),
@@ -363,6 +393,10 @@ impl Game {
             (_, Row::LoadMenu) => self.go(Page::Load),
             (_, Row::OptionsMenu) => self.go(Page::Options),
             (_, Row::Opt(Opt::Back)) => self.back(),
+            (_, Row::Opt(Opt::Controls)) => self.go(Page::Controls),
+            (_, Row::Bind(a)) => self.menu.capture = Some(a),
+            (_, Row::ResetKeys) => self.set_keys(None, None),
+            (_, Row::BackToOptions) => self.back(),
             (_, Row::Opt(o)) => self.change_opt(o, 1, true),
             (_, Row::SaveQuit) => {
                 let slot = self.save_quit_slot();
@@ -430,6 +464,7 @@ impl Game {
             Opt::Music => "Music volume",
             Opt::Effects => "Effects volume",
             Opt::TextSpeed => "Text speed",
+            Opt::Controls => "Controls...",
             Opt::Reset => "Reset to defaults",
             Opt::Back => "Back",
         }
@@ -447,7 +482,7 @@ impl Game {
             Opt::Music => pct(s.music_volume),
             Opt::Effects => pct(s.effects_volume),
             Opt::TextSpeed => TEXT_SPEEDS.iter().find(|t| t.0 == s.text_speed).map_or("Normal", |t| t.1).to_string(),
-            Opt::Reset | Opt::Back => String::new(),
+            Opt::Controls | Opt::Reset | Opt::Back => String::new(),
         }
     }
 
@@ -472,8 +507,9 @@ impl Game {
                 let speeds: Vec<f32> = TEXT_SPEEDS.iter().map(|t| t.0).collect();
                 s.text_speed = step(&speeds, s.text_speed);
             }
-            Opt::Reset => *s = Settings::default(),
-            Opt::Back => return,
+            // The keys have their own reset on the Controls page.
+            Opt::Reset => *s = Settings { keys: std::mem::take(&mut s.keys), ..Settings::default() },
+            Opt::Controls | Opt::Back => return,
         }
         self.apply_settings();
         if o == Opt::Effects || o == Opt::Master {
@@ -484,8 +520,44 @@ impl Game {
         }
     }
 
-    /// Applies the options: volumes, fullscreen (zoom, FPS and text speed are read where used).
+    /// Changes the keys of `act`: `Some(key)` adds a key (an action keeps at most three, the
+    /// oldest drops out), `None` clears them; `act` None resets every action. Applies and saves.
+    fn set_keys(&mut self, act: Option<Act>, key: Option<KeyCode>) {
+        let mut table: std::collections::HashMap<Act, Vec<KeyCode>> = Act::ALL.into_iter().map(|a| (a, input::keys_of(a))).collect();
+        match (act, key) {
+            (None, _) => table.clear(),
+            (Some(a), None) => {
+                table.insert(a, Vec::new());
+            }
+            (Some(a), Some(k)) => {
+                let keys = table.entry(a).or_default();
+                if !keys.contains(&k) {
+                    keys.push(k);
+                    if keys.len() > 3 {
+                        keys.remove(0);
+                    }
+                }
+            }
+        }
+        self.settings.keys = input::binding_names(&table);
+        input::set_bindings(&self.settings.keys);
+        if let Err(e) = self.settings.save(&self.project.config.name) {
+            self.menu.message = Some(format!("Could not save the options: {e}"));
+        }
+    }
+
+    /// Controls page: what the selected row's keys clash with.
+    fn conflict_text(&self, a: Act) -> Option<String> {
+        let clashes: Vec<String> = input::keys_of(a)
+            .into_iter()
+            .flat_map(|k| input::conflicts(a, k).into_iter().map(move |b| format!("{} is also {}", input::key_label(k), b.label())))
+            .collect();
+        (!clashes.is_empty()).then(|| clashes.join(" · "))
+    }
+
+    /// Applies the options: volumes, fullscreen, keys (zoom, FPS and text speed are read where used).
     pub(super) fn apply_settings(&mut self) {
+        input::set_bindings(&self.settings.keys);
         let s = self.settings.clone();
         self.audio.set_volumes(s.effects(), s.music());
         if self.fullscreen != Some(s.fullscreen) {
@@ -610,10 +682,34 @@ impl Game {
             return true;
         }
 
+        // Controls page waiting for a key: the next key pressed is added (Esc keeps the keys).
+        if let Some(a) = self.menu.capture {
+            if let Some(k) = input::last_key_pressed() {
+                self.menu.capture = None;
+                if k == KeyCode::Escape {
+                    return true;
+                }
+                if input::key_name(k).is_none() {
+                    self.menu.message = Some("That key can't be used.".into());
+                    return true;
+                }
+                self.set_keys(Some(a), Some(k));
+            } else if input::pad_pressed(Pad::East) || input::pad_pressed(Pad::Start) {
+                self.menu.capture = None;
+            }
+            return true;
+        }
         let n = rows.len();
         if input::act_pressed(Act::Cancel) {
             self.back();
             return true;
+        }
+        // Controls page: Del / Backspace (gamepad X) clears the selected action's keys.
+        if self.menu.page == Page::Controls && (input::any_pressed(&[KeyCode::Delete, KeyCode::Backspace]) || input::pad_pressed(Pad::West)) {
+            if let Some((Row::Bind(a), _, _)) = rows.get(self.menu.sel) {
+                self.set_keys(Some(*a), None);
+                return true;
+            }
         }
         if n > 0 {
             if input::act_pressed(Act::Up) {
@@ -652,7 +748,7 @@ impl Game {
                 match hovered {
                     // Options: "<" goes to the previous value, ">" to the next one, a click
                     // elsewhere on the row cycles forward.
-                    Some(k) if self.menu.page == Page::Options && !matches!(OPTS[k], Opt::Reset | Opt::Back) => {
+                    Some(k) if self.menu.page == Page::Options && !matches!(OPTS[k], Opt::Reset | Opt::Back | Opt::Controls) => {
                         self.menu.sel = k;
                         let (prev, next) = opt_arrows(rects[k - self.menu.scroll]);
                         if prev.contains(m) {
@@ -769,6 +865,19 @@ impl Game {
                     let vw = measure_text(detail, None, 22, 1.0).width;
                     draw_text(detail, (prev.right() + next.x - vw) / 2.0, r.y + 25.0, 22.0, base);
                 }
+            } else if self.menu.page == Page::Controls && !detail.is_empty() {
+                // Action left, keys right (orange where they clash with another action).
+                draw_text(label, r.x + 14.0, r.y + 26.0, 22.0, c);
+                let Row::Bind(a) = rows[idx].0 else { continue };
+                let (text, col) = if self.menu.capture == Some(a) {
+                    ("Press a key...".to_string(), GOLD)
+                } else if self.conflict_text(a).is_some() {
+                    (detail.clone(), Color::new(1.0, 0.65, 0.25, 1.0))
+                } else {
+                    (detail.clone(), if selected { WHITE } else { LIGHTGRAY })
+                };
+                let tw = measure_text(&text, None, 20, 1.0).width;
+                draw_text(&text, r.x + r.w - 14.0 - tw, r.y + 25.0, 20.0, col);
             } else if detail.is_empty() {
                 draw_text(label, r.x + 14.0, r.y + 26.0, 26.0, c);
             } else {
@@ -786,10 +895,17 @@ impl Game {
             Page::Load => "Enter / click: load · Del: delete · Esc: back",
             Page::Name => "Type a name · Enter: save · Esc: back",
             Page::Options => "Left/Right or click < >: change · saved right away · Esc: back",
+            Page::Controls if self.menu.capture.is_some() => "Press the new key · Esc: keep the keys",
+            Page::Controls => "Enter: add a key · Del: clear · saved right away · Esc: back",
             Page::Defeated => "Up/Down: choose · Enter / click: confirm",
             _ => "Enter / click · Esc: back",
         };
-        if let Some(msg) = &self.menu.message {
+        // Controls page: what the selected action's keys clash with.
+        let clash = match (&self.menu.page, rows.get(self.menu.sel)) {
+            (Page::Controls, Some((Row::Bind(a), _, _))) if self.menu.message.is_none() => self.conflict_text(*a),
+            _ => None,
+        };
+        if let Some(msg) = self.menu.message.as_ref().or(clash.as_ref()) {
             draw_text(msg, p.x + 16.0, p.y + p.h - 34.0, 18.0, Color::new(1.0, 0.5, 0.5, 1.0));
         }
         draw_text(hint, p.x + 16.0, p.y + p.h - 12.0, 16.0, GRAY);

@@ -265,11 +265,19 @@ Quick-bar slots have no buttons (use items from the character window).
 **Verify.** Every autoplay script of the README still works (key names unchanged); `pad a`
 walks a dialog; screenshots of inventory / shop / loot operated by pad commands.
 
-### [ ] Key rebinding — `feature/rebinding`
+### [x] Key rebinding — `feature/rebinding`
 
 **Goal.** Options → *Controls*: a page listing every action with its keys; Enter waits for a key,
 Esc keeps, *Reset to defaults*. Conflicts are shown, not refused. The README controls table
 documents the defaults. Depends on the input layer.
+
+**Decided while building.** Keyboard only (gamepad buttons stay fixed); Escape (back, pause) and
+F3 can't be rebound. Enter + a key *adds* a key (at most three per action, the oldest drops out),
+Del / Backspace clears an action, so WASD + arrows style pairs stay possible. `Settings.keys` keeps
+only actions that differ from the defaults (action id -> key names, `input::KEY_NAMES`). Clashes
+count only between actions used in the same place (`Act::places`: playing, windows, map screen),
+so the default C / Space on both *Character* and *Map: center* is fine. `status()` got
+`attacking=` for scripted checks.
 
 **Verify.** `opt` commands rebind *Attack* to another key, `press` the new key attacks; the
 setting survives a restart (settings file in the scratch settings dir).
