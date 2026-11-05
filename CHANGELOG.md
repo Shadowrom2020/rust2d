@@ -52,6 +52,9 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
 
 ### Gameplay
+- **Status frame** (HUD, top left): a framed panel with a small portrait of the hero, the hero's
+  name, the hearts, the mana bar, the defense and the ammo of an equipped ranged weapon. The
+  weapon box in the bottom-left corner is gone (the held weapon is drawn on the hero).
 - **Character window**: inventory, character sheet, skills and spells are one window with the
   tabs *Character* (C / I), *Skills* (K) and *Spells* (L); one HUD button (next to the map
   button) replaces the three inventory / character / skills buttons. Tab cycles the tabs, the
