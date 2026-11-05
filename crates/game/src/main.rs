@@ -5,8 +5,6 @@
 //! Without PROJECT_DIR a released game runs the project in `data/` next to the executable
 //! (saves in `~/.local/share/<game>/saves`); otherwise `example_project` is used.
 
-mod glibc_compat;
-
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};

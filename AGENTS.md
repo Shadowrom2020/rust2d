@@ -6,74 +6,121 @@ engine (`crates/engine`), the game runner (`crates/game`) and the editor (`crate
 ## Branching concept
 
 ```
-feature/a            o---o                      feature/b   o---o
-                    /     \                                /     \
-develop     ---o---o-------o---------o--------o-----------o-------o---
-                                      \      /  (release merged back)
-release/0.0.4                          o----o
-                                             \
-master      ---o------------------------------o--- tag v0.0.4
+feature/<name>, bugfix/<name>   o---o
+                               /     \ PR
+develop        ---o-----------o-------o---------------o-------------------------o---
+                                       \             / back-merge PR           / back-merge PR
+release/0.2.0                           o---o       /                         /
+                                             \ PR  /                         /
+master         ---o---------------------------o---o-------------------------o---
+                                         tag v0.2.0 \                      / PR, tag v0.2.1
+hotfix/0.2.1                                         o--------------------o
 ```
 
-| Branch | Created from | Merged into | Purpose |
+| Branch | Created from | Pull request into | Purpose |
 |---|---|---|---|
-| `master` | – | – | The main branch. Only ever updated by merging a release branch. Every merge is a release and gets a tag `vX.Y.Z`. |
-| `develop` | `master` (once) | – | Integration branch: the consolidated state of all finished features. Must always build and pass the checks below. |
-| `feature/<name>` | `develop` | `develop` | One feature or fix per branch, e.g. `feature/quest-journal`, `feature/fix-script-tab`. |
-| `release/<version>` | `develop` | `master`, then `develop` | Created on demand when one or more features on `develop` should become a release, e.g. `release/0.0.4`. |
+| `master` | – | – | Released versions only. Every merge is a release: CI tags it `vX.Y.Z` and publishes it. |
+| `develop` | `master` (once) | – | Integration branch: everything finished for the next release. Always builds and passes CI. |
+| `feature/<name>` | `develop` | `develop` | One feature, e.g. `feature/quest-journal`. |
+| `bugfix/<name>` | `develop` | `develop` | A fix that ships with the next regular release, e.g. `bugfix/gate-spawn`. |
+| `release/X.Y.Z` | `develop` | `master` | Prepares a release: version bump, CHANGELOG section, small fixes found while preparing it. No new features. |
+| `hotfix/X.Y.Z` | `master` | `master` | An urgent fix of the released version that can't wait for the next release; raises PATCH. |
+| `dependabot/*` | – | `develop` | Dependency updates opened by Dependabot. |
 
 Note: this repository's main branch is called `master` (not `main`).
 
 ### Rules
 
-1. **Never commit directly to `master` or `develop`.** All work happens on a feature branch.
-   `develop` only receives merges from feature branches (and release branches being merged
-   back). `master` only receives merges from release branches.
-2. **Features** start from an up-to-date `develop` and go back into `develop` when they are
-   done and checked. Keep a feature branch focused on one topic; delete it after the merge.
-3. **Releases** are cut on demand from `develop` once it contains the features to ship. A
-   release branch only gets release work: the version bump in the workspace `Cargo.toml`,
-   README / release notes, and small fixes found while preparing the release. No new features.
-4. Finishing a release: merge `release/<version>` into `master` with `--no-ff`, tag the merge
-   commit `v<version>` on `master`, merge the release branch back into `develop` (so the version
-   bump and fixes are not lost), then delete the release branch.
-5. Versions follow `MAJOR.MINOR.PATCH` (currently `0.x.y`); the version lives in
-   `[workspace.package] version` in the root `Cargo.toml`.
-6. Push branches and tags only when asked to; publish a branch with `git push -u origin <branch>`.
+1. **`master` and `develop` are protected** (GitHub rulesets, for everyone including admins):
+   no direct pushes, no force pushes, no deletion. Changes arrive by **pull request** only, merged
+   with a **merge commit** (squash and rebase merges are disabled) once the required CI checks
+   pass. No review is required (one developer); `master` additionally requires the branch to be
+   up to date. Tags `v*` can't be moved or deleted.
+2. **CI decides which branch may go where** (`cargo xtask check-branch`, the *Branch policy*
+   check): `develop` takes `feature/*`, `bugfix/*`, `release/X.Y.Z`, `hotfix/X.Y.Z`, `master`
+   (back-merges) and `dependabot/*`; `master` takes only `release/X.Y.Z` and `hotfix/X.Y.Z`.
+3. Keep a branch focused on one topic; GitHub deletes it after the merge.
+4. **Releases** are cut on demand from `develop`, **hotfixes** from `master`. Their branch name
+   carries the version, and CI (*Version* check, `cargo xtask check-version`) refuses the pull
+   request unless the version is valid SemVer, above the latest release, equal to
+   `[workspace.package] version` in `Cargo.toml`, has a `## X.Y.Z — date` section in
+   CHANGELOG.md and no `## Unreleased` is left; a hotfix may only raise PATCH.
+5. **Merging into master releases automatically** (`.github/workflows/release.yml`): it builds
+   the rust2d AppImage and Flatpak, tags the merge commit `vX.Y.Z`, publishes a GitHub Release
+   (notes = the CHANGELOG section, with the packages and SHA256SUMS) and opens the pull request
+   that merges `master` back into `develop`. Merge that one too.
+6. Push and open pull requests only when asked to; merge only when asked to.
 7. Before starting work, check which branch is checked out (`git branch --show-current`) and
    that the working tree is clean. If the current branch is `master` or `develop`, create a
-   feature branch first.
+   branch first.
+
+### Versions: Semantic Versioning 2.0
+
+Versions are `MAJOR.MINOR.PATCH` ([semver.org](https://semver.org)), in `[workspace.package]
+version` of the root `Cargo.toml`, tagged `vX.Y.Z`:
+
+- **MAJOR** — incompatible changes: projects, maps, definitions or save games of the previous
+  version no longer load (the compatibility rules below make this rare), or a script API is
+  removed or changes meaning.
+- **MINOR** — new features (the usual release from `develop`); backwards compatible.
+- **PATCH** — fixes only (hotfixes; a release from `develop` with only bug fixes).
+- **Pre-releases** `X.Y.Z-rc.N` are allowed (`release/0.3.0-rc.1`); GitHub marks them as
+  pre-releases. Build metadata (`+…`) is not used.
+- While MAJOR is 0, MINOR releases may still contain breaking changes; say so in the CHANGELOG.
 
 ### Commands
 
 ```sh
-# Start a feature
+# Start a feature or bugfix
 git checkout develop && git pull --ff-only
-git checkout -b feature/<name>
+git checkout -b feature/<name>               # or bugfix/<name>
+# ... commit, then publish and open the pull request
+git push -u origin feature/<name>
+gh pr create --base develop --fill
+gh pr checks --watch                         # wait for CI
+gh pr merge --merge                          # (--auto: merge as soon as CI passes)
 
-# Finish a feature (after the checks below pass)
+# Cut a release (MINOR for features, PATCH for fixes only)
 git checkout develop && git pull --ff-only
-git merge --no-ff feature/<name>
-git push origin develop
-git branch -d feature/<name>                 # and: git push origin --delete feature/<name>
+git checkout -b release/0.2.0
+#   set [workspace.package] version = "0.2.0" in Cargo.toml (cargo build updates Cargo.lock),
+#   rename "## Unreleased" in CHANGELOG.md to "## 0.2.0 — YYYY-MM-DD", update "Current version" in README.md
+git commit -am "rust2d 0.2.0"
+git push -u origin release/0.2.0
+gh pr create --base master --title "rust2d 0.2.0" --fill
+gh pr merge --merge                          # after CI: Release workflow tags, publishes, opens the back-merge PR
+gh pr merge <back-merge PR> --merge          # master -> develop
 
-# Cut a release from the consolidated develop branch
-git checkout develop && git pull --ff-only
-git checkout -b release/0.0.4
-#   bump [workspace.package] version in Cargo.toml, update README, commit "rust2d 0.0.4"
-
-# Finish the release
+# Hotfix a released version
 git checkout master && git pull --ff-only
-git merge --no-ff release/0.0.4
-git tag v0.0.4
-git checkout develop && git merge --no-ff release/0.0.4
-git push origin master develop v0.0.4
-git branch -d release/0.0.4
+git checkout -b hotfix/0.2.1
+#   fix, bump version to 0.2.1, add "## 0.2.1 — YYYY-MM-DD" to CHANGELOG.md
+git push -u origin hotfix/0.2.1
+gh pr create --base master --fill            # then merge it and the back-merge PR as above
 ```
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request into `develop` / `master` and every push to
+them (Ubuntu 22.04, so the binaries need only glibc ≤ 2.35). Its jobs are the required checks:
+
+| Check | What it does | Required for |
+|---|---|---|
+| *Branch policy* | `cargo xtask check-branch HEAD BASE` | develop, master |
+| *Build, lint, test* | `cargo build`, `cargo clippy -D warnings`, `cargo test` (workspace, `--locked`) | develop, master |
+| *Version* | `cargo xtask check-version BRANCH` on pull requests into master | master |
+| *Packages* | release build, `cargo xtask dist` (AppImage + Flatpak), smoke test of game and editor under Xvfb, packages as artifacts; for pull requests into master and changes to packaging | master |
+
+Dependabot opens weekly grouped updates (cargo, GitHub Actions) against `develop`; macroquad and
+egui-macroquad are pinned and updated by hand.
+
+`cargo xtask` (crates/xtask) runs the same tasks locally: `dist [--out DIR]` (needs
+`cargo build --release` first; refuses binaries that need glibc > 2.35), `check-version BRANCH`,
+`check-branch HEAD BASE`, `release-notes X.Y.Z`.
 
 ## Checks before merging
 
-Run from the repository root; all must pass before a feature or release branch is merged:
+CI runs them on every pull request; run them locally before pushing:
 
 ```sh
 cargo build --workspace                      # also rebuilds rust2d-game for editor play-tests
@@ -85,7 +132,7 @@ cargo test --workspace
   editor's starter asset pack with `cargo run --example gen_example` and commit the results.
   Never delete or commit `example_project/saves/` (it is ignored; it may hold the user's saves).
 - Build the game in release mode (`cargo build --release --workspace`) before testing
-  *File → Export game*.
+  *File → Export game* or `cargo xtask dist`.
 
 ## Commit messages
 

@@ -13,6 +13,8 @@ lz4_flex.workspace = true
 rhai.workspace = true
 anyhow.workspace = true
 png = "0.17"
+# Portable math functions (glibc_compat.rs).
+libm = "0.2"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]

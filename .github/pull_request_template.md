@@ -1,0 +1,20 @@
+## What and why
+
+<!-- What does this change, and why? Link issues with "Fixes #123". -->
+
+## Branch
+
+- [ ] `feature/<name>` or `bugfix/<name>` into `develop`
+- [ ] `release/X.Y.Z` into `master` (version bump in Cargo.toml + CHANGELOG section only)
+- [ ] `hotfix/X.Y.Z` into `master` (urgent fix, PATCH bump)
+
+## How it was tested
+
+<!-- Scripted game / editor runs (RUST2D_AUTOPLAY, RUST2D_EDITOR_SCRIPT), screenshots, unit tests. -->
+
+## Checklist
+
+- [ ] `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` pass
+- [ ] CHANGELOG.md (*Unreleased*), README.md and Documentation/scripting.md updated where users see a change
+- [ ] Old maps, definitions and save games still load (new enum variants appended, new fields have serde defaults)
+- [ ] `example_project/` regenerated if `gen_example` changed (`cargo run --example gen_example`)

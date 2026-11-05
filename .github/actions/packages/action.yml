@@ -1,0 +1,29 @@
+name: Build rust2d packages
+description: Release build, AppImage + Flatpak of the rust2d toolkit (cargo xtask dist) and a smoke test of both binaries under Xvfb.
+runs:
+  using: composite
+  steps:
+    - name: Packaging tools
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends flatpak xvfb xauth libgl1-mesa-dri libglx-mesa0 libxi6 libxcursor1 libxkbcommon-x11-0
+    - name: Release build
+      shell: bash
+      run: cargo build --release --locked -p rust2d-editor -p rust2d-game
+    - name: AppImage and Flatpak
+      shell: bash
+      run: cargo xtask dist --out dist
+    - name: Smoke test (game and editor from the AppImage)
+      shell: bash
+      run: |
+        cd "$RUNNER_TEMP"
+        "$GITHUB_WORKSPACE"/dist/rust2d-*-x86_64.AppImage --appimage-extract > /dev/null
+        export RUST2D_MUTE=1 RUST2D_SETTINGS_DIR="$RUNNER_TEMP/settings" XDG_DATA_HOME="$RUNNER_TEMP/data"
+        export RUST2D_EDITOR_CONFIG="$RUNNER_TEMP/editor-config" RUST2D_LIBRARY="$RUNNER_TEMP/library"
+        RUST2D_AUTOPLAY="wait 2; status; quit" timeout 120 xvfb-run -a -s "-screen 0 1280x720x24" \
+          squashfs-root/usr/bin/rust2d-game squashfs-root/usr/share/rust2d/example_project 2>&1 | tee game.log
+        grep -q "menu=title" game.log
+        RUST2D_EDITOR_SCRIPT="wait 2; status; quit" timeout 120 xvfb-run -a -s "-screen 0 1280x720x24" \
+          squashfs-root/AppRun 2>&1 | tee editor.log
+        grep -q "open=false" editor.log

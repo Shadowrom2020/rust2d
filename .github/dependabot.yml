@@ -1,0 +1,25 @@
+# Weekly dependency updates as pull requests into develop (allowed by the branch policy as
+# dependabot/*). Minor and patch updates come grouped in one pull request per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor:
+        update-types: [minor, patch]
+    ignore:
+      # Pinned stack (CLAUDE.md): macroquad / egui-macroquad move together, by hand.
+      - dependency-name: macroquad
+      - dependency-name: egui-macroquad
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

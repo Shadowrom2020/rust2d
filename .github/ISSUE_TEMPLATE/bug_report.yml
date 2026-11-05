@@ -1,0 +1,37 @@
+name: Bug report
+description: Something in the game, the editor or the asset library doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the example project
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: rust2d version
+      description: Release (e.g. 0.2.0, AppImage or Flatpak) or the commit you built.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: e.g. Ubuntu 24.04, Wayland, NVIDIA
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal output / screenshots
+      render: text

@@ -347,6 +347,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         // exportdialog [appimage] [flatpak]: opens File → Export game with those packages ticked
+        // example: the welcome screen's "Example project" (packaged rust2d only)
+        "example" => ed.open_example(),
         "exportdialog" => {
             ed.open_export();
             if let Some(d) = &mut ed.export {
