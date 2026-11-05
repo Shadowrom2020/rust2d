@@ -93,24 +93,27 @@ impl Game {
         self.world.player_hp.unwrap_or(self.combat.max_hp)
     }
 
-    /// Advances the game-over screen; returns true while it is showing.
+    /// Advances the game-over screen; returns true while it is showing. Once the red fade is
+    /// done the defeat menu opens (continue from the last save, start over, quit to the main
+    /// menu); the screen stays red behind it.
     pub(super) fn update_game_over(&mut self, dt: f32) -> bool {
         let Some(t) = &mut self.game_over else { return false };
         *t += dt;
         if *t >= GAME_OVER_TIME {
-            self.game_over = None;
-            self.respawn();
+            *t = GAME_OVER_TIME;
+            self.open_defeat_menu();
         }
         true
     }
 
-    /// After defeat: reload the quick save, or restart from the project start.
-    fn respawn(&mut self) {
-        if self.project.saves_dir().join("quick.ron").exists() && self.load_game("quick").is_ok() {
-            self.world.player_hp = Some(self.combat.max_hp);
-            return;
-        }
+    /// The defeat menu's *Start over*: a new game from the start, as the same hero (name, sex
+    /// and look stay).
+    pub(super) fn start_over(&mut self) {
+        let (name, sex, look) = (self.world.player_name.clone(), self.world.player_sex, self.world.player_appearance.clone());
         self.new_game();
+        self.world.player_name = name;
+        self.world.player_sex = sex;
+        self.world.player_appearance = look;
     }
 
     /// Starts over with a fresh world at the project's start map / spawn.
@@ -128,6 +131,7 @@ impl Game {
         self.slot = None;
         self.order = None;
         self.game_over = None;
+        self.autosave_pending = false;
         self.prepare_world();
         self.inv = Default::default();
         self.combat.reset();
@@ -708,12 +712,13 @@ impl Game {
         let Some(t) = self.game_over else { return };
         let (w, h) = (screen_width(), screen_height());
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.25, 0.0, 0.0, (t / 0.8).min(0.75)));
+        // The defeat menu shows the message once it is open.
+        if self.defeat_menu_open() {
+            return;
+        }
         let msg = "You were defeated";
         let m = measure_text(msg, None, 48, 1.0);
         draw_text(msg, (w - m.width) / 2.0, h / 2.0, 48.0, WHITE);
-        let sub = if self.project.saves_dir().join("quick.ron").exists() { "Returning to your last save..." } else { "Starting over..." };
-        let m2 = measure_text(sub, None, 24, 1.0);
-        draw_text(sub, (w - m2.width) / 2.0, h / 2.0 + 40.0, 24.0, LIGHTGRAY);
     }
 }
 

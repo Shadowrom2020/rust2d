@@ -49,6 +49,8 @@ type TriggerSink<'a> = dyn FnMut(String, &[Trigger], Option<u32>) + 'a;
 /// How many recently left maps are kept in memory.
 const MAP_CACHE: usize = 4;
 const FADE_TIME: f32 = 0.25;
+/// Save slot of the autosaves (after map changes and the `Autosave` action).
+pub(super) const AUTOSAVE: &str = "autosave";
 
 #[derive(Clone, Debug)]
 pub enum Arrival {
@@ -202,6 +204,8 @@ pub struct Game {
     skills: skills::Skills,
     /// Set while a saved game is being loaded (see `enter_map`).
     resuming: bool,
+    /// An autosave is due (after a map change, or `Autosave`): written once no event runs.
+    autosave_pending: bool,
     /// The player's options (Options menu), saved per game in the user's config folder.
     pub settings: crate::settings::Settings,
     /// Fullscreen state last applied (None = not yet).
@@ -255,6 +259,7 @@ impl Game {
             light_pass: None,
             skills: Default::default(),
             resuming: false,
+            autosave_pending: false,
             settings: crate::settings::Settings::default(),
             fullscreen: None,
             loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![], tile_lights: vec![] },
@@ -584,6 +589,10 @@ impl Game {
             self.zones_inside = self.zones_at(self.player.pos);
             return;
         }
+        // A real map change (not loading a save) is autosaved once its Map enter triggers ran.
+        if !self.resuming && !self.on_title() {
+            self.autosave_pending = true;
+        }
         match self.take_map(&map_name) {
             Ok(map) => self.enter_map(map, arrival),
             Err(e) => {
@@ -887,6 +896,7 @@ impl Game {
             self.fire(ev, src);
         }
 
+        self.update_autosave();
         if self.update_game_over(dt) {
             return;
         }
@@ -1327,7 +1337,9 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.menu_status(),
+            self.autosave_status(),
             self.cutscene_status(),
             self.ui_hidden,
             self.window_status(),
@@ -1374,6 +1386,13 @@ impl Game {
     }
 
     pub fn save_game(&mut self, slot: &str) -> Result<()> {
+        self.write_save(slot)?;
+        self.slot = Some(slot.to_string());
+        Ok(())
+    }
+
+    /// Writes the save file of `slot` (the game keeps its own slot for *Save and quit*).
+    fn write_save(&mut self, slot: &str) -> Result<()> {
         if self.runner.busy() {
             return Err(anyhow!("can't save during an event"));
         }
@@ -1382,8 +1401,34 @@ impl Game {
         let dir = self.project.saves_dir();
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join(format!("{slot}.ron")), self.world.to_ron()?)?;
-        self.slot = Some(slot.to_string());
         Ok(())
+    }
+
+    /// Writes a due autosave once the game is calm: no event, cut-scene, dialog, fade or
+    /// defeat in progress.
+    fn update_autosave(&mut self) {
+        if !self.autosave_pending || self.runner.busy() || self.ui.dialog_open() || self.game_over.is_some() || !matches!(self.fade, Fade::None) || self.on_title() || self.cutscene_active() {
+            return;
+        }
+        self.autosave_pending = false;
+        match self.write_save(AUTOSAVE) {
+            Ok(()) => self.ui.toast("Autosaved".into()),
+            Err(e) => {
+                eprintln!("[game] autosave failed: {e:#}");
+                self.ui.toast(format!("Autosave failed: {e}"));
+            }
+        }
+    }
+
+    /// For `status()`: "pending", "saved" (the file exists) or "none".
+    fn autosave_status(&self) -> &'static str {
+        if self.autosave_pending {
+            "pending"
+        } else if self.project.saves_dir().join(format!("{AUTOSAVE}.ron")).exists() {
+            "saved"
+        } else {
+            "none"
+        }
     }
 
     pub fn load_game(&mut self, slot: &str) -> Result<()> {
@@ -1401,6 +1446,7 @@ impl Game {
         self.ui = Ui::default();
         self.inv = Default::default();
         self.game_over = None;
+        self.autosave_pending = false;
         self.combat.reset();
         if self.world.player_hp.is_none_or(|hp| hp <= 0) {
             self.world.player_hp = Some(self.combat.max_hp);
@@ -1838,6 +1884,11 @@ impl ActionHost for Game {
             }
             Action::DefeatEnemies => {
                 self.defeat_enemies();
+                Step::Continue
+            }
+            Action::Autosave => {
+                // The event that queued it is still running; it saves once that is done.
+                self.autosave_pending = true;
                 Step::Continue
             }
             Action::OpenShop { target } => {

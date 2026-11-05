@@ -1241,6 +1241,9 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
         Action::DefeatEnemies => {
             ui.weak("Every hostile character on the current map is defeated at once (loot drops, their 'Defeated' triggers run).");
         }
+        Action::Autosave => {
+            ui.weak("Saves the game to the 'Autosave' slot once this event (dialogs, cut-scene) has finished. Map changes autosave by themselves.");
+        }
         Action::EndCutscene => {
             ui.weak("(ends the cut-scene; added automatically after a cut-scene's actions)");
         }

@@ -360,6 +360,16 @@ are still shown. Not saved: a loaded game always starts with the HUD visible.
 | `hide_ui()` | Hides the HUD. *(queued)* |
 | `show_ui()` | Shows it again. *(queued)* |
 
+### Saving
+
+The game autosaves to the *Autosave* slot after every map change (once the new map's *Map
+enter* triggers and cut-scenes are done), and a defeated player can continue from the newest
+save. Scripts can add autosaves at important moments, e.g. after a boss fight or a quest step.
+
+| Function | Description |
+|---|---|
+| `autosave()` | Saves the game to the *Autosave* slot as soon as the running event — its dialogs, waits or cut-scene — has finished, so a save never captures half an event. *(queued)* |
+
 ### Quests
 
 | Function | Description |

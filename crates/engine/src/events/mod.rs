@@ -457,6 +457,9 @@ pub enum Action {
     /// Defeats every hostile character on the current map at once (with their loot, dropped
     /// items and *Defeated* triggers, like a defeat in combat).
     DefeatEnemies,
+    /// Saves the game to the autosave slot as soon as the running event (dialogs, cut-scene)
+    /// has finished.
+    Autosave,
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -540,6 +543,7 @@ impl Action {
             Action::Dim { .. } => "Dim the scene",
             Action::SetSpawners { .. } => "Spawners on / off",
             Action::DefeatEnemies => "Defeat all enemies",
+            Action::Autosave => "Autosave",
         }
     }
 
@@ -594,6 +598,7 @@ impl Action {
             Action::Dim { amount: 0.7, seconds: 1.0 },
             Action::SetSpawners { map: s(), zone: s(), active: false },
             Action::DefeatEnemies,
+            Action::Autosave,
         ]
     }
 }
