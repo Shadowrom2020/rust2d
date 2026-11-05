@@ -21,6 +21,17 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   seconds left in the status frame, markers over characters, tints for poison / burning / stun;
   the player's effects are saved. Example: poisonous slimes, an *Antidote*, an *Elixir of
   Strength* and a *Swiftness Potion* at Tilda's (new icons); skeletons in the starter library slow.
+- **Enemy behaviour**: *Chase player* characters notice the player in a clear line within their
+  sight (through walls and trees only within half of it), hunt on for a few seconds after losing
+  them, and slide around obstacles instead of getting stuck on a corner. New per character: *Leash*
+  (give up and walk home), *Flee below %* and, for shooters, *Keep distance*. The *HP below %*
+  trigger (characters) and `hp_of(target)` for scripts let bosses react to their HP. Example: goblin
+  archers keep their distance, flee once wounded and stay near their camp; a *Bandit Chief* in the
+  south-east of Whisperwood calls two outlaws at half his HP.
+
+### Fixes
+- Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage
+  area*, `damage_around()` or *Defeat all enemies* (e.g. quest counters) now run, as documented.
 
 ### Maintenance
 - **Faster, cheaper CI**: pull requests into develop run only the branch policy (now seconds:

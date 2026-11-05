@@ -757,6 +757,28 @@ fn forest() -> Map {
     // A torch lies at the mine entrance (it glows on the ground at night).
     let torch = b.entity(EntityKind::Item, "torch", 54, 8);
     torch.count = 2;
+    // The bandit camp (south-east): the chief, and two outlaws who only show up when he calls
+    // for help at half his HP. Spots are moved off trees like the slimes'.
+    let free = |b: &B, x: i32, y: i32| (0..6).flat_map(|d| [(x + d, y), (x - d, y), (x, y + d), (x, y - d)]).find(|&(x, y)| b.free(x, y)).unwrap();
+    let (cx, cy) = free(&b, 58, 38);
+    let chief = b.entity(EntityKind::Character, "bandit_chief", cx, cy);
+    chief.name = "bandit_chief".into();
+    chief.triggers = vec![Trigger {
+        on: TriggerOn::HpBelow { percent: 50 },
+        conditions: vec![],
+        actions: vec![
+            dialog("{self}", "Argh! Lads, to me! Cut this one down!"),
+            Action::SetActive { target: "outlaw_1".into(), active: true },
+            Action::SetActive { target: "outlaw_2".into(), active: true },
+        ],
+        once: true,
+    }];
+    for (k, (x, y)) in [(55, 41), (61, 35)].into_iter().enumerate() {
+        let (x, y) = free(&b, x, y);
+        let o = b.entity(EntityKind::Character, "outlaw", x, y);
+        o.name = format!("outlaw_{}", k + 1);
+        o.active = false;
+    }
     b.m
 }
 
@@ -954,7 +976,7 @@ fn database() -> Database {
         i
     };
     let use_trig = |actions: Vec<Action>| vec![trig(TriggerOn::UseItem { item: String::new() }, vec![], actions)];
-    let mut slime = ch("slime", "Slime", "slime", 32.0, Behavior::Chase { sight: 4.0 });
+    let mut slime = ch("slime", "Slime", "slime", 32.0, Behavior::chase(4.0));
     slime.hitbox = [12.0 * R, 6.0 * R];
     slime.max_hp = 3;
     slime.damage = 2;
@@ -964,7 +986,9 @@ fn database() -> Database {
     slime.touch_effect = Some(EffectSpec::new(EffectKind::Poison, 0.5, 6.0));
     slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
     slime.loot = vec![LootEntry::new("coin", 50.0, 1, 3), LootEntry::new("apple", 10.0, 1, 1)];
-    let mut goblin = ch("goblin", "Goblin Archer", "", 38.0, Behavior::Chase { sight: 7.0 });
+    // Goblin archers give up 10 tiles from home, run away once wounded (2 HP: at 1) and keep 4
+    // tiles between them and the player while shooting.
+    let mut goblin = ch("goblin", "Goblin Archer", "", 38.0, Behavior::Chase { sight: 7.0, leash: 10.0, flee_below: 0.6, keep_distance: 4.0 });
     goblin.max_hp = 2;
     goblin.damage = 1;
     goblin.hostile = true;
@@ -974,6 +998,20 @@ fn database() -> Database {
     goblin.loot = vec![LootEntry::new("arrows", 70.0, 2, 4), LootEntry::new("coin", 25.0, 1, 2)];
     // Goblin scouts (female) roam the wilds with the archers.
     let goblin_f = CharacterDef { id: "goblin_f".into(), name: "Goblin Scout".into(), speed: 42.0 * R, ..goblin.clone() };
+    // The bandits' camp in the south-east of Whisperwood: the chief calls two outlaws when hurt
+    // (an 'HP below 50 %' trigger on the placed chief).
+    let mut chief = ch("bandit_chief", "Bandit Chief", "", 40.0, Behavior::Chase { sight: 6.0, leash: 9.0, flee_below: 0.0, keep_distance: 0.0 });
+    chief.max_hp = 10;
+    chief.damage = 2;
+    chief.hostile = true;
+    chief.xp = 60;
+    chief.loot = vec![LootEntry::new("coin", 100.0, 10, 20), LootEntry::new("potion", 100.0, 1, 1), LootEntry::new("elixir_strength", 50.0, 1, 1)];
+    let mut outlaw = ch("outlaw", "Outlaw", "", 46.0, Behavior::Chase { sight: 7.0, leash: 12.0, flee_below: 0.3, keep_distance: 0.0 });
+    outlaw.max_hp = 4;
+    outlaw.damage = 2;
+    outlaw.hostile = true;
+    outlaw.xp = 20;
+    outlaw.loot = vec![LootEntry::new("coin", 60.0, 2, 6)];
     let mut hero = ch("hero", "Hero", "", 70.0, Behavior::Static);
     hero.max_hp = 12; // 6 hearts
     hero.damage = 1;
@@ -1171,6 +1209,8 @@ fn database() -> Database {
             slime,
             goblin,
             goblin_f,
+            chief,
+            outlaw,
             // Every merchant sells these by default; the one in the village has their own stock.
             CharacterDef {
                 shop: Some(ShopSpec {
@@ -1556,6 +1596,12 @@ fn layered_characters(db: &mut Database) {
             "merchant_f" => (look("body_female", 0xe8b88a, "hair_long", 0x3a2418, false), vec![(EquipSlot::Clothing, "merchant_dress")]),
             "goblin" => (look("body_goblin", 0x7cb342, "hair_short", 0x33691e, false), vec![(EquipSlot::Clothing, "goblin_rags"), (EquipSlot::Weapon, "crude_bow")]),
             "goblin_f" => (look("body_goblin_female", 0x8bc34a, "hair_ponytail", 0x2a4a14, false), vec![(EquipSlot::Clothing, "goblin_rags"), (EquipSlot::Weapon, "crude_bow")]),
+            "bandit_chief" => (
+                look("body_male", 0xd09068, "hair_long", 0x1e1612, true),
+                // Light armor (defense 2) and an axe; all of it drops when he is defeated.
+                vec![(EquipSlot::Clothing, "tunic_red"), (EquipSlot::Body, "leather_armor"), (EquipSlot::Head, "leather_cap"), (EquipSlot::Weapon, "axe")],
+            ),
+            "outlaw" => (look("body_male", 0xe8b88a, "hair_short", 0x7a4a22, false), vec![(EquipSlot::Clothing, "tunic_green"), (EquipSlot::Head, "leather_cap"), (EquipSlot::Weapon, "sword")]),
             _ => continue,
         };
         d.appearance = app;

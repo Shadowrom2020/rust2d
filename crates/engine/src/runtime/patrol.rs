@@ -71,7 +71,7 @@ impl Game {
         vec2((t.0 as f32 + 0.5) * ts, (t.1 as f32 + 1.0) * ts - 2.0)
     }
 
-    fn tile_of(&self, p: Vec2) -> TilePos {
+    pub(super) fn tile_of(&self, p: Vec2) -> TilePos {
         let ts = self.ts();
         ((p.x / ts).floor() as i32, ((p.y - 1.0) / ts).floor() as i32)
     }
