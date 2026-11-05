@@ -2,7 +2,7 @@
 
 A small 2D engine for top-down RPGs on Linux, written in Rust ([macroquad](https://macroquad.rs) + [egui](https://github.com/emilk/egui)), with a map/content editor.
 
-Current version: **0.0.9** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+Current version: **0.1.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 - **Tile maps** up to 1024×1024 tiles, any number of layers (overhead layers draw above characters), stored chunked and sparse.
 - **Editor** for maps (brush/stamp, rectangle, flood fill, erase, eyedropper, collision painting, undo/redo), entities, zones and transitions, plus a database editor for items, props, characters, tilesets, sprite sheets, project settings and scripts.

@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.1.0 — 2026-11-05
 
 ### Saving and defeat
 - **Defeat menu**: a defeated player no longer reloads the quicksave automatically. After the
