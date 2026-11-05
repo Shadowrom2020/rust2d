@@ -70,7 +70,8 @@ crates/engine/src/      library: everything shared by game and editor
                         lighting.rs = day/night ambient, LightPass light map, tile_lights)
   library.rs            asset library + .r2dpack bundles; refactor.rs = id renames / refs_of_*
   migrate.rs            converts old 16 px projects; release.rs = standalone game export
-  examples/gen_example/ generates example_project/ and the editor's starter.r2dpack
+  examples/gen_example/ generates example_project/ and the editor's starter.r2dpack; music.rs
+                        composes and renders the two music tracks (tiny synth, Ogg Vorbis via vorbis_rs)
 crates/game/src/main.rs game binary: CLI args, window, RUST2D_AUTOPLAY script runner
 crates/editor/src/      editor binary
   main.rs               loop + RUST2D_EDITOR_SCRIPT command runner
@@ -168,6 +169,7 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
   `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), `addaction LABEL` (append an action template to the selected entity's trigger), `entequip ITEM` / `entskin RRGGBB` (selected NPC's own equipment / look), pixel editor (`px…`),
   character builder (`charnew [ID NAME]`, `charcustom` = selected NPC, `charset body|hair|beard|skin|haircolor|clothing|head|armor|weapon|offhand|carry|id|name VALUE` on the open builder else the selected character, `charrandom`, `chartemplate ID` (project or library character), `charcreate` / `charapply`, `charcancel`, `charreset`, `playable SHEET on|off`; `status` prints `builder=`),
+  sounds (`sndplay [ID]` / `sndstop [ID]` = the Sounds form's Play / Stop, default the selected sound; `status` prints `preview=` and `music=`),
   template chooser (`model def|inst|builder`, `modelpick`, `modeluse`), wizard (`newwizard`, `wiz`,
   `wizcreate`), `scriptsel`, `probe X Y` (egui layer at a point), `status`, `dump`.
 - **Asset Library window:** run `rust2d-editor --library` (with `RUST2D_LIBRARY=<scratch>/lib`)

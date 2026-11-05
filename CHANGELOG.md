@@ -3,6 +3,20 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Audio
+- **Ogg Vorbis music**: sounds and music can be WAV or Ogg Vorbis files (`.ogg`); the Sounds
+  form and the README say so, and a file in a format the game can't play (Opus, FLAC, MP3)
+  is reported by name when the project loads instead of just "could not decode".
+- **New music**: the example project's and the starter library's two tracks are replaced by
+  composed, rendered pieces — *Market Day* (a lilting lute, recorder and tabor dance for the
+  village) and *Whisperwood* (a slow drone, harp, recorder and bells for the forest) — saved as
+  Ogg Vorbis at 44.1 kHz and looping seamlessly. They are written by the example generator's
+  new `music.rs` (a small synthesizer and note notation) instead of the old square-wave loops.
+- **Stop button**: the Sounds form (Database and the Asset Library window) has *Stop* next to
+  *Play*; Play previews a file once and a new preview stops the previous one.
+
 ## 0.0.9 — 2026-11-05
 
 ### Characters and equipment

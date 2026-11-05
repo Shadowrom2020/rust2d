@@ -347,7 +347,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} msg={}",
             ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
@@ -359,6 +359,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.defs_dirty,
             ed.lib.add.as_ref().map_or("closed".to_string(), |d| format!("{:?}:{}", d.kind, d.picked.len())),
             ed.builder_status(),
+            ed.audio.previewing(),
+            ed.audio.current_music(),
             ed.status.0
         ),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),
@@ -697,6 +699,15 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 _ => Tab::Items,
             };
             ed.db.sel = num(2) as usize;
+        }
+        // sndplay / sndstop [ID]: the Sounds form's Play / Stop (default: the selected sound).
+        "sndplay" | "sndstop" => {
+            let id = if arg(1).is_empty() { ed.project.db.sounds.get(ed.db.sel).map(|d| d.id.clone()).unwrap_or_default() } else { arg(1).to_string() };
+            if arg(0) == "sndplay" {
+                ed.audio.play_preview(&id);
+            } else {
+                ed.audio.stop(&id);
+            }
         }
         "tool" => {
             ed.tool = match arg(1) {
