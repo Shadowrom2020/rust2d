@@ -12,3 +12,5 @@ egui-phosphor = "0.9"
 anyhow.workspace = true
 ron.workspace = true
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+# AppImage / Flatpak exports (package.rs).
+rust2d-packaging.workspace = true

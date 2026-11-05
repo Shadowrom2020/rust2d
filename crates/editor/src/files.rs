@@ -25,6 +25,8 @@ pub enum Purpose {
     ExportPackage { from_library: bool, assets: Vec<rust2d_engine::library::AssetRef> },
     /// Output folder of File → Export game.
     ExportGameFolder,
+    /// Icon picture of the AppImage / Flatpak packages (File → Export game).
+    ExportIcon,
 }
 
 /// A file dialog running on a background thread, so the editor keeps drawing.
@@ -51,6 +53,7 @@ impl PendingDialog {
                 Purpose::SheetImage(_) => d.set_title("Choose sprite sheet image").add_filter("Images", &images).pick_file(),
                 Purpose::SoundFile(_) => d.set_title("Choose sound").add_filter("Audio (WAV, OGG)", &["wav", "ogg"]).pick_file(),
                 Purpose::ExportGameFolder => d.set_title("Folder for the exported game").pick_folder(),
+                Purpose::ExportIcon => d.set_title("Icon of the game (PNG, e.g. 256 x 256)").add_filter("PNG image", &["png"]).pick_file(),
                 Purpose::ImportPackage { .. } => d.set_title("Import asset package").add_filter("rust2d asset package", &["r2dpack"]).pick_file(),
                 Purpose::ExportPackage { .. } => d.set_title("Export asset package").add_filter("rust2d asset package", &["r2dpack"]).set_file_name("assets.r2dpack").save_file(),
             };
@@ -165,6 +168,42 @@ pub fn remember_recent(root: &Path) {
             let _ = std::fs::write(dir.join("recent.ron"), s);
         }
     }
+}
+
+/// The example project shipped with a packaged rust2d (AppImage / Flatpak:
+/// `<prefix>/share/rust2d/example_project`, the editor being `<prefix>/lib/rust2d/rust2d-editor`).
+pub fn bundled_example() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let p = exe.parent()?.parent()?.parent()?.join("share/rust2d/example_project");
+    p.join("project.ron").is_file().then_some(p)
+}
+
+/// A writable copy of the bundled example in `~/rust2d/example_project` (made on first use;
+/// an existing copy - maybe edited - is opened as it is).
+pub fn example_copy() -> Result<PathBuf> {
+    let src = bundled_example().context("this rust2d has no bundled example project")?;
+    let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
+    let dst = home.join("rust2d/example_project");
+    if !dst.join("project.ron").exists() {
+        copy_tree(&src, &dst).with_context(|| format!("copying the example project to {}", dst.display()))?;
+    }
+    Ok(dst)
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)?.flatten() {
+        let (src, dst) = (e.path(), to.join(e.file_name()));
+        if src.is_dir() {
+            copy_tree(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)?;
+            // Files in the AppImage / Flatpak are read-only: the copy belongs to the user.
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o644))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

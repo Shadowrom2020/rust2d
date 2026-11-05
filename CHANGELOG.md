@@ -3,6 +3,48 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.2.0 — 2026-11-05
+
+### Project
+- **MIT License** (Copyright (c) 2026 Jürgen Herrmann): the project has a `LICENSE` file (it was
+  declared MIT in Cargo.toml only). It ships in the rust2d AppImage and Flatpak, and every
+  exported game includes it as `rust2d-LICENSE.txt` for the engine inside (also in the game's
+  zip, AppImage and Flatpak); the license of the game itself stays the creator's choice.
+
+### Development and releases
+- **GitHub workflow**: CI on every pull request (branch policy, build + clippy + tests, version
+  check, AppImage / Flatpak packaging with a smoke test); `master` and `develop` are protected
+  (pull requests and passing checks for everyone, merge commits only, release tags can't be
+  moved); Dependabot updates; pull request and issue templates.
+- **Bugfix and hotfix branches**: `bugfix/<name>` (from develop) and `hotfix/X.Y.Z` (from master,
+  PATCH only) next to `feature/` and `release/`.
+- **Semantic Versioning**: the version is in the release / hotfix branch name; CI checks it is
+  valid SemVer, above the latest release and matches Cargo.toml and the CHANGELOG.
+- **Automatic releases**: merging into master tags the release, publishes it on GitHub with the
+  rust2d editor (+ game runner and example project) as **AppImage** and **Flatpak**, and opens the
+  back-merge pull request into develop.
+- `cargo xtask` (`dist`, `check-version`, `check-branch`, `release-notes`); the packaging code is
+  shared by the editor's game export and the toolkit packages (`crates/packaging`).
+- Packaged rust2d: the welcome screen's **Example project** copies the bundled example to
+  `~/rust2d/example_project` and opens it; game exports work from inside the AppImage and the
+  Flatpak (there via the host's `flatpak`).
+- The editor binary, too, runs on glibc 2.34 (`acosf` added to the portable math functions,
+  which moved into the engine); the glibc check reads the ELF version needs and ignores weak ones.
+
+### Releasing games
+- **AppImage and Flatpak**: *File → Export game* can also build Linux packages of the game: an
+  **AppImage** (one file for most distributions; the editor writes it itself, only the official
+  AppImage runtime is downloaded once, checked against a pinned SHA-256 and cached) and a
+  **Flatpak bundle** (sandboxed, on the freedesktop 25.08 or 26.08 runtime, installed by players
+  with `flatpak install --user GAME.flatpak`; needs the `flatpak` command, not the runtime).
+  Both get a desktop entry and an icon — the player character, or a PNG of the creator's choice.
+  Editor commands `exportpkg` and `exportdialog appimage flatpak`.
+- **Runs on older distributions**: the game executable needed the glibc of the system it was
+  built on (2.44 on a current rolling release), so exports didn't start on Debian 12 or Ubuntu
+  22.04. It now needs only glibc 2.34 (five math functions that newer glibc versions
+  re-versioned are built into the game), and the export dialog shows what the executable needs.
+  Verified: the example's AppImage on Debian 12, its Flatpak on the 25.08 runtime.
+
 ## 0.1.0 — 2026-11-05
 
 ### Saving and defeat

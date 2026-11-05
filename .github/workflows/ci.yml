@@ -1,0 +1,119 @@
+# Checks for every pull request into develop / master and every push to them. The job names
+# are the required status checks of the branch rulesets (AGENTS.md).
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, master]
+  push:
+    branches: [develop, master]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  policy:
+    name: Branch policy
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+          save-if: false
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev
+      - name: Branch may merge into its target
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: cargo xtask check-branch "$HEAD_REF" "$BASE_REF"
+      - name: Pushes need no check
+        if: github.event_name != 'pull_request'
+        run: echo "push to ${{ github.ref_name }}"
+
+  build:
+    name: Build, lint, test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev
+      - run: cargo build --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  version:
+    name: Version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        if: github.base_ref == 'master'
+      - uses: Swatinem/rust-cache@v2
+        if: github.base_ref == 'master'
+        with:
+          shared-key: workspace
+          save-if: false
+      - name: Release / hotfix version (SemVer, above the last tag, Cargo.toml, CHANGELOG)
+        if: github.base_ref == 'master'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev
+          cargo xtask check-version "$HEAD_REF"
+      - name: Only pull requests into master carry a version
+        if: github.base_ref != 'master'
+        run: echo "nothing to check"
+
+  packages:
+    name: Packages
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Needed?
+        id: need
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Always for pull requests into master; for others only when packaging changed.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "$BASE_REF" = "master" ] || git diff --name-only "origin/$BASE_REF...HEAD" | grep -qE '^(crates/packaging/|crates/xtask/|\.github/|crates/editor/src/(package|export)\.rs)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.need.outputs.run == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.need.outputs.run == 'true'
+        with:
+          shared-key: release
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev
+        if: steps.need.outputs.run == 'true'
+      - uses: ./.github/actions/packages
+        if: steps.need.outputs.run == 'true'
+      - uses: actions/upload-artifact@v4
+        if: steps.need.outputs.run == 'true'
+        with:
+          name: rust2d-packages
+          path: dist/
+          retention-days: 14

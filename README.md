@@ -2,7 +2,9 @@
 
 A small 2D engine for top-down RPGs on Linux, written in Rust ([macroquad](https://macroquad.rs) + [egui](https://github.com/emilk/egui)), with a map/content editor.
 
-Current version: **0.1.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+Current version: **0.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+
+**Download**: every release on the [Releases page](https://github.com/Shadowrom2020/rust2d/releases) has the editor (with the game runner and the example project) as an **AppImage** — `chmod +x rust2d-X.Y.Z-x86_64.AppImage` and start it — and as a **Flatpak** bundle — `flatpak install --user rust2d-X.Y.Z.flatpak`, then start *rust2d* from the app menu or with `flatpak run io.github.Shadowrom2020.rust2d`. Both run on Linux x86_64 with glibc 2.34 or newer (Debian 12, Ubuntu 22.04, Fedora 35, RHEL 9 and later); the welcome screen's **Example project** copies the bundled example to `~/rust2d/example_project` and opens it. Contributing: branches, versions and releases are described in [AGENTS.md](AGENTS.md).
 
 - **Tile maps** up to 1024×1024 tiles, any number of layers (overhead layers draw above characters), stored chunked and sparse.
 - **Editor** for maps (brush/stamp, rectangle, flood fill, erase, eyedropper, collision painting, undo/redo), entities, zones and transitions, plus a database editor for items, props, characters, tilesets, sprite sheets, project settings and scripts.
@@ -126,10 +128,20 @@ releases/<game-name>/
   <game-name>      the game executable (run it to play)
   data/            project.ron, defs/, maps/, scripts/ and only the images / sounds in use
   README.txt
-releases/<game-name>-linux.zip   (optional, to share)
+  rust2d-LICENSE.txt   the MIT license of the rust2d engine (the game executable)
+releases/<game-name>-linux.zip          (optional, to share)
+releases/<game-name>-x86_64.AppImage    (optional, Linux package)
+releases/<game-name>.flatpak            (optional, Linux package)
 ```
 
-The executable is a copy of `rust2d-game`; started without arguments it runs the `data/` folder next to it, titles the window with the game name and keeps save games in `~/.local/share/<game-name>/saves` (the bundle folder may be read-only). Save games of the project are never shipped. The export checks the project first (start map must exist; missing files and an unset player are reported) and replaces an earlier export in the same place, but never touches other folders. Build the game in release mode first (`cargo build --release -p rust2d-game`) — the editor picks `target/release/rust2d-game` when it exists and warns when only a debug build is available. The bundle targets the platform it was built on (Linux x86_64 here) and needs the usual system libraries (OpenGL, X11/Wayland, ALSA).
+The executable is a copy of `rust2d-game`; started without arguments it runs the `data/` folder next to it, titles the window with the game name and keeps save games in `~/.local/share/<game-name>/saves` (the bundle folder may be read-only). Save games of the project are never shipped. The export checks the project first (start map must exist; missing files and an unset player are reported) and replaces an earlier export in the same place, but never touches other folders. Build the game in release mode first (`cargo build --release -p rust2d-game`) — the editor picks `target/release/rust2d-game` when it exists and warns when only a debug build is available. The bundle targets the platform it was built on (Linux x86_64 here) and needs the usual system libraries (OpenGL, X11/Wayland, ALSA). The game executable runs on **glibc 2.34 or newer** — Debian 12, Ubuntu 22.04, Fedora 35, RHEL / Rocky / Alma 9 and later — even when rust2d is built on a newer rolling-release system (the export dialog shows what the executable needs).
+
+**Linux packages** (ticked in the export dialog, built from the bundle):
+
+- **AppImage** — one file that runs on most distributions: players make it executable (`chmod +x`) and start it; without FUSE, `./<game>-x86_64.AppImage --appimage-extract-and-run` works. The editor writes it itself; only the official AppImage runtime is downloaded once (from github.com/AppImage, checked against a pinned SHA-256, cached in `~/.cache/rust2d/`).
+- **Flatpak bundle** — a sandboxed single file: players install it with `flatpak install --user <game>.flatpak` (Flatpak fetches the freedesktop runtime from Flathub) and start it from the app menu or with `flatpak run <app id>`; saves go to `~/.var/app/<app id>/data/<game>/saves`. Needs the `flatpak` command on the creator's machine (not the runtime). Set the **app id** (default `org.rust2d.<game>`) and the **runtime** (freedesktop 25.08 or 26.08) in the dialog. The game gets a window (X11; XWayland on Wayland desktops), the GPU and sound — nothing else.
+
+Both get a desktop entry and an **icon**: the player character, drawn large, or a PNG picked in the dialog.
 
 ### Asset library, packages and the pixel editor
 
@@ -253,6 +265,8 @@ fn shrine_touch() {
 crates/engine   library: map model + IO, defs, events, scripting, rendering, runtime
 crates/game     player binary (rust2d-game)
 crates/editor   editor binary (rust2d-editor)
+crates/packaging AppImage / Flatpak packages (game exports and the rust2d releases)
+crates/xtask    `cargo xtask`: dist, check-version, check-branch, release-notes (CI)
 ```
 
 - `map/`: `TileLayer` stores 32×32 chunks as `Vec<Option<Box<Chunk>>>`, so empty areas cost nothing. Collision is a per-tile override byte combined with the tileset's solid flags. `transition.rs` holds zones, edge links and the edge-crossing maths.
@@ -292,3 +306,9 @@ RUST2D_EDITOR_SCRIPT="tool brush; brush 2 0 1 1; drag 2 2 20 2; dump 0 10 2; ren
 
 - Enemies placed directly on a map stay dead once defeated; use a spawner zone for respawning enemies.
 - Native file dialogs need a running xdg-desktop-portal (standard on GNOME/KDE desktops); paths can always be typed by hand.
+
+## License
+
+rust2d is released under the [MIT License](LICENSE), Copyright (c) 2026 Jürgen Herrmann — the engine, the game runner, the editor and the example project with its generated art and music. The license file ships with the AppImage and the Flatpak of rust2d.
+
+**Games made with rust2d** are licensed however their creators decide; rust2d sets no terms for your maps, art, scripts or story. Since an exported game's executable is the rust2d game runner, every export includes the engine's license as `rust2d-LICENSE.txt` (next to the game, in its zip, and in its AppImage / Flatpak under `share/licenses/`), which is all the MIT License asks for.

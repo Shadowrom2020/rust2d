@@ -6,6 +6,8 @@
 //!   <slug>        the game executable (a copy of rust2d-game)
 //!   data/         project.ron, defs/, maps/, scripts/ and the images / sounds in use
 //!   README.txt
+//!   rust2d-LICENSE.txt   the engine's license (MIT): the game executable is rust2d's game
+//!                        runner; the game itself is licensed as its creator decides
 //! ```
 //! Started without arguments, the game binary looks for `data/` next to itself (see
 //! [`bundled_root`]) and keeps save games in the user's data folder (see [`user_saves_dir`]).
@@ -20,6 +22,12 @@ use crate::project::Project;
 
 /// Folder next to the executable that holds the project in a bundle.
 pub const DATA_DIR: &str = "data";
+
+/// rust2d's license (the repository's LICENSE file), shipped with every exported game for the
+/// engine inside it.
+pub const ENGINE_LICENSE: &str = include_str!("../../../LICENSE");
+/// Its file name in exports and game packages.
+pub const ENGINE_LICENSE_FILE: &str = "rust2d-LICENSE.txt";
 
 /// A file-name friendly version of a game name ("My Game!" → "my-game").
 pub fn slug(name: &str) -> String {
@@ -164,11 +172,12 @@ pub fn export(project: &Project, name: &str, game_binary: &Path, out_dir: &Path,
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))?;
     }
     let readme = format!(
-        "{name}\n\nRun ./{slug} to play (Linux, x86_64).\nThe game data is in data/; save games are kept in ~/.local/share/{slug}/saves.\n\nMade with rust2d.\n"
+        "{name}\n\nRun ./{slug} to play (Linux, x86_64).\nThe game data is in data/; save games are kept in ~/.local/share/{slug}/saves.\n\nMade with rust2d. The game executable is rust2d's game runner, licensed under the MIT License: see {ENGINE_LICENSE_FILE}.\n"
     );
     std::fs::write(folder.join("README.txt"), readme)?;
+    std::fs::write(folder.join(ENGINE_LICENSE_FILE), ENGINE_LICENSE)?;
     let archive = if zip { Some(write_zip(&folder, &slug, out_dir)?) } else { None };
-    Ok(Exported { folder, archive, files: files.len() + 2, bytes, warnings: check.warnings })
+    Ok(Exported { folder, archive, files: files.len() + 3, bytes, warnings: check.warnings })
 }
 
 /// Zips the bundle folder (keeping the executable's permissions).
@@ -246,12 +255,15 @@ mod tests {
         assert!(f.join("data/project.ron").is_file());
         assert!(f.join("data/maps/start.map").is_file());
         assert!(f.join("data/sprites/a.png").is_file());
+        let lic = std::fs::read_to_string(f.join(ENGINE_LICENSE_FILE)).unwrap();
+        assert!(lic.starts_with("MIT License") && lic.contains("Jürgen Herrmann"), "the engine's license ships with the game");
         assert!(!f.join("data/sprites/unused.png").exists(), "only used files");
         assert!(!f.join("data/saves").exists(), "never ship saves");
         assert_eq!(Project::load(&f.join("data")).unwrap().config.name, "Test Quest");
         assert!(r.warnings.iter().any(|w| w.contains("player")));
         let zip_path = r.archive.unwrap();
         let mut za = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+        assert!(za.by_name("test-quest/rust2d-LICENSE.txt").is_ok());
         let exe = za.by_name("test-quest/test-quest").unwrap();
         assert_eq!(exe.unix_mode().map(|m| m & 0o777), Some(0o755));
         drop(exe);

@@ -1,3 +1,4 @@
 /target
 example_project/saves/
 example_project/saves-backup-*/
+/dist

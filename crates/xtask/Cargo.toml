@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rust2d-engine.workspace = true
+rust2d-packaging.workspace = true
+anyhow.workspace = true

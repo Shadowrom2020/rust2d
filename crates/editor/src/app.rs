@@ -920,6 +920,11 @@ impl Editor {
                     d.out = path.display().to_string();
                 }
             }
+            P::ExportIcon => {
+                if let Some(d) = &mut self.export {
+                    d.opts.icon = path.display().to_string();
+                }
+            }
             P::OpenProject => self.request(Pending::OpenProject(path)),
             P::NewProject => self.request(Pending::NewProject(path)),
             P::NewProjectParent => {
@@ -1227,6 +1232,14 @@ impl Editor {
     }
 
     /// Start screen when no project is open.
+    /// Opens (a copy of) the bundled example project.
+    pub fn open_example(&mut self) {
+        match files::example_copy() {
+            Ok(p) => self.request(Pending::OpenProject(p)),
+            Err(e) => self.set_status(format!("Example project: {e:#}")),
+        }
+    }
+
     fn welcome(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
@@ -1240,6 +1253,17 @@ impl Editor {
                 ui.add_space(6.0);
                 if ui.add_sized([260.0, 36.0], egui::Button::new("\u{E256} Open project…")).on_hover_text("Choose a folder containing project.ron").clicked() {
                     self.open_file_dialog(files::Purpose::OpenProject);
+                }
+                // Packaged rust2d (AppImage / Flatpak): the example game, copied out to be editable.
+                if files::bundled_example().is_some() {
+                    ui.add_space(6.0);
+                    if ui
+                        .add_sized([260.0, 36.0], egui::Button::new(ui::t(ph::GAME_CONTROLLER, "Example project")))
+                        .on_hover_text("Opens the example game; the first time it is copied to ~/rust2d/example_project")
+                        .clicked()
+                    {
+                        self.open_example();
+                    }
                 }
                 let recent = files::recent_projects();
                 if !recent.is_empty() {
