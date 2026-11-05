@@ -126,10 +126,19 @@ releases/<game-name>/
   <game-name>      the game executable (run it to play)
   data/            project.ron, defs/, maps/, scripts/ and only the images / sounds in use
   README.txt
-releases/<game-name>-linux.zip   (optional, to share)
+releases/<game-name>-linux.zip          (optional, to share)
+releases/<game-name>-x86_64.AppImage    (optional, Linux package)
+releases/<game-name>.flatpak            (optional, Linux package)
 ```
 
-The executable is a copy of `rust2d-game`; started without arguments it runs the `data/` folder next to it, titles the window with the game name and keeps save games in `~/.local/share/<game-name>/saves` (the bundle folder may be read-only). Save games of the project are never shipped. The export checks the project first (start map must exist; missing files and an unset player are reported) and replaces an earlier export in the same place, but never touches other folders. Build the game in release mode first (`cargo build --release -p rust2d-game`) — the editor picks `target/release/rust2d-game` when it exists and warns when only a debug build is available. The bundle targets the platform it was built on (Linux x86_64 here) and needs the usual system libraries (OpenGL, X11/Wayland, ALSA).
+The executable is a copy of `rust2d-game`; started without arguments it runs the `data/` folder next to it, titles the window with the game name and keeps save games in `~/.local/share/<game-name>/saves` (the bundle folder may be read-only). Save games of the project are never shipped. The export checks the project first (start map must exist; missing files and an unset player are reported) and replaces an earlier export in the same place, but never touches other folders. Build the game in release mode first (`cargo build --release -p rust2d-game`) — the editor picks `target/release/rust2d-game` when it exists and warns when only a debug build is available. The bundle targets the platform it was built on (Linux x86_64 here) and needs the usual system libraries (OpenGL, X11/Wayland, ALSA). The game executable runs on **glibc 2.34 or newer** — Debian 12, Ubuntu 22.04, Fedora 35, RHEL / Rocky / Alma 9 and later — even when rust2d is built on a newer rolling-release system (the export dialog shows what the executable needs).
+
+**Linux packages** (ticked in the export dialog, built from the bundle):
+
+- **AppImage** — one file that runs on most distributions: players make it executable (`chmod +x`) and start it; without FUSE, `./<game>-x86_64.AppImage --appimage-extract-and-run` works. The editor writes it itself; only the official AppImage runtime is downloaded once (from github.com/AppImage, checked against a pinned SHA-256, cached in `~/.cache/rust2d/`).
+- **Flatpak bundle** — a sandboxed single file: players install it with `flatpak install --user <game>.flatpak` (Flatpak fetches the freedesktop runtime from Flathub) and start it from the app menu or with `flatpak run <app id>`; saves go to `~/.var/app/<app id>/data/<game>/saves`. Needs the `flatpak` command on the creator's machine (not the runtime). Set the **app id** (default `org.rust2d.<game>`) and the **runtime** (freedesktop 25.08 or 26.08) in the dialog. The game gets a window (X11; XWayland on Wayland desktops), the GPU and sound — nothing else.
+
+Both get a desktop entry and an **icon**: the player character, drawn large, or a PNG picked in the dialog.
 
 ### Asset library, packages and the pixel editor
 

@@ -9,6 +9,7 @@ mod canvas;
 mod database;
 mod doc;
 mod export;
+mod package;
 mod files;
 mod library_ui;
 mod library_window;
@@ -327,14 +328,32 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         // exportgame OUT_DIR [NAME]  /  exportdialog
-        "exportgame" => {
-            let name = if arg(2).is_empty() { ed.project.config.name.clone() } else { cmd[2..].join(" ") };
-            match ed.run_export(&name, arg(1), true) {
+        // exportpkg OUT_DIR appimage|flatpak|all [APP_ID]: the folder plus Linux packages
+        "exportgame" | "exportpkg" => {
+            let mut opts = export::ExportOpts { zip: arg(0) == "exportgame", ..Default::default() };
+            let mut name = ed.project.config.name.clone();
+            if arg(0) == "exportgame" {
+                if !arg(2).is_empty() {
+                    name = cmd[2..].join(" ");
+                }
+            } else {
+                opts.appimage = matches!(arg(2), "appimage" | "all");
+                opts.flatpak = matches!(arg(2), "flatpak" | "all");
+                opts.app_id = if arg(3).is_empty() { package::default_app_id(&rust2d_engine::release::slug(&name)) } else { arg(3).to_string() };
+            }
+            match ed.run_export(&name, arg(1), &opts) {
                 Ok(m) => println!("[export] {m}"),
                 Err(e) => println!("[export] error: {e}"),
             }
         }
-        "exportdialog" => ed.open_export(),
+        // exportdialog [appimage] [flatpak]: opens File → Export game with those packages ticked
+        "exportdialog" => {
+            ed.open_export();
+            if let Some(d) = &mut ed.export {
+                d.opts.appimage = cmd.iter().any(|a| a == "appimage");
+                d.opts.flatpak = cmd.iter().any(|a| a == "flatpak");
+            }
+        }
         // pending save|discard|cancel: answers the "Unsaved changes" question
         "pending" => {
             if let Some(p) = ed.pending.take() {

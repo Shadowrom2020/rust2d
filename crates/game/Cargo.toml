@@ -9,3 +9,5 @@ rust2d-engine.workspace = true
 macroquad.workspace = true
 anyhow.workspace = true
 ron.workspace = true
+# Portable math functions (see src/glibc_compat.rs).
+libm = "0.2"

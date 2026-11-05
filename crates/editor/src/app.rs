@@ -920,6 +920,11 @@ impl Editor {
                     d.out = path.display().to_string();
                 }
             }
+            P::ExportIcon => {
+                if let Some(d) = &mut self.export {
+                    d.opts.icon = path.display().to_string();
+                }
+            }
             P::OpenProject => self.request(Pending::OpenProject(path)),
             P::NewProject => self.request(Pending::NewProject(path)),
             P::NewProjectParent => {

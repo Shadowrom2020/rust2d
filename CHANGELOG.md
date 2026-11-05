@@ -3,6 +3,22 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Releasing games
+- **AppImage and Flatpak**: *File → Export game* can also build Linux packages of the game: an
+  **AppImage** (one file for most distributions; the editor writes it itself, only the official
+  AppImage runtime is downloaded once, checked against a pinned SHA-256 and cached) and a
+  **Flatpak bundle** (sandboxed, on the freedesktop 25.08 or 26.08 runtime, installed by players
+  with `flatpak install --user GAME.flatpak`; needs the `flatpak` command, not the runtime).
+  Both get a desktop entry and an icon — the player character, or a PNG of the creator's choice.
+  Editor commands `exportpkg` and `exportdialog appimage flatpak`.
+- **Runs on older distributions**: the game executable needed the glibc of the system it was
+  built on (2.44 on a current rolling release), so exports didn't start on Debian 12 or Ubuntu
+  22.04. It now needs only glibc 2.34 (five math functions that newer glibc versions
+  re-versioned are built into the game), and the export dialog shows what the executable needs.
+  Verified: the example's AppImage on Debian 12, its Flatpak on the 25.08 runtime.
+
 ## 0.1.0 — 2026-11-05
 
 ### Saving and defeat
