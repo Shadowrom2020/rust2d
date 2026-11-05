@@ -1,0 +1,661 @@
+//! Linux packages built from a file tree: **AppImage** (one executable file for most
+//! distributions) and **Flatpak bundle** (sandboxed, `flatpak install --user X.flatpak`).
+//!
+//! Used by the editor's *Export game* (a game: its executable next to `data/`) and by
+//! `cargo xtask dist` (the rust2d toolkit: editor, game runner and the example project).
+//!
+//! Both formats get the same tree below their prefix (`usr/` in the AppImage, `/app` in the
+//! Flatpak), commands as symlinks in `bin/`, a desktop entry and an icon:
+//! - AppImage: the official AppImage runtime (type 2, static; downloaded once, pinned by SHA-256,
+//!   cached in `~/.cache/rust2d/`) followed by a squashfs image written with `backhand` - no
+//!   AppImage tools needed. `AppRun` links to `usr/bin/<command>`.
+//! - Flatpak: a build folder finished with `flatpak build-finish`, exported to a temporary OSTree
+//!   repo and bundled with `flatpak build-bundle` (only the `flatpak` command is needed; inside a
+//!   Flatpak sandbox it is reached with `flatpak-spawn --host`). The bundle names Flathub as the
+//!   runtime source, so installing it fetches the runtime.
+//!
+//! Executables find their files next to themselves: the kernel resolves the `bin/` links, so
+//! `current_exe()` is the real file under `lib/`.
+
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{bail, Context, Result};
+use backhand::compression::Compressor;
+use backhand::{FilesystemCompressor, FilesystemWriter, NodeHeader};
+use rust2d_engine::entity::Facing;
+use rust2d_engine::imageio::Rgba;
+use rust2d_engine::project::Project;
+use rust2d_engine::render::{character, recolor};
+
+/// The AppImage runtime (type 2, static: needs no libfuse on the player's machine, only
+/// `fusermount`; without FUSE, `--appimage-extract-and-run` works).
+const RUNTIME_VERSION: &str = "20251108";
+const RUNTIME_URL: &str = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
+const RUNTIME_SHA256: &str = "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d";
+
+/// Flatpak runtimes offered (freedesktop SDK branches; glibc 2.42 / 2.44).
+pub const FLATPAK_RUNTIMES: [&str; 2] = ["25.08", "26.08"];
+const FLATHUB_REPO: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
+
+/// Size of generated icons.
+pub const ICON: u32 = 256;
+
+/// Where a file's bytes come from.
+pub enum Source {
+    Bytes(Vec<u8>),
+    Path(PathBuf),
+}
+
+impl Source {
+    fn read(&self) -> Result<Vec<u8>> {
+        match self {
+            Source::Bytes(b) => Ok(b.clone()),
+            Source::Path(p) => std::fs::read(p).with_context(|| format!("reading {}", p.display())),
+        }
+    }
+}
+
+/// A file of the package: `dest` relative to the prefix (e.g. `lib/game/game`).
+pub struct Entry {
+    pub dest: String,
+    pub src: Source,
+    pub exec: bool,
+}
+
+/// What to package.
+pub struct AppSpec {
+    /// The command started by the desktop entry / AppImage (a name in `bin/`).
+    pub command: String,
+    /// Display name and one-line description.
+    pub name: String,
+    pub comment: String,
+    /// Desktop entry categories, e.g. "Game;RolePlaying;".
+    pub categories: String,
+    /// Flatpak application id (also its desktop entry / icon name).
+    pub app_id: String,
+    /// Freedesktop runtime branch of the Flatpak (`FLATPAK_RUNTIMES`).
+    pub runtime: String,
+    /// `flatpak build-finish` permissions, e.g. `--socket=x11`.
+    pub finish_args: Vec<String>,
+    pub files: Vec<Entry>,
+    /// Commands: (name in `bin/`, target relative to the prefix).
+    pub bin: Vec<(String, String)>,
+    /// PNG.
+    pub icon: Vec<u8>,
+}
+
+impl AppSpec {
+    /// Adds every file below `dir` (sorted) under `dest`; `exec` decides by relative path.
+    pub fn add_dir(&mut self, dir: &Path, dest: &str, exec: &dyn Fn(&str) -> bool) -> Result<()> {
+        for rel in walk(dir)? {
+            self.files.push(Entry { dest: format!("{dest}/{rel}"), src: Source::Path(dir.join(&rel)), exec: exec(&rel) });
+        }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------ AppImage
+
+/// Writes the AppImage to `path`.
+pub fn appimage(spec: &AppSpec, path: &Path) -> Result<()> {
+    let runtime = appimage_runtime()?;
+    let squashfs = appimage_squashfs(spec)?;
+    std::fs::write(path, [runtime.as_slice(), squashfs.as_slice()].concat()).with_context(|| format!("writing {}", path.display()))?;
+    set_executable(path)
+}
+
+/// The AppDir as a squashfs image:
+/// ```text
+/// AppRun -> usr/bin/<command>     <command>.desktop     <command>.png     .DirIcon
+/// usr/<files>   usr/bin/<links>   usr/share/applications, usr/share/icons
+/// ```
+pub fn appimage_squashfs(spec: &AppSpec) -> Result<Vec<u8>> {
+    let mtime = now() as u32;
+    let dir = NodeHeader::new(0o755, 0, 0, mtime);
+    let file = NodeHeader::new(0o644, 0, 0, mtime);
+    let exe = NodeHeader::new(0o755, 0, 0, mtime);
+    let mut fs = FilesystemWriter::default();
+    fs.set_compressor(FilesystemCompressor::new(Compressor::Gzip, None)?);
+    fs.set_time(mtime);
+    fs.set_root_mode(0o755);
+    let cmd = &spec.command;
+    let desktop = desktop_entry(spec, cmd, cmd);
+    // backhand keeps readers until write(): give it owned bytes.
+    let mut files: Vec<(String, Vec<u8>, NodeHeader)> = vec![
+        (format!("{cmd}.desktop"), desktop.clone().into_bytes(), file),
+        (format!("{cmd}.png"), spec.icon.clone(), file),
+        (format!("usr/share/applications/{cmd}.desktop"), desktop.into_bytes(), file),
+        (format!("usr/share/icons/hicolor/{ICON}x{ICON}/apps/{cmd}.png"), spec.icon.clone(), file),
+    ];
+    for e in &spec.files {
+        files.push((format!("usr/{}", e.dest), e.src.read()?, if e.exec { exe } else { file }));
+    }
+    let links: Vec<(String, String)> = spec.bin.iter().map(|(name, target)| (format!("usr/bin/{name}"), format!("../{target}"))).collect();
+    let mut dirs: Vec<String> = files.iter().map(|f| &f.0).chain(links.iter().map(|l| &l.0)).flat_map(|p| parents(p)).collect();
+    dirs.sort();
+    dirs.dedup();
+    for d in &dirs {
+        fs.push_dir(d, dir)?;
+    }
+    for (path, bytes, header) in files {
+        fs.push_file(Cursor::new(bytes), path, header)?;
+    }
+    for (path, target) in links {
+        fs.push_symlink(target, path, exe)?;
+    }
+    fs.push_symlink(format!("usr/bin/{cmd}"), "AppRun", exe)?;
+    fs.push_symlink(format!("{cmd}.png"), ".DirIcon", file)?;
+    let mut out = Cursor::new(Vec::new());
+    fs.write(&mut out).context("writing the squashfs image")?;
+    Ok(out.into_inner())
+}
+
+/// The cached AppImage runtime, downloaded on first use (curl or wget) and checked against
+/// its pinned hash.
+fn appimage_runtime() -> Result<Vec<u8>> {
+    let cache = cache_dir().join(format!("appimage-runtime-{RUNTIME_VERSION}-x86_64"));
+    if let Ok(b) = std::fs::read(&cache) {
+        if hex(&sha256(&b)) == RUNTIME_SHA256 {
+            return Ok(b);
+        }
+    }
+    std::fs::create_dir_all(cache.parent().unwrap())?;
+    let part = cache.with_extension("part");
+    let ok = |c: &mut Command| c.status().is_ok_and(|s| s.success());
+    let fetched = ok(Command::new("curl").args(["-fsSL", "--retry", "2", "-o"]).arg(&part).arg(RUNTIME_URL))
+        || ok(Command::new("wget").args(["-q", "-O"]).arg(&part).arg(RUNTIME_URL));
+    if !fetched {
+        let _ = std::fs::remove_file(&part);
+        bail!(
+            "could not download the AppImage runtime (needs curl or wget and an internet connection). You can also download {RUNTIME_URL} yourself and save it as {}",
+            cache.display()
+        );
+    }
+    let b = std::fs::read(&part)?;
+    if hex(&sha256(&b)) != RUNTIME_SHA256 {
+        let _ = std::fs::remove_file(&part);
+        bail!("the downloaded AppImage runtime has an unexpected checksum; nothing was used");
+    }
+    std::fs::rename(&part, &cache)?;
+    Ok(b)
+}
+
+// ------------------------------------------------------------------ Flatpak
+
+/// Inside a Flatpak sandbox the host's `flatpak` is reached through `flatpak-spawn --host`.
+fn flatpak_cmd() -> Command {
+    if Path::new("/.flatpak-info").exists() {
+        let mut c = Command::new("flatpak-spawn");
+        c.args(["--host", "flatpak"]);
+        c
+    } else {
+        Command::new("flatpak")
+    }
+}
+
+/// Whether the `flatpak` command is available (needed for Flatpak bundles).
+pub fn flatpak_available() -> bool {
+    flatpak_cmd().arg("--version").output().is_ok_and(|o| o.status.success())
+}
+
+/// Checks a Flatpak application id: at least three dot-separated parts of letters, digits,
+/// `_` and `-`, none starting with a digit.
+pub fn check_app_id(id: &str) -> Result<(), String> {
+    let parts: Vec<&str> = id.split('.').collect();
+    if parts.len() < 3 {
+        return Err("needs at least three parts, like org.example.MyGame".into());
+    }
+    for p in &parts {
+        if p.is_empty() || p.starts_with(|c: char| c.is_ascii_digit()) || !p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+            return Err(format!("'{p}' isn't allowed: letters, digits, _ and - only, not starting with a digit"));
+        }
+    }
+    if id.len() > 255 {
+        return Err("is too long".into());
+    }
+    Ok(())
+}
+
+/// Writes the Flatpak bundle to `path`, working in a temporary folder next to it (the host's
+/// flatpak must see it when called from a sandbox).
+pub fn flatpak_bundle(spec: &AppSpec, path: &Path) -> Result<()> {
+    check_app_id(&spec.app_id).map_err(|e| anyhow::anyhow!("Flatpak app id: {e}"))?;
+    let name = path.file_name().map_or("app".into(), |n| n.to_string_lossy().into_owned());
+    let work = path.parent().unwrap_or(Path::new(".")).join(format!(".{name}-build"));
+    let _ = std::fs::remove_dir_all(&work);
+    let res = flatpak_in(&work, spec, path);
+    let _ = std::fs::remove_dir_all(&work);
+    res
+}
+
+fn flatpak_in(work: &Path, spec: &AppSpec, path: &Path) -> Result<()> {
+    let build = work.join("build");
+    let files = build.join("files");
+    for e in &spec.files {
+        let dst = files.join(&e.dest);
+        write(&dst, &e.src.read()?)?;
+        if e.exec {
+            set_executable(&dst)?;
+        }
+    }
+    for (name, target) in &spec.bin {
+        let link = files.join("bin").join(name);
+        std::fs::create_dir_all(link.parent().unwrap())?;
+        std::os::unix::fs::symlink(format!("../{target}"), link)?;
+    }
+    let id = &spec.app_id;
+    let share = files.join("share");
+    write(&share.join(format!("applications/{id}.desktop")), desktop_entry(spec, &spec.command, id).as_bytes())?;
+    write(&share.join(format!("icons/hicolor/{ICON}x{ICON}/apps/{id}.png")), &spec.icon)?;
+    write(&share.join(format!("metainfo/{id}.metainfo.xml")), metainfo(spec).as_bytes())?;
+    std::fs::create_dir_all(build.join("var"))?;
+    let rt = &spec.runtime;
+    std::fs::write(build.join("metadata"), format!("[Application]\nname={id}\nruntime=org.freedesktop.Platform/x86_64/{rt}\nsdk=org.freedesktop.Sdk/x86_64/{rt}\n"))?;
+    run(flatpak_cmd().args(["build-finish", "--command", &spec.command]).args(&spec.finish_args).arg(&build))?;
+    let repo = work.join("repo");
+    run(flatpak_cmd().args(["build-export", "--no-update-summary"]).arg(&repo).arg(&build).arg("stable"))?;
+    run(flatpak_cmd().arg("build-bundle").arg(format!("--runtime-repo={FLATHUB_REPO}")).arg(&repo).arg(path).arg(id).arg("stable"))?;
+    Ok(())
+}
+
+/// AppStream metadata (shown by software centers when the bundle is opened).
+fn metainfo(spec: &AppSpec) -> String {
+    let (id, name, summary) = (&spec.app_id, xml_escape(&spec.name), xml_escape(&spec.comment));
+    let cats: String = spec.categories.split(';').filter(|c| !c.is_empty()).map(|c| format!("<category>{c}</category>")).collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>{id}</id>
+  <name>{name}</name>
+  <summary>{summary}</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <description><p>{summary}.</p></description>
+  <launchable type="desktop-id">{id}.desktop</launchable>
+  <categories>{cats}</categories>
+  <content_rating type="oars-1.1"/>
+</component>
+"#
+    )
+}
+
+fn run(cmd: &mut Command) -> Result<()> {
+    let out = cmd.output().with_context(|| format!("running {:?}", cmd.get_program()))?;
+    if !out.status.success() {
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).filter(|a| a.starts_with("build")).collect();
+        bail!("flatpak {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ shared
+
+/// A desktop entry (`exec` = command, `icon` = icon name).
+fn desktop_entry(spec: &AppSpec, exec: &str, icon: &str) -> String {
+    let clean = |s: &str| s.chars().filter(|c| !c.is_control()).collect::<String>();
+    format!(
+        "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={exec}\nIcon={icon}\nTerminal=false\nCategories={}\n",
+        clean(&spec.name),
+        clean(&spec.comment),
+        clean(&spec.categories)
+    )
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// The player character facing the viewer (layers composed like in the game), enlarged with
+/// sharp pixels onto a 256 x 256 transparent square.
+pub fn hero_icon(project: &Project) -> Option<Rgba> {
+    let db = &project.db;
+    let d = db.character(&project.config.player)?;
+    let mut canvas: Option<Rgba> = None;
+    for l in character::layers(db, &d.appearance, &d.equipment, Facing::Down, 0, false) {
+        let Some(sheet) = db.sheet(&l.sheet) else { continue };
+        let Ok(img) = std::fs::read(project.path(&sheet.image)).map_err(anyhow::Error::from).and_then(|b| Rgba::decode(&b)) else { continue };
+        let (fw, fh) = (sheet.frame_w.max(1), sheet.frame_h.max(1));
+        let cols = (img.w / fw).max(1);
+        let (fx, fy) = ((l.frame % cols * fw) as i32, (l.frame / cols * fh) as i32);
+        let mut frame = Rgba::new(fw, fh);
+        for y in 0..fh as i32 {
+            for x in 0..fw as i32 {
+                frame.set(x, y, img.get(fx + x, fy + y));
+            }
+        }
+        recolor::recolor(&mut frame.px, l.skin, l.hair);
+        let c = canvas.get_or_insert_with(|| Rgba::new(fw, fh));
+        // Layers of another frame size stand on the same ground, centered.
+        let (ox, oy) = ((c.w as i32 - fw as i32) / 2, c.h as i32 - fh as i32);
+        for y in 0..fh as i32 {
+            for x in 0..fw as i32 {
+                over(c, ox + x, oy + y, frame.get(x, y));
+            }
+        }
+    }
+    let c = canvas?;
+    // Trim to the drawn pixels.
+    let opaque: Vec<(i32, i32)> = (0..c.h as i32).flat_map(|y| (0..c.w as i32).map(move |x| (x, y))).filter(|&(x, y)| c.get(x, y)[3] > 0).collect();
+    let (x0, x1) = (opaque.iter().map(|p| p.0).min()?, opaque.iter().map(|p| p.0).max()?);
+    let (y0, y1) = (opaque.iter().map(|p| p.1).min()?, opaque.iter().map(|p| p.1).max()?);
+    let (w, h) = ((x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32);
+    let scale = ((ICON - 16) / w.max(h)).max(1);
+    let mut out = Rgba::new(ICON, ICON);
+    let (ox, oy) = ((ICON - w * scale) as i32 / 2, (ICON - h * scale) as i32 / 2);
+    for y in 0..(h * scale) as i32 {
+        for x in 0..(w * scale) as i32 {
+            out.set(ox + x, oy + y, c.get(x0 + x / scale as i32, y0 + y / scale as i32));
+        }
+    }
+    Some(out)
+}
+
+/// Fallback icon (no player character): a sword on a dark shield.
+pub fn emblem() -> Rgba {
+    let mut img = Rgba::new(ICON, ICON);
+    let c = ICON as f32 / 2.0;
+    for y in 0..ICON as i32 {
+        for x in 0..ICON as i32 {
+            let (dx, dy) = ((x as f32 - c) / c, (y as f32 - c) / c);
+            // A shield: flat top, round bottom.
+            let inside = dx.abs() < 0.8 && dy > -0.85 && (dy < 0.1 || dx * dx + (dy - 0.1) * (dy - 0.1) * 1.6 < 0.64);
+            let edge = dx.abs() < 0.86 && dy > -0.92 && (dy < 0.1 || dx * dx + (dy - 0.1) * (dy - 0.1) * 1.6 < 0.74);
+            if inside {
+                img.set(x, y, [0x1b, 0x2a, 0x55, 255]);
+            } else if edge {
+                img.set(x, y, [0xe8, 0xc0, 0x5a, 255]);
+            }
+        }
+    }
+    let rect = |img: &mut Rgba, x: i32, y: i32, w: i32, h: i32, col: [u8; 4]| {
+        for yy in y..y + h {
+            for xx in x..x + w {
+                img.set(xx, yy, col);
+            }
+        }
+    };
+    rect(&mut img, 120, 52, 16, 120, [0xd8, 0xdc, 0xe8, 255]); // blade
+    rect(&mut img, 126, 52, 4, 120, [0xff, 0xff, 0xff, 255]);
+    rect(&mut img, 92, 168, 72, 12, [0xe8, 0xc0, 0x5a, 255]); // guard
+    rect(&mut img, 122, 180, 12, 28, [0x7a, 0x54, 0x10, 255]); // grip
+    rect(&mut img, 116, 206, 24, 12, [0xe8, 0xc0, 0x5a, 255]); // pommel
+    img
+}
+
+/// Alpha-composites `c` over the pixel at x, y.
+fn over(img: &mut Rgba, x: i32, y: i32, c: [u8; 4]) {
+    if c[3] == 0 {
+        return;
+    }
+    let d = img.get(x, y);
+    let a = c[3] as f32 / 255.0;
+    let da = d[3] as f32 / 255.0 * (1.0 - a);
+    let oa = a + da;
+    let mix = |s: u8, t: u8| ((s as f32 * a + t as f32 * da) / oa).round() as u8;
+    img.set(x, y, [mix(c[0], d[0]), mix(c[1], d[1]), mix(c[2], d[2]), (oa * 255.0).round() as u8]);
+}
+
+/// The highest glibc version a Linux executable needs, e.g. (2, 34): the non-weak `GLIBC_2.x`
+/// entries of its ELF version-needs table (weak ones, like the optional `pidfd_*` functions of
+/// Rust's standard library, don't stop it from starting). For data that isn't an ELF file the
+/// `GLIBC_2.x` names are just searched. None if there are none.
+pub fn glibc_needed(binary: &[u8]) -> Option<(u32, u32)> {
+    let names = elf_version_needs(binary).unwrap_or_else(|| scan_glibc_names(binary));
+    names.iter().filter_map(|n| n.strip_prefix("GLIBC_2.")?.split('.').next()?.parse::<u32>().ok()).max().map(|m| (2, m))
+}
+
+/// Names of the non-weak version needs of a 64-bit little-endian ELF file.
+fn elf_version_needs(b: &[u8]) -> Option<Vec<String>> {
+    const SHT_GNU_VERNEED: u32 = 0x6fff_fffe;
+    const VER_FLG_WEAK: u16 = 0x2;
+    if b.get(..6)? != b"\x7fELF\x02\x01" {
+        return None;
+    }
+    let u16_at = |o: usize| b.get(o..o + 2).map(|x| u16::from_le_bytes([x[0], x[1]]));
+    let u32_at = |o: usize| b.get(o..o + 4).map(|x| u32::from_le_bytes(x.try_into().unwrap()));
+    let u64_at = |o: usize| b.get(o..o + 8).map(|x| u64::from_le_bytes(x.try_into().unwrap()) as usize);
+    let (shoff, shentsize, shnum) = (u64_at(0x28)?, u16_at(0x3a)? as usize, u16_at(0x3c)? as usize);
+    let section = |k: usize| -> Option<(u32, usize, usize, usize)> {
+        let h = shoff + k * shentsize;
+        Some((u32_at(h + 4)?, u64_at(h + 0x18)?, u64_at(h + 0x20)?, u32_at(h + 0x28)? as usize))
+    };
+    let (_, off, _, link) = (0..shnum).filter_map(section).find(|s| s.0 == SHT_GNU_VERNEED)?;
+    let (_, str_off, str_size, _) = section(link)?;
+    let name_at = |o: usize| -> Option<String> {
+        let s = b.get(str_off + o..str_off + str_size)?;
+        Some(String::from_utf8_lossy(&s[..s.iter().position(|&c| c == 0)?]).into_owned())
+    };
+    let mut out = Vec::new();
+    let mut vn = off;
+    loop {
+        let (cnt, aux, next) = (u16_at(vn + 2)?, u32_at(vn + 8)? as usize, u32_at(vn + 12)? as usize);
+        let mut a = vn + aux;
+        for _ in 0..cnt {
+            let (flags, name, anext) = (u16_at(a + 4)?, u32_at(a + 8)? as usize, u32_at(a + 12)? as usize);
+            if flags & VER_FLG_WEAK == 0 {
+                out.push(name_at(name)?);
+            }
+            a += anext;
+        }
+        if next == 0 {
+            return Some(out);
+        }
+        vn += next;
+    }
+}
+
+/// `GLIBC_2.x` names anywhere in the data.
+fn scan_glibc_names(binary: &[u8]) -> Vec<String> {
+    const PAT: &[u8] = b"GLIBC_2.";
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(k) = binary[i..].windows(PAT.len()).position(|w| w == PAT) {
+        let start = i + k + PAT.len();
+        let digits: String = binary[start..].iter().take_while(|b| b.is_ascii_digit()).map(|&b| b as char).collect();
+        out.push(format!("GLIBC_2.{digits}"));
+        i = start;
+    }
+    out
+}
+
+fn cache_dir() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("rust2d")
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+fn set_executable(p: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).with_context(|| format!("making {} executable", p.display()))
+}
+
+fn write(p: &Path, bytes: &[u8]) -> Result<()> {
+    std::fs::create_dir_all(p.parent().unwrap())?;
+    std::fs::write(p, bytes).with_context(|| format!("writing {}", p.display()))
+}
+
+/// Files below `dir` as relative paths with `/`, sorted.
+fn walk(dir: &Path) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).with_context(|| format!("reading {}", d.display()))?.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                out.push(p.strip_prefix(dir)?.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// The parent folders of a relative path ("a/b/c" -> "a", "a/b").
+fn parents(p: &str) -> Vec<String> {
+    let parts: Vec<&str> = p.split('/').collect();
+    (1..parts.len()).map(|n| parts[..n].join("/")).collect()
+}
+
+// ------------------------------------------------------------------ SHA-256
+
+/// SHA-256 of `bytes` as lowercase hex (SHA256SUMS files).
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&sha256(bytes))
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// SHA-256 (FIPS 180-4), to check the downloaded AppImage runtime.
+fn sha256(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&(data.len() as u64 * 8).to_be_bytes());
+    for block in msg.as_chunks::<64>().0 {
+        let mut w = [0u32; 64];
+        for t in 0..16 {
+            w[t] = u32::from_be_bytes(block[t * 4..t * 4 + 4].try_into().unwrap());
+        }
+        for t in 16..64 {
+            let s0 = w[t - 15].rotate_right(7) ^ w[t - 15].rotate_right(18) ^ (w[t - 15] >> 3);
+            let s1 = w[t - 2].rotate_right(17) ^ w[t - 2].rotate_right(19) ^ (w[t - 2] >> 10);
+            w[t] = w[t - 16].wrapping_add(s0).wrapping_add(w[t - 7]).wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
+        for t in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ (!e & g);
+            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[t]).wrapping_add(w[t]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            (hh, g, f, e, d, c, b, a) = (g, f, e, d.wrapping_add(t1), c, b, a, t1.wrapping_add(t2));
+        }
+        for (x, v) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
+            *x = x.wrapping_add(v);
+        }
+    }
+    let mut out = [0u8; 32];
+    for (k, v) in h.iter().enumerate() {
+        out[k * 4..k * 4 + 4].copy_from_slice(&v.to_be_bytes());
+    }
+    out
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_vectors() {
+        assert_eq!(hex(&sha256(b"")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(hex(&sha256(b"abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let long = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+        assert_eq!(hex(&sha256(long)), "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+    }
+
+    #[test]
+    fn app_ids() {
+        assert!(check_app_id("org.rust2d.knight_tales").is_ok());
+        assert!(check_app_id("org.example").is_err());
+        assert!(check_app_id("org.example.1game").is_err());
+        assert!(check_app_id("org.exa mple.game").is_err());
+        assert!(check_app_id("io.github.someone.My-Game").is_ok());
+    }
+
+    #[test]
+    fn glibc_scan() {
+        assert_eq!(glibc_needed(b"\0GLIBC_2.2.5\0GLIBC_2.34\0GLIBC_2.17\0"), Some((2, 34)));
+        assert_eq!(glibc_needed(b"no versions here"), None);
+        // A real ELF file: the test binary itself needs some glibc 2.x.
+        let me = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        assert!(elf_version_needs(&me).is_some_and(|n| n.iter().any(|x| x.starts_with("GLIBC_2."))));
+        assert!(glibc_needed(&me).is_some_and(|v| v >= (2, 2)));
+    }
+
+    /// A small spec: an executable next to its data, one command.
+    pub fn spec(tmp: &Path) -> AppSpec {
+        std::fs::create_dir_all(tmp.join("data/maps")).unwrap();
+        std::fs::write(tmp.join("data/project.ron"), b"()").unwrap();
+        std::fs::write(tmp.join("data/maps/start.map"), b"map").unwrap();
+        let mut s = AppSpec {
+            command: "knight-tales".into(),
+            name: "Knight Tales".into(),
+            comment: "A game".into(),
+            categories: "Game;RolePlaying;".into(),
+            app_id: "org.rust2d.knight_tales".into(),
+            runtime: FLATPAK_RUNTIMES[0].into(),
+            finish_args: vec!["--socket=x11".into()],
+            files: vec![Entry { dest: "lib/knight-tales/knight-tales".into(), src: Source::Bytes(b"\x7fELF game".to_vec()), exec: true }],
+            bin: vec![("knight-tales".into(), "lib/knight-tales/knight-tales".into())],
+            icon: emblem().encode().unwrap(),
+        };
+        s.add_dir(&tmp.join("data"), "lib/knight-tales/data", &|_| false).unwrap();
+        s
+    }
+
+    #[test]
+    fn appimage_contents() {
+        use backhand::{FilesystemReader, InnerNode};
+        let tmp = std::env::temp_dir().join(format!("rust2d_appimage_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let img = appimage_squashfs(&spec(&tmp)).unwrap();
+        let fs = FilesystemReader::from_reader(Cursor::new(img)).unwrap();
+        let mut seen = std::collections::BTreeMap::new();
+        for node in fs.files() {
+            let path = node.fullpath.to_string_lossy().trim_start_matches('/').to_string();
+            let what = match &node.inner {
+                InnerNode::File(f) => {
+                    let mut buf = Vec::new();
+                    std::io::Read::read_to_end(&mut fs.file(f).reader(), &mut buf).unwrap();
+                    format!("file {} {:o}", String::from_utf8_lossy(&buf[..buf.len().min(9)]), node.header.permissions)
+                }
+                InnerNode::Symlink(s) => format!("-> {}", s.link.display()),
+                InnerNode::Dir(_) => "dir".into(),
+                _ => "other".into(),
+            };
+            seen.insert(path, what);
+        }
+        assert_eq!(seen["AppRun"], "-> usr/bin/knight-tales");
+        assert_eq!(seen["usr/bin/knight-tales"], "-> ../lib/knight-tales/knight-tales");
+        assert_eq!(seen[".DirIcon"], "-> knight-tales.png");
+        assert_eq!(seen["usr/lib/knight-tales/knight-tales"], "file \x7fELF game 755");
+        assert_eq!(seen["usr/lib/knight-tales/data/maps/start.map"], "file map 644");
+        assert!(seen["knight-tales.desktop"].starts_with("file [Desktop"));
+        assert!(seen.contains_key("usr/share/icons/hicolor/256x256/apps/knight-tales.png"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn desktop_and_metainfo() {
+        let tmp = std::env::temp_dir().join(format!("rust2d_meta_test_{}", std::process::id()));
+        let s = spec(&tmp);
+        let d = desktop_entry(&s, "knight-tales", "org.rust2d.knight_tales");
+        assert!(d.contains("Exec=knight-tales\n") && d.contains("Icon=org.rust2d.knight_tales\n") && d.contains("Categories=Game;RolePlaying;\n"));
+        let m = metainfo(&s);
+        assert!(m.contains("<category>Game</category><category>RolePlaying</category>"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}

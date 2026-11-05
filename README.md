@@ -4,6 +4,8 @@ A small 2D engine for top-down RPGs on Linux, written in Rust ([macroquad](https
 
 Current version: **0.1.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
+**Download**: every release on the [Releases page](https://github.com/Shadowrom2020/rust2d/releases) has the editor (with the game runner and the example project) as an **AppImage** — `chmod +x rust2d-X.Y.Z-x86_64.AppImage` and start it — and as a **Flatpak** bundle — `flatpak install --user rust2d-X.Y.Z.flatpak`, then start *rust2d* from the app menu or with `flatpak run io.github.Shadowrom2020.rust2d`. Both run on Linux x86_64 with glibc 2.34 or newer (Debian 12, Ubuntu 22.04, Fedora 35, RHEL 9 and later); the welcome screen's **Example project** copies the bundled example to `~/rust2d/example_project` and opens it. Contributing: branches, versions and releases are described in [AGENTS.md](AGENTS.md).
+
 - **Tile maps** up to 1024×1024 tiles, any number of layers (overhead layers draw above characters), stored chunked and sparse.
 - **Editor** for maps (brush/stamp, rectangle, flood fill, erase, eyedropper, collision painting, undo/redo), entities, zones and transitions, plus a database editor for items, props, characters, tilesets, sprite sheets, project settings and scripts.
 - **Map transitions**: portal zones (teleport to a named spawn on any map) and edge links (walk off the north/south/east/west edge into a neighbouring map, keeping your position along the edge).
@@ -262,6 +264,8 @@ fn shrine_touch() {
 crates/engine   library: map model + IO, defs, events, scripting, rendering, runtime
 crates/game     player binary (rust2d-game)
 crates/editor   editor binary (rust2d-editor)
+crates/packaging AppImage / Flatpak packages (game exports and the rust2d releases)
+crates/xtask    `cargo xtask`: dist, check-version, check-branch, release-notes (CI)
 ```
 
 - `map/`: `TileLayer` stores 32×32 chunks as `Vec<Option<Box<Chunk>>>`, so empty areas cost nothing. Collision is a per-tile override byte combined with the tileset's solid flags. `transition.rs` holds zones, edge links and the edge-crossing maths.
