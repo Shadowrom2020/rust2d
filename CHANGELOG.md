@@ -41,6 +41,11 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   now instead of fixed keys (the groundwork for rebinding); keyboard controls are unchanged.
   Flatpaks of games and of rust2d get `--device=all` (gamepads need /dev/input). Building rust2d
   needs `libudev-dev` (the game links `libudev`, present on every desktop Linux).
+- **Key rebinding**: *Options › Controls* lists every action with its keys. Enter and a key adds a
+  key (up to three per action), Del clears, *Reset to defaults* restores them; keys that clash with
+  another action where both are used show in orange with the clash named. Saved per game in
+  `settings.ron` (only the changed actions); the Options page's own reset keeps the keys. Escape,
+  F3 and the gamepad buttons stay fixed.
 
 ### Fixes
 - Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage

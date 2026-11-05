@@ -97,51 +97,165 @@ pub fn any_pressed(keys: &[KeyCode]) -> bool {
     keys.iter().any(|k| pressed(*k))
 }
 
-/// Parses key names used by autoplay scripts.
+/// Every key that can be bound, with its name (autoplay scripts, the settings file and the
+/// Controls page show these).
+const KEY_NAMES: &[(KeyCode, &str)] = &[
+    (KeyCode::A, "a"),
+    (KeyCode::B, "b"),
+    (KeyCode::C, "c"),
+    (KeyCode::D, "d"),
+    (KeyCode::E, "e"),
+    (KeyCode::F, "f"),
+    (KeyCode::G, "g"),
+    (KeyCode::H, "h"),
+    (KeyCode::I, "i"),
+    (KeyCode::J, "j"),
+    (KeyCode::K, "k"),
+    (KeyCode::L, "l"),
+    (KeyCode::M, "m"),
+    (KeyCode::N, "n"),
+    (KeyCode::O, "o"),
+    (KeyCode::P, "p"),
+    (KeyCode::Q, "q"),
+    (KeyCode::R, "r"),
+    (KeyCode::S, "s"),
+    (KeyCode::T, "t"),
+    (KeyCode::U, "u"),
+    (KeyCode::V, "v"),
+    (KeyCode::W, "w"),
+    (KeyCode::X, "x"),
+    (KeyCode::Y, "y"),
+    (KeyCode::Z, "z"),
+    (KeyCode::Key0, "0"),
+    (KeyCode::Key1, "1"),
+    (KeyCode::Key2, "2"),
+    (KeyCode::Key3, "3"),
+    (KeyCode::Key4, "4"),
+    (KeyCode::Key5, "5"),
+    (KeyCode::Key6, "6"),
+    (KeyCode::Key7, "7"),
+    (KeyCode::Key8, "8"),
+    (KeyCode::Key9, "9"),
+    (KeyCode::Up, "up"),
+    (KeyCode::Down, "down"),
+    (KeyCode::Left, "left"),
+    (KeyCode::Right, "right"),
+    (KeyCode::Space, "space"),
+    (KeyCode::Enter, "enter"),
+    (KeyCode::Tab, "tab"),
+    (KeyCode::Backspace, "backspace"),
+    (KeyCode::Delete, "delete"),
+    (KeyCode::Insert, "insert"),
+    (KeyCode::Home, "home"),
+    (KeyCode::End, "end"),
+    (KeyCode::PageUp, "pageup"),
+    (KeyCode::PageDown, "pagedown"),
+    (KeyCode::LeftShift, "shift"),
+    (KeyCode::RightShift, "rshift"),
+    (KeyCode::LeftControl, "ctrl"),
+    (KeyCode::RightControl, "rctrl"),
+    (KeyCode::LeftAlt, "alt"),
+    (KeyCode::RightAlt, "altgr"),
+    (KeyCode::Minus, "minus"),
+    (KeyCode::Equal, "equal"),
+    (KeyCode::Comma, "comma"),
+    (KeyCode::Period, "period"),
+    (KeyCode::Slash, "slash"),
+    (KeyCode::Backslash, "backslash"),
+    (KeyCode::Semicolon, "semicolon"),
+    (KeyCode::Apostrophe, "apostrophe"),
+    (KeyCode::LeftBracket, "lbracket"),
+    (KeyCode::RightBracket, "rbracket"),
+    (KeyCode::GraveAccent, "grave"),
+    (KeyCode::Kp0, "kp0"),
+    (KeyCode::Kp1, "kp1"),
+    (KeyCode::Kp2, "kp2"),
+    (KeyCode::Kp3, "kp3"),
+    (KeyCode::Kp4, "kp4"),
+    (KeyCode::Kp5, "kp5"),
+    (KeyCode::Kp6, "kp6"),
+    (KeyCode::Kp7, "kp7"),
+    (KeyCode::Kp8, "kp8"),
+    (KeyCode::Kp9, "kp9"),
+    (KeyCode::KpAdd, "kpplus"),
+    (KeyCode::KpSubtract, "kpminus"),
+    (KeyCode::KpMultiply, "kpmultiply"),
+    (KeyCode::KpDivide, "kpdivide"),
+    (KeyCode::KpEnter, "kpenter"),
+    (KeyCode::KpDecimal, "kpdecimal"),
+    (KeyCode::F1, "f1"),
+    (KeyCode::F2, "f2"),
+    (KeyCode::F3, "f3"),
+    (KeyCode::F4, "f4"),
+    (KeyCode::F5, "f5"),
+    (KeyCode::F6, "f6"),
+    (KeyCode::F7, "f7"),
+    (KeyCode::F8, "f8"),
+    (KeyCode::F9, "f9"),
+    (KeyCode::F10, "f10"),
+    (KeyCode::F11, "f11"),
+    (KeyCode::F12, "f12"),
+    (KeyCode::Escape, "escape"),
+];
+
+/// Parses key names (autoplay scripts, the settings file); a few short forms are accepted too.
 pub fn key_from_name(name: &str) -> Option<KeyCode> {
-    Some(match name.to_ascii_lowercase().as_str() {
-        "left" => KeyCode::Left,
-        "right" => KeyCode::Right,
-        "up" => KeyCode::Up,
-        "down" => KeyCode::Down,
-        "e" => KeyCode::E,
-        "i" => KeyCode::I,
-        "u" => KeyCode::U,
-        "j" => KeyCode::J,
-        "x" => KeyCode::X,
-        "q" => KeyCode::Q,
-        "t" => KeyCode::T,
-        "g" => KeyCode::G,
-        "c" => KeyCode::C,
-        "h" => KeyCode::H,
-        "k" => KeyCode::K,
-        "l" => KeyCode::L,
-        "m" => KeyCode::M,
-        "f" => KeyCode::F,
-        "1" => KeyCode::Key1,
-        "2" => KeyCode::Key2,
-        "3" => KeyCode::Key3,
-        "4" => KeyCode::Key4,
-        "5" => KeyCode::Key5,
-        "6" => KeyCode::Key6,
-        "7" => KeyCode::Key7,
-        "8" => KeyCode::Key8,
-        "tab" => KeyCode::Tab,
-        "space" => KeyCode::Space,
-        "enter" => KeyCode::Enter,
-        "escape" | "esc" => KeyCode::Escape,
-        "shift" => KeyCode::LeftShift,
-        "f3" => KeyCode::F3,
-        "f5" => KeyCode::F5,
-        "f9" => KeyCode::F9,
-        "delete" | "del" => KeyCode::Delete,
-        "backspace" => KeyCode::Backspace,
-        "pageup" | "pgup" => KeyCode::PageUp,
-        "pagedown" | "pgdn" => KeyCode::PageDown,
-        "home" => KeyCode::Home,
-        "end" => KeyCode::End,
-        _ => return None,
-    })
+    let n = name.trim().to_ascii_lowercase();
+    let n = match n.as_str() {
+        "esc" => "escape",
+        "del" => "delete",
+        "pgup" => "pageup",
+        "pgdn" => "pagedown",
+        "lshift" => "shift",
+        "plus" => "equal",
+        other => other,
+    };
+    KEY_NAMES.iter().find(|(_, s)| *s == n).map(|(k, _)| *k)
+}
+
+/// The name of a key (None for keys that can't be bound).
+pub fn key_name(k: KeyCode) -> Option<&'static str> {
+    KEY_NAMES.iter().find(|(c, _)| *c == k).map(|(_, s)| *s)
+}
+
+/// How a key is shown to players: "E", "Space", "Shift", "F5", "Num +".
+pub fn key_label(k: KeyCode) -> String {
+    let n = key_name(k).unwrap_or("?");
+    match n {
+        "kpplus" => "Num +".into(),
+        "kpminus" => "Num -".into(),
+        "kpmultiply" => "Num *".into(),
+        "kpdivide" => "Num /".into(),
+        "kpenter" => "Num Enter".into(),
+        "kpdecimal" => "Num .".into(),
+        "equal" => "=".into(),
+        "minus" => "-".into(),
+        "comma" => ",".into(),
+        "period" => ".".into(),
+        "slash" => "/".into(),
+        "backslash" => "\\".into(),
+        "semicolon" => ";".into(),
+        "apostrophe" => "'".into(),
+        "lbracket" => "[".into(),
+        "rbracket" => "]".into(),
+        "grave" => "`".into(),
+        "pageup" => "Page Up".into(),
+        "pagedown" => "Page Down".into(),
+        "rshift" => "Right Shift".into(),
+        "rctrl" => "Right Ctrl".into(),
+        "altgr" => "AltGr".into(),
+        n if n.starts_with("kp") => format!("Num {}", &n[2..]),
+        n if n.len() == 1 || (n.starts_with('f') && n[1..].parse::<u8>().is_ok()) => n.to_uppercase(),
+        n => {
+            let mut c = n.chars();
+            c.next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + c.as_str())
+        }
+    }
+}
+
+/// The key pressed this frame, injected ones first (the Controls page waits for one).
+pub fn last_key_pressed() -> Option<KeyCode> {
+    INJECTED.with(|i| i.borrow().pressed.first().copied()).or_else(macroquad::input::get_last_key_pressed)
 }
 
 // ------------------------------------------------------------------ gamepads
@@ -398,8 +512,152 @@ pub enum Act {
 impl Act {
     pub const QUICK: [Act; 8] = [Act::Quick1, Act::Quick2, Act::Quick3, Act::Quick4, Act::Quick5, Act::Quick6, Act::Quick7, Act::Quick8];
 
-    /// The keyboard keys that trigger it.
-    pub fn keys(self) -> &'static [KeyCode] {
+    pub const ALL: [Act; 35] = [
+        Act::Up,
+        Act::Down,
+        Act::Left,
+        Act::Right,
+        Act::Run,
+        Act::Confirm,
+        Act::Attack,
+        Act::SwitchWeapon,
+        Act::Character,
+        Act::Skills,
+        Act::Spells,
+        Act::NextTab,
+        Act::PrevTab,
+        Act::Map,
+        Act::Journal,
+        Act::HideUi,
+        Act::Drop,
+        Act::Use,
+        Act::TakeAll,
+        Act::ZoomIn,
+        Act::ZoomOut,
+        Act::MapCenter,
+        Act::Quick1,
+        Act::Quick2,
+        Act::Quick3,
+        Act::Quick4,
+        Act::Quick5,
+        Act::Quick6,
+        Act::Quick7,
+        Act::Quick8,
+        Act::QuickSave,
+        Act::QuickLoad,
+        Act::Cancel,
+        Act::Pause,
+        Act::Debug,
+    ];
+
+    /// The name in the settings file (`keys: {"attack": ["x"]}`).
+    pub fn id(self) -> &'static str {
+        match self {
+            Act::Up => "up",
+            Act::Down => "down",
+            Act::Left => "left",
+            Act::Right => "right",
+            Act::Run => "run",
+            Act::Confirm => "confirm",
+            Act::Cancel => "cancel",
+            Act::Pause => "pause",
+            Act::Attack => "attack",
+            Act::SwitchWeapon => "switch_weapon",
+            Act::Character => "character",
+            Act::Skills => "skills",
+            Act::Spells => "spells",
+            Act::NextTab => "next_tab",
+            Act::PrevTab => "prev_tab",
+            Act::Map => "map",
+            Act::Journal => "journal",
+            Act::HideUi => "hide_ui",
+            Act::Drop => "drop",
+            Act::Use => "use",
+            Act::TakeAll => "take_all",
+            Act::ZoomIn => "zoom_in",
+            Act::ZoomOut => "zoom_out",
+            Act::MapCenter => "map_center",
+            Act::Quick1 => "quick1",
+            Act::Quick2 => "quick2",
+            Act::Quick3 => "quick3",
+            Act::Quick4 => "quick4",
+            Act::Quick5 => "quick5",
+            Act::Quick6 => "quick6",
+            Act::Quick7 => "quick7",
+            Act::Quick8 => "quick8",
+            Act::QuickSave => "quick_save",
+            Act::QuickLoad => "quick_load",
+            Act::Debug => "debug",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Act> {
+        Act::ALL.into_iter().find(|a| a.id() == id)
+    }
+
+    /// How the Controls page names it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Act::Up => "Move up",
+            Act::Down => "Move down",
+            Act::Left => "Move left",
+            Act::Right => "Move right",
+            Act::Run => "Run (hold)",
+            Act::Confirm => "Interact / confirm",
+            Act::Cancel => "Back / close",
+            Act::Pause => "Pause menu",
+            Act::Attack => "Attack",
+            Act::SwitchWeapon => "Switch weapon",
+            Act::Character => "Character & inventory",
+            Act::Skills => "Skills",
+            Act::Spells => "Spells",
+            Act::NextTab => "Next tab",
+            Act::PrevTab => "Previous tab",
+            Act::Map => "Map",
+            Act::Journal => "Journal",
+            Act::HideUi => "Hide interface",
+            Act::Drop => "Drop item",
+            Act::Use => "Use item",
+            Act::TakeAll => "Take all (loot)",
+            Act::ZoomIn => "Map: zoom in",
+            Act::ZoomOut => "Map: zoom out",
+            Act::MapCenter => "Map: center",
+            Act::Quick1 => "Quick slot 1",
+            Act::Quick2 => "Quick slot 2",
+            Act::Quick3 => "Quick slot 3",
+            Act::Quick4 => "Quick slot 4",
+            Act::Quick5 => "Quick slot 5",
+            Act::Quick6 => "Quick slot 6",
+            Act::Quick7 => "Quick slot 7",
+            Act::Quick8 => "Quick slot 8",
+            Act::QuickSave => "Quick save",
+            Act::QuickLoad => "Quick load",
+            Act::Debug => "Debug overlay",
+        }
+    }
+
+    /// Players can change its keys (Escape stays the way back; F3 is for creators).
+    pub fn rebindable(self) -> bool {
+        !matches!(self, Act::Cancel | Act::Pause | Act::Debug)
+    }
+
+    /// Where it is used (bits): 1 = playing, 2 = inventory / loot / shop windows, 4 = map
+    /// screen. Two actions only conflict when they share a key and a place.
+    fn places(self) -> u8 {
+        match self {
+            Act::Up | Act::Down | Act::Left | Act::Right | Act::Run => 1 | 2 | 4,
+            Act::Confirm | Act::Character | Act::NextTab | Act::PrevTab => 1 | 2,
+            Act::Quick1 | Act::Quick2 | Act::Quick3 | Act::Quick4 | Act::Quick5 | Act::Quick6 | Act::Quick7 | Act::Quick8 => 1 | 2,
+            Act::Drop | Act::Use | Act::TakeAll => 2,
+            Act::Map => 1 | 4,
+            Act::ZoomIn | Act::ZoomOut | Act::MapCenter => 4,
+            Act::Cancel => 1 | 2 | 4,
+            _ => 1,
+        }
+    }
+
+    /// The keyboard keys it has unless the player changed them.
+    pub fn default_keys(self) -> &'static [KeyCode] {
         use KeyCode as K;
         match self {
             Act::Up => &[K::Up, K::W],
@@ -467,14 +725,52 @@ impl Act {
     }
 }
 
+thread_local! {
+    /// Keys the player bound instead of the defaults (Options › Controls).
+    static BINDINGS: RefCell<std::collections::HashMap<Act, Vec<KeyCode>>> = RefCell::new(Default::default());
+}
+
+/// The keys that trigger `a` now.
+pub fn keys_of(a: Act) -> Vec<KeyCode> {
+    BINDINGS.with(|b| b.borrow().get(&a).cloned()).unwrap_or_else(|| a.default_keys().to_vec())
+}
+
+/// Applies the player's bindings (`settings.keys`: action id -> key names). Unknown actions,
+/// unknown keys and actions that can't be rebound are ignored.
+pub fn set_bindings(keys: &std::collections::BTreeMap<String, Vec<String>>) {
+    let map = keys
+        .iter()
+        .filter_map(|(id, names)| {
+            let a = Act::from_id(id).filter(|a| a.rebindable())?;
+            Some((a, names.iter().filter_map(|n| key_from_name(n)).collect::<Vec<_>>()))
+        })
+        .collect();
+    BINDINGS.with(|b| *b.borrow_mut() = map);
+}
+
+/// Key names for `settings.keys` from a binding table (only actions that differ from the defaults).
+pub fn binding_names(table: &std::collections::HashMap<Act, Vec<KeyCode>>) -> std::collections::BTreeMap<String, Vec<String>> {
+    table
+        .iter()
+        .filter(|(a, keys)| a.rebindable() && keys.as_slice() != a.default_keys())
+        .map(|(a, keys)| (a.id().to_string(), keys.iter().filter_map(|k| key_name(*k)).map(String::from).collect()))
+        .collect()
+}
+
+/// Other (rebindable) actions that `key` would also trigger where `a` is used. Escape, shared
+/// by *Back* and *Pause* on purpose, can't be bound (it cancels the key prompt).
+pub fn conflicts(a: Act, key: KeyCode) -> Vec<Act> {
+    Act::ALL.into_iter().filter(|b| *b != a && b.rebindable() && b.places() & a.places() != 0 && keys_of(*b).contains(&key)).collect()
+}
+
 /// The action is held (keyboard or gamepad).
 pub fn act_down(a: Act) -> bool {
-    a.keys().iter().any(|k| down(*k)) || a.pad().iter().any(|b| pad_down(*b))
+    keys_of(a).iter().any(|k| down(*k)) || a.pad().iter().any(|b| pad_down(*b))
 }
 
 /// The action was triggered this frame.
 pub fn act_pressed(a: Act) -> bool {
-    a.keys().iter().any(|k| pressed(*k)) || a.pad().iter().any(|b| pad_pressed(*b))
+    keys_of(a).iter().any(|k| pressed(*k)) || a.pad().iter().any(|b| pad_pressed(*b))
 }
 
 pub fn any_act_pressed(acts: &[Act]) -> bool {
@@ -483,6 +779,7 @@ pub fn any_act_pressed(acts: &[Act]) -> bool {
 
 /// Menu navigation in text-entry screens: arrow keys or the gamepad (not WASD, which types).
 pub fn nav_pressed(a: Act) -> bool {
+    // The arrow keys always navigate here, whatever movement is bound to.
     let key = match a {
         Act::Up => KeyCode::Up,
         Act::Down => KeyCode::Down,
@@ -514,13 +811,52 @@ mod tests {
 
     #[test]
     fn actions_keep_the_old_keys() {
-        assert_eq!(Act::Confirm.keys(), &[KeyCode::E, KeyCode::Space, KeyCode::Enter]);
-        assert_eq!(Act::Attack.keys(), &[KeyCode::X]);
-        assert_eq!(Act::Character.keys(), &[KeyCode::C, KeyCode::I]);
-        assert!(Act::QUICK.iter().enumerate().all(|(k, a)| a.keys().len() == 1 && key_from_name(&(k + 1).to_string()) == Some(a.keys()[0])));
+        assert_eq!(Act::Confirm.default_keys(), &[KeyCode::E, KeyCode::Space, KeyCode::Enter]);
+        assert_eq!(Act::Attack.default_keys(), &[KeyCode::X]);
+        assert_eq!(Act::Character.default_keys(), &[KeyCode::C, KeyCode::I]);
+        assert!(Act::QUICK.iter().enumerate().all(|(k, a)| a.default_keys().len() == 1 && key_from_name(&(k + 1).to_string()) == Some(a.default_keys()[0])));
         // The gamepad reaches everything a controller player needs.
         for a in [Act::Up, Act::Down, Act::Left, Act::Right, Act::Confirm, Act::Cancel, Act::Pause, Act::Attack, Act::Character, Act::NextTab, Act::PrevTab, Act::Map, Act::Journal] {
             assert!(!a.pad().is_empty(), "{a:?} has no gamepad button");
         }
+    }
+
+    #[test]
+    fn names_and_bindings() {
+        for (k, n) in KEY_NAMES {
+            assert_eq!(key_from_name(n), Some(*k));
+            assert_eq!(key_name(*k), Some(*n));
+        }
+        for a in Act::ALL {
+            assert_eq!(Act::from_id(a.id()), Some(a));
+            for k in a.default_keys() {
+                assert!(key_name(*k).is_some(), "{a:?}: {k:?} has no name");
+            }
+        }
+        assert_eq!(Act::ALL.len(), Act::ALL.iter().collect::<std::collections::HashSet<_>>().len());
+        assert_eq!((key_label(KeyCode::Space), key_label(KeyCode::F5), key_label(KeyCode::KpAdd), key_label(KeyCode::X)), ("Space".into(), "F5".into(), "Num +".into(), "X".into()));
+        // The defaults have no conflicts where it matters.
+        for a in Act::ALL.into_iter().filter(|a| a.rebindable()) {
+            for k in a.default_keys() {
+                assert!(conflicts(a, *k).is_empty(), "{a:?} {k:?}: {:?}", conflicts(a, *k));
+            }
+        }
+        // Bindings: only changed actions are stored; unknown names are ignored.
+        let mut keys = std::collections::BTreeMap::new();
+        keys.insert("attack".to_string(), vec!["z".to_string(), "nonsense".to_string()]);
+        keys.insert("pause".to_string(), vec!["p".to_string()]);
+        set_bindings(&keys);
+        assert_eq!(keys_of(Act::Attack), vec![KeyCode::Z]);
+        assert_eq!(keys_of(Act::Pause), vec![KeyCode::Escape], "pause can't be rebound");
+        let mut table = std::collections::HashMap::new();
+        table.insert(Act::Attack, vec![KeyCode::Z]);
+        table.insert(Act::Map, vec![KeyCode::M]);
+        assert_eq!(binding_names(&table).into_iter().collect::<Vec<_>>(), vec![("attack".to_string(), vec!["z".to_string()])]);
+        // A bound key conflicts with the action that still has it.
+        keys.insert("attack".to_string(), vec!["j".to_string()]);
+        set_bindings(&keys);
+        assert_eq!(conflicts(Act::Attack, KeyCode::J), vec![Act::Journal]);
+        set_bindings(&Default::default());
+        assert_eq!(keys_of(Act::Attack), vec![KeyCode::X]);
     }
 }

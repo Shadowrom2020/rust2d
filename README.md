@@ -50,6 +50,8 @@ The example project contains a short quest: talk to the elder, get the key from 
 
 ### Game controls
 
+The default keys; players change them in *Options › Controls*.
+
 | Key | Action |
 |---|---|
 | Arrows / WASD (Shift = run) | Move |
@@ -68,7 +70,7 @@ The example project contains a short quest: talk to the elder, get the key from 
 | In a shop | Click a *Buy* / *Sell* button (or double-click a row, or Enter / E on the selected row) to trade one, hold Shift for ten; arrows / W S select, Tab / ← → switch between the merchant's stock and your items, mouse wheel moves the selection up / down (on the list under the pointer), Esc close |
 | In a loot window | Click a stack to take it (right-click: take one), click your own stack to store it, drag between grids, T take all, Tab switch side, Esc close |
 | Esc | Pause menu: Resume, Save game (new named save or overwrite), Load game (all saves incl. the quicksave and the autosave, newest first; Del deletes), Options (see below), Save and quit (saves to the slot this game was last saved to / loaded from, or a new "Save N", then returns to the main menu), Quit (back to the main menu without saving, after a confirmation). Only *Exit* on the main menu closes the game. |
-| Options (title screen and pause menu) | Player settings: *Fullscreen*, *Zoom* (75–250 % on top of the game's pixel scale), *Show FPS*, *Master*, *Music* and *Effects volume* (10 % steps), *Text speed* (Slow, Normal, Fast, Instant) and *Reset to defaults*. Up/Down select, Left/Right or a click on a row's `<` / `>` arrow go to the previous / next value (a click elsewhere on the row or Enter cycles), Esc back. Changes apply and are saved at once, per game, in `~/.config/rust2d/<game>/settings.ron` (`$XDG_CONFIG_HOME` is honoured; `RUST2D_SETTINGS_DIR` overrides the folder), so they persist between sessions and across save games. |
+| Options (title screen and pause menu) | Player settings: *Fullscreen*, *Zoom* (75–250 % on top of the game's pixel scale), *Show FPS*, *Master*, *Music* and *Effects volume* (10 % steps), *Text speed* (Slow, Normal, Fast, Instant), *Controls...* and *Reset to defaults* (keeps the keys). **Controls** lists every action with its keys: Enter, then a key, adds a key (up to three per action), Del / Backspace clears an action's keys, *Reset to defaults* restores all of them; a key that another action also uses where it matters shows in orange with the clash named below. Escape (back / pause menu) and F3 stay fixed; the gamepad buttons are fixed too. Up/Down select, Left/Right or a click on a row's `<` / `>` arrow go to the previous / next value (a click elsewhere on the row or Enter cycles), Esc back. Changes apply and are saved at once, per game, in `~/.config/rust2d/<game>/settings.ron` (`$XDG_CONFIG_HOME` is honoured; `RUST2D_SETTINGS_DIR` overrides the folder), so they persist between sessions and across save games. |
 | Window close button | While playing: asks *Save and exit* (to the slot "Save and quit" uses; not possible in the middle of an event), *Exit without saving* or *Cancel*. On the main menu or the game-over screen the game closes right away. |
 | F5 / F9 | Quick save / quick load (`<project>/saves/quick.ron`) |
 | F3 | Debug overlay (collision, zones, edge strips, hitboxes) |
