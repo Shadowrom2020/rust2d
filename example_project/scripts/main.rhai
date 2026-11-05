@@ -11,6 +11,8 @@
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
 //               open_shop(target) set_state(target, state)
 //               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
+// Cut-scenes:   cutscene(fn) walk_to(target, x, y) approach(target, other) place(target, x, y)
+//               hide_ui() show_ui() dim(amount, seconds) disable_spawners(map) enable_spawners(map)
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
 //               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
 //               quest_done(id)
@@ -18,8 +20,13 @@
 //               text("...") fills in placeholders: {player} {sir|madam} {variable}
 // Skills/magic: skill(id) skill_points() knows_spell(id) mana(); queued: set_skill(id, level)
 //               give_skill_points(n) learn_spell(id) add_mana(n) damage_around(dmg, radius)
-//               player_light(radius, seconds)
-// Other:        player_hp() random(n) current_map()
+//               player_light(radius, seconds, #{ color: [r, g, b], flicker })
+//               heal_area(x, y, radius, n) light_at(x, y, radius, seconds, #{ ... })
+// Spell effects (queued; x, y in tiles): aim(fn) calls fn(x, y) with the player's target;
+//               fly(sheet, x, y, fn, #{ speed, frames: [a, b], fps, scale, light }) calls
+//               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
+// Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
+//               random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -56,17 +63,50 @@ fn mira_walk() {
 
 fn shrine_touch() {
     if flag("shrine_lit") {
-        say("The shrine glows softly.");
+        say("The shrine glows softly. The forest is calm.");
         return;
     }
     if !flag("quest_accepted") {
         say("An old stone shrine. It seems dormant.");
         return;
     }
-    say("You touch the shrine. Ancient runes begin to glow!");
+    cutscene("shrine_awakening");
+}
+
+// The shrine awakens (a cut-scene, the first time it is touched on the elder's quest): the
+// clearing darkens, the statues' eyes and the shrine light up, a burst of magic rolls out -
+// every monster left in the forest is destroyed and its spawners go quiet. Tilda's slime
+// hunt can't go on then: accepted, it is done (she rewards it); not accepted, she won't offer it.
+fn shrine_awakening() {
+    face("player", "up");
+    say("You lay your hand on the cold stone. It begins to hum under your fingers...");
+    dim(0.8, 1.5);
+    play_sound("chime");
+    wait(1.6);
+    let blue = #{ color: [120, 200, 255], flicker: true };
+    light_at(47.5, 20.5, 1.5, 8, blue);         // a glow in the crystal
+    wait(0.8);
+    light_at(44.5, 20.2, 2.5, 7, blue);         // the statues' eyes
+    wait(0.4);
+    light_at(50.5, 20.2, 2.5, 6.6, blue);
+    wait(0.6);
+    set_state("shrine", "glowing");
+    play_sound("chime");
+    effect("magic_burst", 47.5, 20.5, #{ scale: 1.5, fps: 14, light: 5, color: [140, 210, 255] });
+    wait(0.5);
+    effect("magic_burst", 47.5, 20.5, #{ scale: 3.5, fps: 9, light: 9, color: [170, 230, 255] });
+    light_at(47.5, 21, 9, 3.5, #{ color: [180, 230, 255] });
+    wait(1.0);
+    say("Ancient runes flare up! A wave of light rolls out from the shrine, deep into Whisperwood.");
+    defeat_enemies();                           // every monster left in the forest
+    disable_spawners("forest");                 // and no new ones
+    if quest_active("pest_control") && quest_stage("pest_control") == 0 {
+        set_quest_stage("pest_control", 1);     // the slimes are gone: back to Tilda
+    }
     set_flag("shrine_lit", true);
-    set_state("self", "glowing");
     set_quest_stage("strange_lights", 2);
+    dim(0, 2);
+    wait(1.5);
     emit("shrine_lit");
 }
 
@@ -97,6 +137,21 @@ fn slime_defeated() {
 
 // The town guard patrols the road (see his patrol route in the map inspector). Once the
 // shrine is lit he stops: stop_patrol(target) / patrol(target) / patrol(target, [[x, y], ...]).
+// The intro of a new game, a cut-scene (village Map enter trigger, once): the player walks
+// into town from the west, the guard comes over and sends them to the elder.
+fn intro_cutscene() {
+    place("player", 0, 18);
+    face("player", "right");
+    wait(0.8);
+    walk_to("player", 5, 18);
+    wait(0.4);
+    approach("guard", "player");
+    say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("Guard", "Something is not right in Whisperwood, east of town. Strange lights flicker between the trees at night, and the slimes grow bolder every day.");
+    say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well in the middle of town.");
+    wait(0.3);
+}
+
 fn guard_talk() {
     if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
@@ -108,4 +163,25 @@ fn guard_talk() {
 
 fn count_coins() {
     say("You have " + item_count("coin") + " coins.");
+}
+
+// Fireball, a scripted spell (Database > Spells > Fireball, effect "Script"). Casting it calls
+// cast_fireball(); aim() lets the player click a target and calls fireball_at(x, y) with it (in
+// tiles). The spell's mana is only spent once a target is chosen.
+fn cast_fireball() {
+    aim("fireball_at");
+}
+
+fn fireball_at(x, y) {
+    play_sound("fireball");
+    // An animated sprite (all frames of the "fireball" sheet) flies there and glows on the way.
+    fly("fireball", x, y, "fireball_hit", #{ speed: 9, fps: 14, light: 2.5 });
+}
+
+fn fireball_hit(x, y) {
+    play_sound("explosion");
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    damage_area(x, y, 2, 5);
+    // Embers glow on for a few seconds.
+    light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });
 }

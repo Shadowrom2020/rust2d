@@ -4,6 +4,7 @@
 //!        rust2d-editor --library [DIR]  (the Asset Library window; default: the shared library)
 
 mod app;
+mod builder;
 mod canvas;
 mod database;
 mod doc;
@@ -267,11 +268,63 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.art_action(database::ArtAction::NewFrame { cells }, tab);
             println!("[script] {}", ed.status.0);
         }
-        "newcharsheet" => {
-            let tab = ed.db.tab;
-            let template = (!arg(1).is_empty()).then(|| arg(1).to_string());
-            ed.art_action(database::ArtAction::CharacterSheet { template }, tab);
-            println!("[script] {}", ed.status.0);
+        // Character builder: charnew [ID] · charcustom (selected placed NPC) · charset KEY VALUE
+        // (body|hair|beard|skin|haircolor|clothing|head|armor|weapon|offhand|carry ITEMxN|
+        // random|id|name; on the open builder, else the selected character) · charrandom ·
+        // chartemplate ID (project or library character) · charcreate / charapply · charcancel ·
+        // charreset (selected NPC uses the definition's look)
+        "charnew" => {
+            ed.open_builder(builder::Target::New);
+            if !arg(1).is_empty() {
+                if let Some(b) = &mut ed.builder {
+                    b.id = arg(1).to_string();
+                    b.name = cmd[2..].join(" ");
+                }
+            }
+        }
+        "charcustom" => {
+            if let Selection::Entity(uid) = ed.sel {
+                ed.open_builder(builder::Target::Instance(uid));
+            }
+        }
+        "charset" => {
+            if let Err(e) = ed.builder_set(arg(1), &cmd[2..].join(" ")) {
+                println!("[script] charset: {e}");
+            }
+        }
+        "charrandom" => {
+            if let Err(e) = ed.builder_set("random", "") {
+                println!("[script] charrandom: {e}");
+            }
+        }
+        "chartemplate" => {
+            use crate::models::{ModelPick, ModelTarget};
+            let target = if ed.builder.is_some() {
+                ModelTarget::Builder
+            } else if let Selection::Entity(uid) = ed.sel {
+                ModelTarget::Instance(uid)
+            } else {
+                ModelTarget::Def(ed.project.db.characters.get(ed.db.sel).map(|d| d.id.clone()).unwrap_or_default())
+            };
+            let pick = if ed.project.db.character(arg(1)).is_some() { ModelPick::Project(arg(1).to_string()) } else { ModelPick::Library(arg(1).to_string()) };
+            let r = ed.apply_model(&target, &pick);
+            println!("[script] chartemplate: {r:?}");
+            ed.show_result(r);
+        }
+        "charcreate" | "charapply" => match ed.apply_builder() {
+            Ok(m) => {
+                println!("[script] {m}");
+                ed.set_status(m);
+            }
+            Err(e) => println!("[script] {}: {e:#}", arg(0)),
+        },
+        "charcancel" => ed.builder = None,
+        // playable SHEET on|off: may players choose that body in the character creator?
+        "playable" => builder::request_playable(arg(1), arg(2) != "off"),
+        "charreset" => {
+            if let Selection::Entity(uid) = ed.sel {
+                ed.reset_instance_look(uid);
+            }
         }
         // exportgame OUT_DIR [NAME]  /  exportdialog
         "exportgame" => {
@@ -294,7 +347,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} msg={}",
+            ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
             ed.pending.is_some(),
@@ -304,6 +358,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.library_mode,
             ed.defs_dirty,
             ed.lib.add.as_ref().map_or("closed".to_string(), |d| format!("{:?}:{}", d.kind, d.picked.len())),
+            ed.builder_status(),
             ed.status.0
         ),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),
@@ -358,6 +413,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         // Library / packages: libsel KIND ID · libadd · tolib KIND ID · libexport PATH ·
         // libimport PATH (into the library) · projimport PATH (into the project)
+        // libfilter KIND|all: the Browse view's kind filter
+        "libfilter" => ed.lib.filter = library_ui::parse_kind(arg(1)),
         "libsel" => {
             ed.lib.ensure_loaded();
             if let Some(k) = library_ui::parse_kind(arg(1)) {
@@ -465,14 +522,35 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         "tolib" => {
             if let Some(k) = library_ui::parse_kind(arg(1)) {
-                let r = ed.project_to_library(&[(k, arg(2).to_string())]);
-                ed.show_result(r);
+                // Assets using scripts open the "Script functions" dialog (scriptpick…).
+                ed.send_project_assets(vec![(k, arg(2).to_string())], library_ui::SendTo::Library);
                 println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
             }
         }
+        // projexport KIND ID PATH: a project asset to a package (via the script dialog if needed)
+        "projexport" => {
+            if let Some(k) = library_ui::parse_kind(arg(1)) {
+                ed.send_project_assets(vec![(k, arg(2).to_string())], library_ui::SendTo::Package(arg(3).into()));
+                println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+            }
+        }
+        // The "Script functions" dialog: scriptpick FN on|off · scriptpickok · scriptpickcancel
+        "scriptpick" => {
+            if let Some(p) = &mut ed.lib.script_pick {
+                if arg(2) == "off" {
+                    p.picked.remove(arg(1));
+                } else {
+                    p.picked.insert(arg(1).to_string());
+                }
+            }
+        }
+        "scriptpickok" | "scriptpickcancel" => {
+            ed.close_script_pick(arg(0) == "scriptpickok");
+            println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+        }
         "libexport" => {
             let sel: Vec<_> = ed.lib.selected.iter().cloned().collect();
-            let r = ed.export_package(true, &sel, std::path::Path::new(arg(1)));
+            let r = ed.export_package(&sel, std::path::Path::new(arg(1)));
             ed.show_result(r);
             println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
         }
@@ -497,12 +575,12 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
             }
         }
-        // model def ID | model inst UID|NAME: open the model chooser
+        // model def ID | model builder | model inst UID|NAME: open the template chooser
         "model" => {
             use crate::models::{request_model, ModelTarget};
             match arg(1) {
                 "def" => request_model(ModelTarget::Def(arg(2).to_string())),
-                "look" => request_model(ModelTarget::Look(num(2) as usize)),
+                "builder" => request_model(ModelTarget::Builder),
                 _ => {
                     let uid = arg(2).parse::<u32>().ok().or_else(|| ed.doc.as_ref()?.map.entities.iter().find(|e| e.name == arg(2)).map(|e| e.uid));
                     if let Some(uid) = uid {
@@ -578,7 +656,13 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         // probe X Y: print the egui layer under that screen point (next frame)
         "probe" => ed.probe.push(egui_macroquad::egui::pos2(num(1), num(2))),
-        "wizard" => ed.wizard = Some(wizard::Wizard::new(&ed.project)),
+        "wizard" => {
+            if arg(1) == "character" {
+                ed.open_builder(builder::Target::New);
+            } else {
+                ed.wizard = Some(wizard::Wizard::new(&ed.project));
+            }
+        }
         // Pixel editor: pxopen REL FW FH · pxtool NAME · pxcolor RRGGBB · pxat X Y [right] · pxsave
         "pxopen" => ed.open_pixel(arg(1), (num(2) as u32, num(3) as u32), pixel::Layout::Plain),
         "pxtool" => {
@@ -641,6 +725,45 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "view" => {
             ed.cam.center = vec2(num(1), num(2));
             ed.cam.zoom = num(3).max(0.01);
+        }
+        // addaction LABEL...: appends the action template with that label (e.g. "Play effect") to
+        // the selected entity's first trigger (testing the action editors)
+        "addaction" => {
+            let label = cmd[1..].join(" ");
+            let tpl = rust2d_engine::events::Action::templates().into_iter().find(|a| a.label() == label);
+            if let (Some(tpl), Selection::Entity(uid), Some(doc)) = (tpl, ed.sel, ed.doc.as_mut()) {
+                let before = doc::Objects::of(&doc.map);
+                if let Some(e) = doc.map.entities.iter_mut().find(|e| e.uid == uid) {
+                    if e.triggers.is_empty() {
+                        e.triggers.push(rust2d_engine::events::Trigger::new(rust2d_engine::events::TriggerOn::Interact));
+                    }
+                    e.triggers[0].actions.push(tpl);
+                }
+                doc.record_objects(before, "inspector");
+            } else {
+                eprintln!("[editor script] addaction: no template '{label}' or no entity selected");
+            }
+        }
+        // entequip ITEM: the selected NPC wears / holds ITEM (its own equipment, in the item's slot)
+        // entskin RRGGBB: the selected NPC gets its own look with that skin color
+        "entequip" | "entskin" => {
+            if let (Selection::Entity(uid), Some(doc)) = (ed.sel, ed.doc.as_mut()) {
+                let before = doc::Objects::of(&doc.map);
+                let db = &ed.project.db;
+                if let Some(e) = doc.map.entities.iter_mut().find(|e| e.uid == uid) {
+                    let def = db.character(&e.def).cloned();
+                    if arg(0) == "entequip" {
+                        if let (Some(slot), Some(d)) = (db.item(arg(1)).and_then(|i| i.equip_slot()), &def) {
+                            let eq = e.equipment.get_or_insert_with(|| d.equipment.clone());
+                            *eq.slot_mut(slot) = Some(rust2d_engine::inventory::ItemStack::new(arg(1), 1));
+                        }
+                    } else if let (Ok(v), Some(d)) = (u32::from_str_radix(arg(1), 16), &def) {
+                        let a = e.appearance.get_or_insert_with(|| d.appearance.clone());
+                        a.skin = [(v >> 16) as u8, (v >> 8) as u8, v as u8];
+                    }
+                }
+                doc.record_objects(before, "inspector");
+            }
         }
         "fit" => ed.fit_view(),
         "collision" => ed.view.collision = arg(1) != "off",

@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use macroquad::prelude::{Color, Image};
+use rust2d_engine::defs::{Armor, EquipSlot, ItemDef, SpriteRef};
 use rust2d_engine::entity::Facing;
 
 /// Tile size in pixels.
@@ -247,6 +248,28 @@ impl Canvas {
         for y in 0..h {
             for x in 0..w {
                 if self.get(x, y).a >= 0.5 {
+                    continue;
+                }
+                let solid = |dx: i32, dy: i32| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    nx >= 0 && ny >= 0 && nx < w && ny < h && self.get(nx, ny).a >= 0.5
+                };
+                if solid(1, 0) || solid(-1, 0) || solid(0, 1) || solid(0, -1) {
+                    edge.push((x, y));
+                }
+            }
+        }
+        for (x, y) in edge {
+            self.px(x, y, hex(c));
+        }
+    }
+    /// Outline around what is drawn, but only where `mask` (same layout) has nothing: an
+    /// overlay gets its outline where it stands out from the body below.
+    fn outline_outside(&mut self, mask: &Canvas, w: i32, h: i32, c: u32) {
+        let mut edge = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                if self.get(x, y).a >= 0.5 || mask.get(x, y).a >= 0.5 {
                     continue;
                 }
                 let solid = |dx: i32, dy: i32| {
@@ -793,7 +816,7 @@ pub fn terrain(out: &Path) {
 
 // ------------------------------------------------------------------ characters
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Look {
     pub skin: u32,
     pub hair: u32,
@@ -810,8 +833,40 @@ pub struct Look {
     pub veil: Option<u32>,
     /// Bones instead of skin and clothes.
     pub skeleton: bool,
-    /// Female look: longer hair, eyelashes, lips.
+    /// Female look: a feminine body (narrow waist, bust, slim limbs, rounder chin), lashes
+    /// and lips, long hair by default, outfits in their fitted cut.
     pub female: bool,
+    pub hair_style: HairStyle,
+    pub beard_style: BeardStyle,
+}
+
+impl Look {
+    fn hair_style(&self) -> HairStyle {
+        match self.hair_style {
+            HairStyle::Auto if self.female => HairStyle::Long,
+            HairStyle::Auto => HairStyle::Short,
+            s => s,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum HairStyle {
+    /// Long for women, short for men.
+    #[default]
+    Auto,
+    Short,
+    Long,
+    /// Short on top with a tail at the back.
+    Ponytail,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum BeardStyle {
+    #[default]
+    Full,
+    /// A small chin beard.
+    Goatee,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -857,11 +912,35 @@ fn body_y(frame: u32) -> (i32, i32) {
     (5 + bob, 22 + bob)
 }
 
+/// Which part of a person to draw: everything (pre-drawn sheets), or one layer of a layered
+/// model - the body in underwear (skin in the magenta reference ramp), hair or beard (cyan
+/// reference ramp), or the outfit (clothes, shoes, hats).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    Full,
+    Body,
+    Hair,
+    Beard,
+    Outfit,
+}
+
+/// Skin / hair reference shades the engine recolors (`render::recolor`).
+pub const SKIN_REF: [u32; 4] = [0x6e006e, 0x9c009c, 0xc800c8, 0xf000f0];
+pub const HAIR_REF: [u32; 4] = [0x006e6e, 0x009c9c, 0x00c8c8, 0x00f0f0];
+/// Underwear of the bodies.
+const UNDERWEAR: [u32; 4] = [0x8a8478, 0xb8b0a0, 0xdcd4c4, 0xf2ece0];
+
 fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
+    draw_part(c, look, f, frame, Part::Full);
+}
+
+fn draw_part(c: &mut Canvas, look: &Look, f: Facing, frame: u32, part: Part) {
+    let full = part == Part::Full;
+    let (body, outfit, hairs) = (full || part == Part::Body, full || part == Part::Outfit, full || part == Part::Hair);
     let (_, l_up, r_up) = walk(frame);
     let (hy, by) = body_y(frame);
-    let skin = ramp(look.skin);
-    let hair = ramp(look.hair);
+    let skin = if full { ramp(look.skin) } else { SKIN_REF };
+    let hair = if full { ramp(look.hair) } else { HAIR_REF };
     let shirt = ramp(look.shirt);
     let pants = ramp(look.pants);
     let boots = [0x24180e, 0x3a2a1e, 0x4e3a28, 0x6a5038];
@@ -873,48 +952,112 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
         _ => 0,
     };
 
-    // Legs (or a robe reaching the ground).
-    let leg = |c: &mut Canvas, x: i32, lift: i32, pal: [u32; 4]| {
-        c.shade_box(x, 34 - lift, 5, 9, pal);
-        c.shade_box(x, 41 - lift, 5, 4, boots);
-    };
-    if let Some(col) = look.robe {
-        let pal = ramp(col);
-        for (k, y) in (by + 9..45).enumerate() {
-            let half = 7 + (k as i32) / 4;
-            c.hline(16 - half, y, 2 * half + 1, hex(pal[2]));
-            c.px(16 - half, y, hex(pal[3]));
-            c.px(16 + half, y, hex(pal[1]));
+    // Legs (or a robe reaching the ground); the body has bare legs and feet.
+    // Women: slimmer limbs (3 / 4 px instead of 4 / 5), a narrow waist and a fitted cut.
+    let fem = look.female;
+    let (leg_w, arm_w) = if fem { (4, 3) } else { (5, 4) };
+    let (leg_l, leg_r) = if fem { (12, 17) } else { (11, 17) };
+    let (arm_l, arm_r) = if fem { (7, 23) } else { (5, 24) };
+    if part == Part::Body {
+        let bare = |c: &mut Canvas, x: i32, lift: i32, pal: [u32; 4]| c.shade_box(x, 34 - lift, leg_w, 11, pal);
+        if side {
+            bare(c, 14 - swing * dir, r_up, [skin[0], skin[0], skin[1], skin[2]]);
+            bare(c, 14 + swing * dir, l_up, skin);
+        } else {
+            bare(c, leg_l, l_up, skin);
+            bare(c, leg_r, r_up, skin);
         }
-        c.hline(9, 44, 15, hex(pal[0]));
-        // Shoes peeking out while walking.
-        if l_up > 0 || r_up > 0 {
-            c.rect(if l_up > 0 { 11 } else { 18 }, 44, 4, 2, hex(boots[1]));
+    } else if outfit {
+        if let Some(col) = look.robe {
+            let pal = ramp(col);
+            for (k, y) in (by + 9..45).enumerate() {
+                // A woman's dress flares from the waist into a skirt.
+                let half = if fem { 6 + (k as i32) * 9 / 35 } else { 7 + (k as i32) / 4 };
+                c.hline(16 - half, y, 2 * half + 1, hex(pal[2]));
+                c.px(16 - half, y, hex(pal[3]));
+                c.px(16 + half, y, hex(pal[1]));
+            }
+            c.hline(9, 44, 15, hex(pal[0]));
+            // Shoes peeking out while walking.
+            if l_up > 0 || r_up > 0 {
+                c.rect(if l_up > 0 { 11 } else { 18 }, 44, 4, 2, hex(boots[1]));
+            }
+        } else if side {
+            let leg = |c: &mut Canvas, x: i32, lift: i32, pal: [u32; 4]| {
+                c.shade_box(x, 34 - lift, leg_w, 9, pal);
+                c.shade_box(x, 41 - lift, leg_w, 4, boots);
+            };
+            leg(c, 14 - swing * dir, r_up, [pants[0], pants[0], pants[1], pants[2]]);
+            leg(c, 14 + swing * dir, l_up, pants);
+        } else {
+            let leg = |c: &mut Canvas, x: i32, lift: i32, pal: [u32; 4]| {
+                c.shade_box(x, 34 - lift, leg_w, 9, pal);
+                c.shade_box(x, 41 - lift, leg_w, 4, boots);
+            };
+            leg(c, leg_l, l_up, pants);
+            leg(c, leg_r, r_up, pants);
         }
-    } else if side {
-        leg(c, 14 - swing * dir, r_up, [pants[0], pants[0], pants[1], pants[2]]);
-        leg(c, 14 + swing * dir, l_up, pants);
-    } else {
-        leg(c, 11, l_up, pants);
-        leg(c, 17, r_up, pants);
     }
 
     // Hood mass behind the head.
-    if let Hat::Hood(col) = look.hat {
+    if let (Hat::Hood(col), true) = (look.hat, outfit) {
         c.rrect(6, hy - 3, 21, 22, 6, hex(ramp(col)[1]));
     }
     // Back arm (side view) goes behind the torso.
-    if side {
-        c.shade_box(14 + swing * dir, by + 2, 4, 9, [shirt[0], shirt[0], shirt[1], shirt[1]]);
+    if side && (body || outfit) {
+        let pal = if part == Part::Body { [skin[0], skin[0], skin[1], skin[1]] } else { [shirt[0], shirt[0], shirt[1], shirt[1]] };
+        c.shade_box(14 + swing * dir, by + 2, arm_w, 9, pal);
     }
 
-    // Torso.
-    c.rrect(9, by, 15, 13, 2, hex(shirt[2]));
-    c.vline(10, by + 1, 11, hex(shirt[3]));
-    c.vline(22, by + 1, 11, hex(shirt[1]));
-    c.hline(10, by + 12, 13, hex(shirt[1]));
-    c.rect(9, by + 10, 15, 2, hex(0x4a2c14)); // belt
-    if look.skeleton {
+    // Torso: bare with underwear, or the shirt with a belt. Women: shoulders, a narrow waist
+    // and hips (the same shape under the clothes and in their cut).
+    let torso = |c: &mut Canvas, pal: [u32; 4]| {
+        if fem {
+            c.rrect(10, by, 13, 5, 2, hex(pal[2]));
+            c.rect(11, by + 4, 11, 5, hex(pal[2]));
+            c.rrect(10, by + 8, 13, 5, 2, hex(pal[2]));
+            c.vline(11, by + 1, 3, hex(pal[3]));
+            c.vline(12, by + 4, 5, hex(pal[3]));
+            c.vline(11, by + 9, 3, hex(pal[3]));
+            c.vline(21, by + 1, 3, hex(pal[1]));
+            c.vline(20, by + 4, 5, hex(pal[1]));
+            c.vline(21, by + 9, 3, hex(pal[1]));
+        } else {
+            c.rrect(9, by, 15, 13, 2, hex(pal[2]));
+            c.vline(10, by + 1, 11, hex(pal[3]));
+            c.vline(22, by + 1, 11, hex(pal[1]));
+        }
+    };
+    if part == Part::Body {
+        torso(c, skin);
+        if fem {
+            if f == Facing::Down {
+                // Bust: a shadow under it, a highlight on top.
+                c.hline(12, by + 3, 4, hex(skin[1]));
+                c.hline(17, by + 3, 4, hex(skin[1]));
+                c.px(13, by + 1, hex(skin[3]));
+                c.px(18, by + 1, hex(skin[3]));
+            }
+            c.shade_box(10, by + 9, 13, 4, UNDERWEAR);
+            if f == Facing::Up {
+                c.hline(11, by + 2, 11, hex(UNDERWEAR[1]));
+            } else {
+                c.shade_box(10, by + 1, 13, 3, UNDERWEAR);
+            }
+        } else {
+            c.shade_box(9, by + 9, 15, 4, UNDERWEAR);
+        }
+    } else if outfit {
+        torso(c, shirt);
+        if fem {
+            c.hline(11, by + 12, 11, hex(shirt[1]));
+            c.rect(10, by + 10, 13, 2, hex(0x4a2c14)); // belt
+        } else {
+            c.hline(10, by + 12, 13, hex(shirt[1]));
+            c.rect(9, by + 10, 15, 2, hex(0x4a2c14)); // belt
+        }
+    }
+    if look.skeleton && full {
         // Rib cage over a dark torso.
         let bone = ramp(look.skin);
         c.rrect(9, by, 15, 13, 2, hex(0x2b2620));
@@ -923,44 +1066,70 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
         }
         c.vline(16, by + 1, 11, hex(bone[3]));
     }
-    if let Some(col) = look.apron {
+    if let (Some(col), true) = (look.apron, outfit) {
         let pal = ramp(col);
+        let (ax, aw) = if fem { (12, 9) } else { (11, 11) };
         match f {
             Facing::Down => {
-                c.shade_box(11, by + 3, 11, 17, pal);
-                c.hline(11, by + 3, 11, hex(pal[3]));
+                c.shade_box(ax, by + 3, aw, 17, pal);
+                c.hline(ax, by + 3, aw, hex(pal[3]));
             }
-            Facing::Left => c.shade_box(9, by + 4, 6, 15, pal),
-            Facing::Right => c.shade_box(18, by + 4, 6, 15, pal),
-            Facing::Up => c.hline(9, by + 4, 15, hex(pal[1])),
+            Facing::Left => c.shade_box(if fem { 10 } else { 9 }, by + 4, if fem { 5 } else { 6 }, 15, pal),
+            Facing::Right => c.shade_box(18, by + 4, if fem { 5 } else { 6 }, 15, pal),
+            Facing::Up => c.hline(ax - 1, by + 4, aw + 2, hex(pal[1])),
         }
     }
-    if f == Facing::Down && !look.skeleton {
+    if f == Facing::Down && !look.skeleton && outfit {
         c.rect(15, by + 10, 3, 2, hex(GOLD[2]));
-        c.px(16, by, hex(skin[2]));
-        c.px(15, by, hex(skin[2]));
-        c.px(17, by, hex(skin[2]));
-        c.px(16, by + 1, hex(skin[2]));
+        // The neck opening shows the skin (an outfit leaves it open for the body below).
+        let neck = if full { hex(skin[2]) } else { CLEAR };
+        for (x, y) in [(16, by), (15, by), (17, by), (16, by + 1)] {
+            c.px(x, y, neck);
+        }
     }
 
-    // Arms.
-    if side {
-        let x = 14 - swing * dir;
-        c.shade_box(x, by + 2, 4, 7, shirt);
-        c.shade_box(x, by + 9, 4, 3, skin);
-    } else {
-        for (x, s) in [(5, swing), (24, -swing)] {
-            c.shade_box(x, by + 1 + s / 2, 4, 7, shirt);
-            c.shade_box(x, by + 8 + s / 2, 4, 3, skin);
+    // Arms: sleeves and hands (the body: bare arms).
+    if part == Part::Body {
+        if side {
+            c.shade_box(14 - swing * dir, by + 2, arm_w, 10, skin);
+        } else {
+            for (x, s) in [(arm_l, swing), (arm_r, -swing)] {
+                c.shade_box(x, by + 1 + s / 2, arm_w, 10, skin);
+            }
+        }
+    } else if outfit {
+        if side {
+            let x = 14 - swing * dir;
+            c.shade_box(x, by + 2, arm_w, 7, shirt);
+            if full {
+                c.shade_box(x, by + 9, arm_w, 3, skin);
+            }
+        } else {
+            for (x, s) in [(arm_l, swing), (arm_r, -swing)] {
+                c.shade_box(x, by + 1 + s / 2, arm_w, 7, shirt);
+                if full {
+                    c.shade_box(x, by + 8 + s / 2, arm_w, 3, skin);
+                }
+            }
         }
     }
 
     // Head.
     let (hx, hw, hh) = (8, 17, 16);
-    c.rrect(hx, hy, hw, hh, 4, hex(skin[2]));
-    c.hline(hx + 3, hy + hh - 1, hw - 6, hex(skin[1]));
-    c.vline(hx + hw - 1, hy + 4, hh - 8, hex(skin[1]));
-    if look.ears {
+    if body {
+        if fem {
+            // A rounder, narrower chin.
+            c.rrect(hx, hy, hw, hh - 3, 4, hex(skin[2]));
+            c.rrect(hx + 1, hy + hh - 5, hw - 2, 5, 3, hex(skin[2]));
+            c.hline(hx + 5, hy + hh - 1, hw - 10, hex(skin[1]));
+            c.vline(hx + hw - 1, hy + 4, hh - 9, hex(skin[1]));
+        } else {
+            c.rrect(hx, hy, hw, hh, 4, hex(skin[2]));
+            c.hline(hx + 3, hy + hh - 1, hw - 6, hex(skin[1]));
+            c.vline(hx + hw - 1, hy + 4, hh - 8, hex(skin[1]));
+        }
+    }
+    if look.ears && body {
         let ear = |c: &mut Canvas, x: i32, d: i32| {
             for k in 0..4 {
                 c.vline(x + d * k, hy + 6 + k / 2, 4 - k / 2, hex(skin[if k == 0 { 2 } else { 1 }]));
@@ -975,7 +1144,7 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
             Facing::Right => ear(c, hx - 1, -1),
         }
     }
-    let skeleton = look.skeleton;
+    let skeleton = look.skeleton && full;
     let eye = |c: &mut Canvas, x: i32| {
         if skeleton {
             c.rect(x - 1, hy + 7, 4, 4, hex(0x1a1612)); // dark sockets
@@ -993,79 +1162,424 @@ fn draw_person(c: &mut Canvas, look: &Look, f: Facing, frame: u32) {
     };
     match f {
         Facing::Down => {
-            cap(c, hx, hw, 7);
-            for x in (hx + 1..hx + hw - 1).step_by(3) {
-                c.px(x + 1, hy + 6, hex(hair[1])); // fringe
+            if hairs {
+                cap(c, hx, hw, 7);
+                for x in (hx + 1..hx + hw - 1).step_by(3) {
+                    c.px(x + 1, hy + 6, hex(hair[1])); // fringe
+                }
+                c.rect(hx, hy + 4, 2, 7, hex(hair[1]));
+                c.rect(hx + hw - 2, hy + 4, 2, 7, hex(hair[1]));
             }
-            c.rect(hx, hy + 4, 2, 7, hex(hair[1]));
-            c.rect(hx + hw - 2, hy + 4, 2, 7, hex(hair[1]));
-            eye(c, 11);
-            eye(c, 20);
-            if !skeleton {
-                c.px(10, hy + 12, hex(0xe8907a)); // cheeks
-                c.px(22, hy + 12, hex(0xe8907a));
+            if body {
+                eye(c, 11);
+                eye(c, 20);
+                if !skeleton {
+                    c.px(10, hy + 12, hex(0xe8907a)); // cheeks
+                    c.px(22, hy + 12, hex(0xe8907a));
+                }
             }
             if skeleton {
                 for x in (12..21).step_by(2) {
                     c.px(x, hy + 13, hex(0x1a1612)); // teeth
                 }
-            } else if look.beard {
-                c.rrect(10, hy + 10, 13, 9, 3, hex(hair[2]));
-                c.hline(12, hy + 10, 9, hex(hair[3]));
-                c.hline(14, hy + 13, 5, hex(hair[0]));
-            } else if look.female {
+            } else if look.beard && full || part == Part::Beard {
+                match look.beard_style {
+                    BeardStyle::Full => {
+                        c.rrect(10, hy + 10, 13, 9, 3, hex(hair[2]));
+                        c.hline(12, hy + 10, 9, hex(hair[3]));
+                        c.hline(14, hy + 13, 5, hex(hair[0]));
+                    }
+                    BeardStyle::Goatee => {
+                        c.rrect(13, hy + 12, 7, 6, 2, hex(hair[2]));
+                        c.hline(14, hy + 12, 5, hex(hair[3]));
+                        c.hline(14, hy + 14, 5, hex(hair[0]));
+                        c.hline(13, hy + 11, 7, hex(hair[1])); // mustache
+                    }
+                }
+            } else if look.female && body {
                 c.hline(15, hy + 13, 3, hex(0xc0505a)); // lips
                 c.px(16, hy + 14, hex(0xa03a46));
-            } else {
+            } else if body {
                 c.hline(15, hy + 13, 3, hex(skin[0]));
             }
-            if look.female {
-                // Long hair falling past the face, eyelashes.
-                c.rect(hx - 1, hy + 4, 3, 15, hex(hair[2]));
-                c.vline(hx - 1, hy + 5, 13, hex(hair[3]));
-                c.rect(hx + hw - 2, hy + 4, 3, 15, hex(hair[1]));
+            if hairs && look.hair_style() == HairStyle::Long {
+                // Long hair falling past the face over the shoulders.
+                c.rect(hx - 1, hy + 4, 3, 17, hex(hair[2]));
+                c.vline(hx - 1, hy + 5, 15, hex(hair[3]));
+                c.rect(hx + hw - 2, hy + 4, 3, 17, hex(hair[1]));
+                c.px(hx, hy + 21, hex(hair[1]));
+                c.px(hx + hw - 1, hy + 21, hex(hair[0]));
+            }
+            if hairs && look.hair_style() == HairStyle::Ponytail {
+                // The tail's tip shows beside the neck.
+                c.rect(hx + hw, hy + 12, 2, 7, hex(hair[1]));
+            }
+            if look.female && body {
+                // Eyelashes.
                 for x in [11, 20] {
                     c.hline(x - 1, hy + 7, 3, hex(0x1a1a22));
                 }
             }
         }
         Facing::Up => {
-            cap(c, hx, hw, hh);
-            c.vline(hx + hw - 2, hy + 3, hh - 6, hex(hair[1]));
-            c.hline(hx + 3, hy + hh - 2, hw - 6, hex(hair[1]));
-            if look.female {
-                c.rrect(hx, hy + 8, hw, 14, 4, hex(hair[2]));
-                c.vline(hx + hw - 2, hy + 9, 12, hex(hair[1]));
-                c.vline(hx + 2, hy + 9, 11, hex(hair[3]));
+            if hairs {
+                cap(c, hx, hw, hh);
+                c.vline(hx + hw - 2, hy + 3, hh - 6, hex(hair[1]));
+                c.hline(hx + 3, hy + hh - 2, hw - 6, hex(hair[1]));
+                match look.hair_style() {
+                    HairStyle::Long => {
+                        // Falls over the shoulders, narrowing to a rounded tip.
+                        c.rrect(hx + 1, hy + 8, hw - 2, 12, 4, hex(hair[2]));
+                        c.rrect(hx + 3, hy + 17, hw - 6, 7, 4, hex(hair[2]));
+                        c.vline(hx + hw - 3, hy + 9, 12, hex(hair[1]));
+                        c.vline(hx + 3, hy + 9, 11, hex(hair[3]));
+                        c.hline(hx + 5, hy + 22, hw - 10, hex(hair[1]));
+                    }
+                    HairStyle::Ponytail => {
+                        c.rect(14, hy + 10, 5, 15, hex(hair[2]));
+                        c.vline(14, hy + 11, 13, hex(hair[3]));
+                        c.vline(18, hy + 11, 13, hex(hair[1]));
+                        c.hline(14, hy + 10, 5, hex(hair[0])); // tie
+                        c.hline(15, hy + 24, 3, hex(hair[1]));
+                    }
+                    _ => {}
+                }
             }
         }
         Facing::Left | Facing::Right => {
             let mirror = |x: i32| if f == Facing::Left { x } else { 2 * 16 - x };
-            cap(c, hx, hw, 7);
-            // Hair at the back of the head.
-            let (bx, bw) = if f == Facing::Left { (hx + 8, 9) } else { (hx, 9) };
-            c.rrect(bx, hy + 2, bw, if look.female { 19 } else { 12 }, 3, hex(hair[2]));
-            c.vline(if f == Facing::Left { hx + hw - 2 } else { hx + 1 }, hy + 4, 9, hex(hair[1]));
+            if hairs {
+                cap(c, hx, hw, 7);
+                // Hair at the back of the head.
+                let style = look.hair_style();
+                let (bx, bw) = if f == Facing::Left { (hx + 8, 9) } else { (hx, 9) };
+                c.rrect(bx, hy + 2, bw, if style == HairStyle::Long { 21 } else { 12 }, 3, hex(hair[2]));
+                c.vline(if f == Facing::Left { hx + hw - 2 } else { hx + 1 }, hy + 4, 9, hex(hair[1]));
+                if style == HairStyle::Ponytail {
+                    // A tail hanging from the back of the head.
+                    let tx = if f == Facing::Left { hx + hw } else { hx - 3 };
+                    c.rect(tx, hy + 7, 3, 4, hex(hair[2]));
+                    c.rect(tx + if f == Facing::Left { 1 } else { -1 }, hy + 10, 3, 11, hex(hair[2]));
+                    c.vline(tx + 1, hy + 11, 9, hex(hair[1]));
+                    c.px(tx + 1, hy + 7, hex(hair[0])); // tie
+                }
+            }
             let ex = if f == Facing::Left { 10 } else { 21 };
-            eye(c, ex);
-            if look.female && !skeleton {
-                c.hline(ex - 1, hy + 7, 3, hex(0x1a1a22));
-                c.px(if f == Facing::Left { 9 } else { 23 }, hy + 13, hex(0xc0505a));
+            if body {
+                eye(c, ex);
+                if look.female && !skeleton {
+                    c.hline(ex - 1, hy + 7, 3, hex(0x1a1a22));
+                    c.px(if f == Facing::Left { 9 } else { 23 }, hy + 13, hex(0xc0505a));
+                }
+                c.px(mirror(8) - if f == Facing::Left { 1 } else { 0 }, hy + 11, hex(skin[2])); // nose
+                c.px(mirror(8) - if f == Facing::Left { 1 } else { 0 }, hy + 12, hex(skin[1]));
+                if !look.ears {
+                    let ear_x = if f == Facing::Left { hx + 6 } else { hx + 9 };
+                    c.rect(ear_x, hy + 8, 2, 3, hex(skin[1]));
+                }
             }
-            c.px(mirror(8) - if f == Facing::Left { 1 } else { 0 }, hy + 11, hex(skin[2])); // nose
-            c.px(mirror(8) - if f == Facing::Left { 1 } else { 0 }, hy + 12, hex(skin[1]));
-            if !look.ears {
-                let ear_x = if f == Facing::Left { hx + 6 } else { hx + 9 };
-                c.rect(ear_x, hy + 8, 2, 3, hex(skin[1]));
-            }
-            if look.beard {
-                let x = if f == Facing::Left { hx } else { hx + 7 };
-                c.rrect(x, hy + 10, 10, 9, 3, hex(hair[2]));
+            if look.beard && full || part == Part::Beard {
+                match look.beard_style {
+                    BeardStyle::Full => {
+                        let x = if f == Facing::Left { hx } else { hx + 7 };
+                        c.rrect(x, hy + 10, 10, 9, 3, hex(hair[2]));
+                    }
+                    BeardStyle::Goatee => {
+                        let x = if f == Facing::Left { hx } else { hx + hw - 5 };
+                        c.rrect(x, hy + 12, 5, 6, 2, hex(hair[2]));
+                        c.hline(x, hy + 11, 5, hex(hair[1]));
+                    }
+                }
             }
         }
     }
-    draw_headwear(c, look, f, hy);
+    if outfit {
+        // In a layered model a helmet is armor (an item), not part of the outfit.
+        if full || !matches!(look.hat, Hat::Helmet) {
+            draw_headwear(c, look, f, hy);
+        }
+    }
 }
+
+/// A sheet of one layer of a layered model: the body with outline and shadow; hair, beard and
+/// outfit outlined only where they stand out from the (outlined) body, like the full sprites.
+pub fn layer_canvas(look: &Look, part: Part) -> Canvas {
+    let mut c = Canvas::new(FW * 4, FH * 4);
+    let mut body = Canvas::new(FW * 4, FH * 4);
+    for f in Facing::ALL {
+        for frame in 0..4u32 {
+            c.at(frame * FW, f as u32 * FH);
+            body.at(frame * FW, f as u32 * FH);
+            draw_part(&mut body, look, f, frame, Part::Body);
+            body.auto_outline(FW as i32, FH as i32, OUTLINE);
+            draw_part(&mut c, look, f, frame, part);
+            if part == Part::Body {
+                c.auto_outline(FW as i32, FH as i32, OUTLINE);
+                c.shadow(16.0, 45.5, 10.0, 2.5);
+            } else {
+                c.outline_outside(&body, FW as i32, FH as i32, OUTLINE);
+            }
+        }
+    }
+    c
+}
+
+/// Items held in a hand (layered models show them).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Held {
+    Sword,
+    Axe,
+    Spear,
+    Bow,
+    Crossbow,
+    Shield,
+    Lantern,
+    Torch,
+}
+
+impl Held {
+    /// In the left hand (shield, lights) or the right one (weapons).
+    fn left(self) -> bool {
+        matches!(self, Held::Shield | Held::Lantern | Held::Torch)
+    }
+}
+
+/// Where the right (`left` = false) or left hand is in a frame, and whether it is on the near
+/// side (sideways: the far hand is behind the body).
+fn hand(f: Facing, frame: u32, left: bool) -> (i32, i32) {
+    let (_, by) = body_y(frame);
+    let swing = match frame {
+        1 => 2,
+        3 => -2,
+        _ => 0,
+    };
+    let dir = if f == Facing::Left { -1 } else { 1 };
+    match f {
+        // Facing down the right hand is on the viewer's left.
+        Facing::Down => if left { (26, by + 9 - swing / 2) } else { (7, by + 9 + swing / 2) },
+        Facing::Up => if left { (7, by + 9 + swing / 2) } else { (26, by + 9 - swing / 2) },
+        _ => {
+            let near = (f == Facing::Right) != left;
+            let x = if near { 14 - swing * dir } else { 14 + swing * dir };
+            (x + 2, by + 10)
+        }
+    }
+}
+
+/// A held-item sheet (character layout).
+pub fn held_canvas(kind: Held) -> Canvas {
+    let steel = [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6];
+    let mut c = Canvas::new(FW * 4, FH * 4);
+    for f in Facing::ALL {
+        for frame in 0..4u32 {
+            c.at(frame * FW, f as u32 * FH);
+            let (x, y) = hand(f, frame, kind.left());
+            let side = matches!(f, Facing::Left | Facing::Right);
+            let fwd = if f == Facing::Left { -1 } else { 1 };
+            // Front views: things point away from the body (outward).
+            let out = if x < 16 { -1 } else { 1 };
+            match kind {
+                Held::Sword => {
+                    if side {
+                        for k in 0..12 {
+                            c.rect(x + fwd * (k / 2 + 1), y - 2 - k, 2, 2, hex(steel[if k > 9 { 3 } else { 2 }]));
+                        }
+                        c.rect(x - 2, y - 2, 5, 2, hex(GOLD[1])); // guard
+                        c.rect(x, y, 2, 3, hex(WOOD[1]));
+                    } else {
+                        c.rect(x - 1, y - 15, 2, 13, hex(steel[2]));
+                        c.vline(x - 1, y - 15, 13, hex(steel[3]));
+                        c.px(x - 1, y - 16, hex(steel[3]));
+                        c.rect(x - 3, y - 2, 6, 2, hex(GOLD[1]));
+                        c.rect(x - 1, y, 2, 3, hex(WOOD[1]));
+                    }
+                }
+                Held::Axe => {
+                    c.rect(x - 1, y - 12, 2, 15, hex(WOOD[1]));
+                    c.vline(x - 1, y - 12, 15, hex(WOOD[2]));
+                    let d = if side { fwd } else { out };
+                    let hx = if d > 0 { x + 1 } else { x - 6 };
+                    c.shade_box(hx, y - 13, 5, 6, steel);
+                    c.vline(if d > 0 { hx + 5 } else { hx - 1 }, y - 12, 4, hex(steel[3]));
+                }
+                Held::Spear => {
+                    c.rect(x - 1, y - 24, 2, 34, hex(WOOD[1]));
+                    c.vline(x - 1, y - 24, 34, hex(WOOD[2]));
+                    for k in 0..5 {
+                        c.hline(x - 2 + k / 2, y - 25 - k, 4 - k / 2 * 2 + 1, hex(steel[if k < 2 { 1 } else { 3 }]));
+                    }
+                }
+                Held::Bow => {
+                    let d = if side { fwd } else { out };
+                    for k in -10..=10i32 {
+                        let bend = 3 - (k * k) / 30;
+                        c.px(x + d * bend, y + k, hex(WOOD[if k < 0 { 2 } else { 1 }]));
+                        c.px(x + d * bend + d, y + k, hex(WOOD[1]));
+                    }
+                    c.vline(x, y - 9, 19, hex(0xe8e0c8)); // string
+                }
+                Held::Crossbow => {
+                    if side {
+                        c.shade_box(if fwd > 0 { x } else { x - 9 }, y - 1, 10, 3, WOOD);
+                        c.vline(if fwd > 0 { x + 9 } else { x - 9 }, y - 5, 10, hex(steel[2]));
+                    } else {
+                        c.shade_box(x - 1, y - 2, 3, 8, WOOD);
+                        c.hline(x - 5, y - 2, 11, hex(steel[2]));
+                        c.hline(x - 4, y - 3, 9, hex(steel[3]));
+                    }
+                }
+                Held::Shield => {
+                    if side {
+                        c.shade_box(x - 2, y - 7, 4, 13, WOOD);
+                        c.vline(x - 2, y - 7, 13, hex(steel[2]));
+                    } else if f == Facing::Down {
+                        c.ellipse(x as f32, y as f32 - 1.0, 6.0, 7.0, hex(WOOD[2]));
+                        c.ellipse(x as f32, y as f32 - 1.0, 4.5, 5.5, hex(WOOD[1]));
+                        c.disc(x as f32, y as f32 - 1.0, 2.0, hex(steel[2]));
+                        c.px(x - 1, y - 2, hex(steel[3]));
+                    } else {
+                        c.ellipse(x as f32, y as f32 - 1.0, 6.0, 7.0, hex(WOOD[0]));
+                        c.vline(x, y - 7, 13, hex(WOOD[1]));
+                    }
+                }
+                Held::Lantern => {
+                    c.vline(x, y + 1, 2, hex(IRON[2]));
+                    c.shade_box(x - 2, y + 3, 5, 7, IRON);
+                    c.rect(x - 1, y + 4, 3, 5, hex(0xffd166));
+                    c.px(x - 1, y + 4, hex(0xfff2b0));
+                }
+                Held::Torch => {
+                    c.rect(x - 1, y - 8, 2, 11, hex(WOOD[1]));
+                    c.disc(x as f32, y as f32 - 10.0, 2.5, hex(0xe8590c));
+                    c.disc(x as f32, y as f32 - 10.5, 1.5, hex(0xffc430));
+                    c.px(x, y - 13, hex(0xffc430));
+                }
+            }
+            c.auto_outline(FW as i32, FH as i32, OUTLINE);
+        }
+    }
+    c
+}
+
+/// Look of the shared body sheets: male / female, with pointy ears (goblins) or not.
+pub fn body_look(female: bool, ears: bool) -> Look {
+    Look { female, ears, ..Default::default() }
+}
+
+/// Id of the body sheet for a look.
+pub fn body_id(look: &Look) -> &'static str {
+    match (look.female, look.ears) {
+        (false, false) => "body_male",
+        (true, false) => "body_female",
+        (false, true) => "body_goblin",
+        (true, true) => "body_goblin_female",
+    }
+}
+
+/// Id of the hair sheet for a look ("" = none).
+pub fn hair_id(look: &Look) -> &'static str {
+    match look.hair_style() {
+        HairStyle::Short | HairStyle::Auto => "hair_short",
+        HairStyle::Long => "hair_long",
+        HairStyle::Ponytail => "hair_ponytail",
+    }
+}
+
+/// Id of the beard sheet for a look ("" = none).
+pub fn beard_id(look: &Look) -> &'static str {
+    match (look.beard, look.beard_style) {
+        (false, _) => "",
+        (true, BeardStyle::Full) => "beard_full",
+        (true, BeardStyle::Goatee) => "beard_goatee",
+    }
+}
+
+fn rgb(v: u32) -> [u8; 3] {
+    [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+}
+
+/// The layered model of a look: body, skin, hair style, beard.
+pub fn appearance_of(look: &Look) -> rust2d_engine::defs::Appearance {
+    rust2d_engine::defs::Appearance { body: body_id(look).into(), skin: rgb(look.skin), hair: hair_id(look).into(), hair_color: rgb(look.hair), beard: beard_id(look).into() }
+}
+
+/// The shared layer sheets of layered characters: (sheet id, canvas, kind, female body).
+pub fn shared_layers() -> Vec<(String, Canvas, rust2d_engine::defs::SheetKind, bool)> {
+    use rust2d_engine::defs::SheetKind as K;
+    let hair = |s: HairStyle| Look { hair_style: s, ..Default::default() };
+    let beard = |s: BeardStyle| Look { beard: true, beard_style: s, ..Default::default() };
+    let mut v = vec![
+        ("body_male".to_string(), layer_canvas(&body_look(false, false), Part::Body), K::Body, false),
+        ("body_female".to_string(), layer_canvas(&body_look(true, false), Part::Body), K::Body, true),
+        ("body_goblin".to_string(), layer_canvas(&body_look(false, true), Part::Body), K::Body, false),
+        ("body_goblin_female".to_string(), layer_canvas(&body_look(true, true), Part::Body), K::Body, true),
+        ("hair_short".to_string(), layer_canvas(&hair(HairStyle::Short), Part::Hair), K::Hair, false),
+        ("hair_long".to_string(), layer_canvas(&hair(HairStyle::Long), Part::Hair), K::Hair, false),
+        ("hair_ponytail".to_string(), layer_canvas(&hair(HairStyle::Ponytail), Part::Hair), K::Hair, false),
+        ("beard_full".to_string(), layer_canvas(&beard(BeardStyle::Full), Part::Beard), K::Beard, false),
+        ("beard_goatee".to_string(), layer_canvas(&beard(BeardStyle::Goatee), Part::Beard), K::Beard, false),
+    ];
+    for (id, kind) in [
+        ("sword", Held::Sword),
+        ("axe", Held::Axe),
+        ("spear", Held::Spear),
+        ("bow", Held::Bow),
+        ("crossbow", Held::Crossbow),
+        ("shield", Held::Shield),
+        ("lantern", Held::Lantern),
+        ("torch", Held::Torch),
+    ] {
+        v.push((format!("held_{id}"), held_canvas(kind), K::Held, false));
+    }
+    v
+}
+
+/// Both cuts of an outfit: (sheet id, canvas) of the regular and the female cut.
+pub fn outfit_cuts(id: &str, look: &Look) -> [(String, Canvas); 2] {
+    let f = Look { female: true, ..look.clone() };
+    let m = Look { female: false, ..look.clone() };
+    [(format!("outfit_{id}"), layer_canvas(&m, Part::Outfit)), (format!("outfit_{id}_f"), layer_canvas(&f, Part::Outfit))]
+}
+
+/// 32 x 32 inventory icons of outfits (the front view from the shoulders down), one per look.
+pub fn outfit_icons(looks: &[Look]) -> Canvas {
+    let mut c = Canvas::new(TS * looks.len().max(1) as u32, TS);
+    for (k, look) in looks.iter().enumerate() {
+        let src = layer_canvas(look, Part::Outfit);
+        c.at(k as u32 * TS, 0);
+        // Front idle frame, rows 13..45 (shoulders to feet).
+        for y in 0..TS as i32 {
+            for x in 0..TS as i32 {
+                let p = src.get(x, y + 13);
+                if p.a > 0.0 {
+                    c.px(x, y, p);
+                }
+            }
+        }
+    }
+    c
+}
+
+/// A clothing item wearing outfit sheet `outfit_<overlay>` (`_f` = the female cut), with icon
+/// `icon_frame` of `icon_sheet`.
+pub fn clothing_item(id: &str, name: &str, description: &str, icon_sheet: &str, icon_frame: u32, overlay: &str, value: u32) -> ItemDef {
+    ItemDef {
+        id: id.into(),
+        name: name.into(),
+        description: description.into(),
+        icon: SpriteRef::new(icon_sheet, icon_frame),
+        consumable: false,
+        on_use: vec![],
+        weapon: None,
+        armor: Some(Armor { slot: EquipSlot::Clothing, defense: 0, speed: 0.0, overlay: format!("outfit_{overlay}"), overlay_f: format!("outfit_{overlay}_f") }),
+        max_stack: 1,
+        value,
+        light: None,
+        teaches: String::new(),
+        held: String::new(),
+    }
+}
+
 
 /// Hats, hoods and veils (drawn over the finished head).
 fn draw_headwear(c: &mut Canvas, look: &Look, f: Facing, hy: i32) {
@@ -1186,18 +1700,6 @@ fn draw_headwear(c: &mut Canvas, look: &Look, f: Facing, hy: i32) {
     }
 }
 
-pub fn character(out: &Path, name: &str, look: &Look) {
-    let mut c = Canvas::new(FW * 4, FH * 4);
-    for f in Facing::ALL {
-        for frame in 0..4u32 {
-            c.at(frame * FW, f as u32 * FH);
-            draw_person(&mut c, look, f, frame);
-            c.auto_outline(FW as i32, FH as i32, OUTLINE);
-            c.shadow(16.0, 45.5, 10.0, 2.5);
-        }
-    }
-    c.save(&out.join(format!("sprites/{name}.png")));
-}
 
 /// Armor drawn over the character sheet layout (same frames, same head bob).
 pub fn overlay(out: &Path, name: &str, gear: Gear) {
@@ -1325,7 +1827,7 @@ pub mod p {
     /// The small gate, destroyed (bent bars, rubble).
     pub const GATE_BROKEN: u32 = 23;
     pub const BARREL: u32 = 4;
-    pub const SHRINE: u32 = 5; // +1 glowing
+    // Cells 5 / 6: the small 1x1 shrine of older projects (dormant / glowing), still drawn.
     pub const WELL: u32 = 7;
     // Multi-cell props (sheet is 8 cells wide).
     pub const DOUBLE_GATE: u32 = 8; // 2x2, open state at +2
@@ -1334,6 +1836,93 @@ pub mod p {
     pub const BIG_OAK: u32 = 24; // 3x4
     pub const BIG_PINE: u32 = 27; // 2x4
     pub const VGATE: u32 = 29; // 1x4 vertical double gate, open state at +1
+    /// The forest shrine (3x2): a monolith with a crystal between two lamp pillars on a
+    /// stepped dais; glowing state at +3.
+    pub const GRAND_SHRINE: u32 = 56;
+}
+
+/// The forest shrine, 96 x 64: a stepped dais, two lamp pillars and a rune-carved monolith with
+/// a crystal on top. Glowing: blue flames in the lamps, lit runes, a bright crystal and a halo.
+fn grand_shrine(c: &mut Canvas, glow: bool) {
+    let dark = [0x2c2c38, 0x45455a, 0x5c5c74, 0x80809a];
+    let rune = if glow { [0x2a8fb0, 0x55d4ff, 0x9ff0ff, 0xe8ffff] } else { [0x1e1e28, 0x2c2c38, 0x38384a, 0x4a4a5e] };
+    if glow {
+        // A soft halo behind everything.
+        c.ellipse(48.0, 32.0, 46.0, 30.0, Color::new(0.45, 0.85, 1.0, 0.10));
+        c.ellipse(48.0, 24.0, 30.0, 22.0, Color::new(0.55, 0.9, 1.0, 0.12));
+    }
+    // Dais: two broad steps.
+    c.shade_box(4, 52, 88, 10, STONE);
+    c.hline(4, 52, 88, hex(STONE[3]));
+    c.shade_box(12, 44, 72, 9, STONE);
+    c.hline(12, 44, 72, hex(STONE[3]));
+    for x in (10..90).step_by(12) {
+        c.vline(x, 54, 7, hex(STONE[1])); // joints
+    }
+    // Lamp pillars with bowls on top.
+    // (Everything stays inside the 96 x 64 block: the sheet cells above belong to the big oak.)
+    for px in [14, 72] {
+        c.shade_box(px, 23, 10, 22, STONE);
+        c.shade_box(px - 2, 19, 14, 5, STONE); // capital
+        c.shade_box(px - 1, 41, 12, 4, STONE); // foot
+        c.shade_box(px - 3, 13, 16, 6, IRON); // bowl
+        c.hline(px - 3, 13, 16, hex(IRON[3]));
+        if glow {
+            // Blue flames.
+            let cx = px as f32 + 5.0;
+            c.ellipse(cx, 8.0, 6.0, 6.0, hex(0x2a8fb0));
+            c.ellipse(cx, 8.5, 4.0, 4.5, hex(0x55d4ff));
+            c.ellipse(cx, 9.5, 2.0, 2.5, hex(0xe8ffff));
+            c.px(px + 5, 2, hex(0x9ff0ff));
+        } else {
+            c.hline(px - 1, 14, 12, hex(0x14141c)); // cold ashes
+        }
+        // A rune on each pillar.
+        c.rect(px + 4, 28, 2, 8, hex(rune[2]));
+        c.hline(px + 2, 31, 6, hex(rune[1]));
+    }
+    // The monolith: tapering towards a pointed top, carved runes down its face.
+    for (k, yy) in (8..45).enumerate() {
+        let half = 8 + (k as i32) / 9;
+        let x0 = 48 - half;
+        c.hline(x0, yy, 2 * half, hex(dark[2]));
+        c.px(x0, yy, hex(dark[3]));
+        c.px(x0 + 1, yy, hex(dark[3]));
+        c.px(x0 + 2 * half - 1, yy, hex(dark[0]));
+        c.px(x0 + 2 * half - 2, yy, hex(dark[1]));
+    }
+    c.rect(41, 6, 14, 3, hex(dark[2]));
+    // Runes: a channel with glyphs branching off.
+    c.rect(47, 12, 2, 30, hex(rune[1]));
+    c.vline(47, 13, 28, hex(rune[2]));
+    for (gy, gx, gw) in [(15, 42, 5), (21, 49, 6), (27, 41, 6), (33, 49, 5), (38, 43, 4)] {
+        c.hline(gx, gy, gw, hex(rune[1]));
+        c.px(gx + if gx < 47 { 0 } else { gw - 1 }, gy - 1, hex(rune[2]));
+    }
+    if glow {
+        c.vline(48, 14, 26, hex(rune[3]));
+    }
+    // The crystal on top: a diamond.
+    let gem = if glow { [0x2a8fb0, 0x55d4ff, 0x9ff0ff, 0xffffff] } else { [0x3a3048, 0x504464, 0x66597e, 0x8478a0] };
+    for k in 0..7i32 {
+        let w = 2 * (k + 1);
+        c.hline(48 - w / 2, k, w, hex(gem[2]));
+        c.hline(48 - w / 2, 12 - k, w, hex(gem[1]));
+    }
+    c.vline(46, 2, 5, hex(gem[3]));
+    c.px(45, 4, hex(gem[3]));
+    c.auto_outline(96, 64, OUTLINE);
+    if glow {
+        // Sparkles around it (after the outline: they float free).
+        for (gx, gy) in [(30, 6), (66, 10), (36, 26), (62, 30), (8, 30), (88, 24), (54, 3), (24, 40), (74, 40)] {
+            c.px(gx, gy, hex(0xe8ffff));
+            c.px(gx - 1, gy, Color::new(0.6, 0.95, 1.0, 0.6));
+            c.px(gx + 1, gy, Color::new(0.6, 0.95, 1.0, 0.6));
+            c.px(gx, gy - 1, Color::new(0.6, 0.95, 1.0, 0.6));
+            c.px(gx, gy + 1, Color::new(0.6, 0.95, 1.0, 0.6));
+        }
+    }
+    c.shadow(48.0, 61.0, 44.0, 2.5);
 }
 
 /// Origin of sheet cell `cell` (8 cells per row).
@@ -1357,7 +1946,9 @@ fn big_props(c: &mut Canvas) {
         c.at(x, y);
         for px in [0, 53] {
             c.shade_box(px, 6, 11, 58, STONE);
-            c.shade_box(px - 1, 2, 13, 6, STONE);
+            // The cap overhangs the post by a pixel on the inner side only: on the outer side
+            // it would spill into the neighbouring cells of the sheet (the boulder's).
+            c.shade_box(if px == 0 { 0 } else { px - 1 }, 2, 12, 6, STONE);
             for yy in (14..60).step_by(10) {
                 c.hline(px + 1, yy, 9, hex(STONE[1]));
             }
@@ -1391,6 +1982,12 @@ fn big_props(c: &mut Canvas) {
     }
     c.auto_outline(64, 64, OUTLINE);
     c.shadow(32.0, 61.0, 28.0, 4.0);
+    // The forest shrine (3x2), dormant and glowing.
+    for (k, glow) in [(0u32, false), (3, true)] {
+        let (x, y) = cell(p::GRAND_SHRINE + k);
+        c.at(x, y);
+        grand_shrine(c, glow);
+    }
     // Statue (1x2): a knight on a pedestal.
     let (x, y) = cell(p::STATUE);
     c.at(x, y);
@@ -1473,7 +2070,8 @@ fn big_props(c: &mut Canvas) {
 }
 
 pub fn props(out: &Path) {
-    let mut c = Canvas::new(TS * 8, TS * 7);
+    // 9 rows: rows 7-8 (the grand shrine) were added later, below the older cells.
+    let mut c = Canvas::new(TS * 8, TS * 9);
     let n = TS as i32;
     for i in 0..8u32 {
         let (x, y) = cell(i);
@@ -1942,4 +2540,139 @@ pub fn items(out: &Path) {
         c.auto_outline(n, n, OUTLINE);
     }
     c.save(&out.join("sprites/items.png"));
+}
+
+// ------------------------------------------------------------------ spell effects
+
+/// Fire colors from dark red to white-hot.
+const FIRE: [u32; 5] = [0x7a1606, 0xc8380c, 0xf07818, 0xffc430, 0xfff4c0];
+
+/// A stable noise value 0..1 per pixel (so flames don't jump around between frames).
+fn noise(x: i32, y: i32, seed: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(374761393) ^ (y as u32).wrapping_mul(668265263) ^ seed.wrapping_mul(2246822519);
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    ((h ^ (h >> 16)) % 1000) as f32 / 1000.0
+}
+
+/// `sprites/fireball.png`: 4 frames (32 x 32) of a fireball flying to the right, with a
+/// flickering tail (the game rotates it into its direction).
+pub fn fireball(out: &Path) {
+    let mut c = Canvas::new(32 * 4, 32);
+    for f in 0..4u32 {
+        c.at(f * 32, 0);
+        // Tail: puffs trailing to the left, shrinking and cooling.
+        for k in 0..7 {
+            let k = k as f32;
+            let wob = ((f as f32 * 1.7 + k * 1.3).sin()) * (0.6 + k * 0.35);
+            let (x, y, r) = (18.0 - k * 2.6, 16.0 + wob, 5.2 - k * 0.6);
+            if r <= 0.5 {
+                break;
+            }
+            c.disc(x, y, r, hex(FIRE[if k < 2.0 { 1 } else { 0 }]));
+            c.disc(x + 0.5, y, r * 0.55, hex(FIRE[if k < 3.0 { 2 } else { 1 }]));
+        }
+        // Flickering sparks behind it.
+        for s in 0..5 {
+            let n = noise(s, f as i32, 7);
+            let x = 2 + (n * 10.0) as i32;
+            let y = 10 + (noise(s, f as i32, 9) * 12.0) as i32;
+            c.px(x, y, hex(FIRE[3]));
+        }
+        // Head.
+        let pulse = [0.0, 0.5, 0.2, 0.7][f as usize];
+        c.disc(21.0, 16.0, 7.0 + pulse, hex(FIRE[1]));
+        c.disc(21.5, 16.0, 5.4 + pulse * 0.6, hex(FIRE[2]));
+        c.disc(22.0, 15.5, 3.6, hex(FIRE[3]));
+        c.disc(22.5, 15.0, 1.8, hex(FIRE[4]));
+    }
+    c.save(&out.join("sprites/fireball.png"));
+}
+
+/// `sprites/explosion.png`: 8 frames (64 x 64): a burst of fire that swells, cools to smoke
+/// and dissolves.
+/// A burst of blue magic (64x64 frames x 8): a bright core, an expanding ring of light and
+/// sparkles flying outwards, fading.
+pub fn magic_burst(out: &Path) {
+    let mut c = Canvas::new(64 * 8, 64);
+    let mut rng = Rng(77);
+    let sparks: Vec<(f32, f32)> = (0..18).map(|_| (rng.range(628) as f32 / 100.0, 0.6 + rng.range(40) as f32 / 100.0)).collect();
+    for f in 0..8i32 {
+        c.at(f as u32 * 64, 0);
+        let t = f as f32 / 7.0;
+        let fade = 1.0 - t * 0.85;
+        // Core.
+        let core = 10.0 * (1.0 - t).max(0.0);
+        if core > 0.5 {
+            c.disc(32.0, 32.0, core + 4.0, Color::new(0.33, 0.83, 1.0, 0.45 * fade));
+            c.disc(32.0, 32.0, core, Color::new(0.62, 0.94, 1.0, 0.9 * fade));
+            c.disc(32.0, 32.0, core * 0.5, Color::new(1.0, 1.0, 1.0, fade));
+        }
+        // The ring.
+        let r = 6.0 + t * 24.0;
+        for y in 0..64 {
+            for x in 0..64 {
+                let d = ((x as f32 + 0.5 - 32.0).powi(2) + (y as f32 + 0.5 - 32.0).powi(2)).sqrt();
+                let band = 1.0 - ((d - r).abs() / (2.5 + t * 2.0));
+                if band > 0.0 {
+                    let a = band * fade;
+                    c.px(x, y, Color::new(0.55 + 0.4 * band, 0.9 + 0.1 * band, 1.0, a.min(1.0)));
+                }
+            }
+        }
+        // Sparkles flying outwards.
+        for (a, sp) in &sparks {
+            let d = 4.0 + t * 28.0 * sp;
+            let (x, y) = ((32.0 + a.cos() * d) as i32, (32.0 + a.sin() * d) as i32);
+            let col = Color::new(0.85, 0.98, 1.0, fade);
+            c.px(x, y, col);
+            if f < 5 {
+                c.px(x + 1, y, Color::new(0.55, 0.9, 1.0, fade * 0.6));
+                c.px(x, y + 1, Color::new(0.55, 0.9, 1.0, fade * 0.6));
+            }
+        }
+    }
+    c.save(&out.join("sprites/magic_burst.png"));
+}
+
+pub fn explosion(out: &Path) {
+    let mut c = Canvas::new(64 * 8, 64);
+    const RADIUS: [f32; 8] = [8.0, 15.0, 21.0, 25.0, 28.0, 29.5, 30.5, 31.0];
+    for f in 0..8i32 {
+        c.at(f as u32 * 64, 0);
+        let r = RADIUS[f as usize];
+        let cool = (f as f32 - 2.0).max(0.0) * 0.17;
+        for y in 0..64 {
+            for x in 0..64 {
+                let (dx, dy) = (x as f32 + 0.5 - 32.0, y as f32 + 0.5 - 32.0);
+                // Ragged edge: noise in the radius.
+                let n = noise(x / 3, y / 3, 1) * 0.35 + noise(x, y, 2) * 0.15;
+                let d = (dx * dx + dy * dy).sqrt() / (r * (0.8 + n));
+                if d > 1.0 {
+                    continue;
+                }
+                // Later frames dissolve from the inside out (an expanding smoke ring).
+                if f >= 5 && bayer(x, y) < (f - 4) as f32 * 0.28 * (1.2 - d) {
+                    continue;
+                }
+                let heat = (1.0 - d) * 1.25 + noise(x, y, f as u32 + 3) * 0.2 - cool;
+                let col = if heat > 0.95 {
+                    hex(FIRE[4])
+                } else if heat > 0.7 {
+                    hex(FIRE[3])
+                } else if heat > 0.45 {
+                    hex(FIRE[2])
+                } else if heat > 0.22 {
+                    hex(FIRE[1])
+                } else if heat > 0.0 || f < 3 {
+                    hex(FIRE[0])
+                } else {
+                    // Smoke.
+                    let g = 0.22 + noise(x / 2, y / 2, 5) * 0.12;
+                    Color::new(g, g * 0.95, g * 0.92, 0.9)
+                };
+                c.px(x, y, col);
+            }
+        }
+    }
+    c.save(&out.join("sprites/explosion.png"));
 }

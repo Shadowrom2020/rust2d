@@ -396,7 +396,96 @@ pub enum Action {
     /// Damages every character within `radius` tiles of the player (spell effects).
     DamageAround { damage: i32, radius: f32 },
     /// A light around the player for a while (radius in tiles).
-    PlayerLight { radius: f32, seconds: f32 },
+    PlayerLight {
+        radius: f32,
+        seconds: f32,
+        #[serde(default = "spell_light_color")]
+        color: [u8; 3],
+        #[serde(default)]
+        flicker: bool,
+    },
+    /// Starts magic targeting: the player's next click (an enemy or a spot) calls the Rhai
+    /// function `function(x, y)` with the target in tile coordinates (X: straight ahead,
+    /// right-click / Esc cancel). Started by a spell's script, the spell's mana and cooldown are
+    /// only spent once a target is chosen.
+    Aim { function: String },
+    /// An animated sprite flies from the player to tile point (`x`, `y`) at `speed` tiles per
+    /// second, then calls `function(x, y)` (if set).
+    Fly { sprite: FxSprite, x: f32, y: f32, speed: f32, function: String },
+    /// Plays an animated sprite once, centered on tile point (`x`, `y`) (explosions, sparkles).
+    Effect { sprite: FxSprite, x: f32, y: f32 },
+    /// Damages every character within `radius` tiles of tile point (`x`, `y`) (scaled by the
+    /// player's spell damage skills).
+    DamageArea { x: f32, y: f32, radius: f32, damage: i32 },
+    /// A light at tile point (`x`, `y`) for `seconds` (radius in tiles; fades out at the end).
+    LightAt { x: f32, y: f32, radius: f32, seconds: f32, color: [u8; 3], flicker: bool },
+    /// Heals the player and friendly characters within `radius` tiles of tile point (`x`, `y`).
+    HealArea { x: f32, y: f32, radius: f32, amount: i32 },
+    /// Puts an item into its slot (clothing, armor, weapon, left hand) on a character; what it
+    /// wore there goes to its carried items. The player takes it from the inventory (or gets it).
+    Equip { target: TargetName, item: String },
+    /// Takes off what a character wears / holds in a slot (into its carried items).
+    Unequip { target: TargetName, slot: crate::defs::EquipSlot },
+    /// Adds items to what a character carries (the player: the inventory).
+    GiveItemTo { target: TargetName, item: String, count: u32 },
+    /// Takes items from what a character carries.
+    TakeItemFrom { target: TargetName, item: String, count: u32 },
+    /// Hides or shows the game's HUD (status frame, clock, quick bar, buttons), e.g. for a
+    /// cut-scene; dialogs and windows the player opens still show. The player toggles it with H.
+    SetUiVisible { visible: bool },
+    /// Plays the Rhai function `function` as a cut-scene: the HUD is hidden, black bars slide
+    /// in, the player and the other characters wait while its actions run (walking, dialogs,
+    /// waits, ...); afterwards everything is as before.
+    Cutscene { function: String },
+    /// Ends a cut-scene (queued after its actions by `Cutscene`).
+    EndCutscene,
+    /// Walks a character (or the player) to the middle of tile (`x`, `y`); blocks until it arrives.
+    WalkTo { target: TargetName, x: i32, y: i32 },
+    /// Walks a character (or the player) up to another one (`to`), stopping a tile before it;
+    /// then both face each other. Blocks until it arrives.
+    Approach { target: TargetName, to: TargetName },
+    /// Puts a character (or the player) on tile (`x`, `y`) at once (no walking).
+    Place { target: TargetName, x: i32, y: i32 },
+    /// Darkens the scene to `amount` (0 = normal, 1 = deep night) over `seconds`, e.g. so that
+    /// lights show in a cut-scene by day. Not saved (loading resets it); a cut-scene's end fades
+    /// back to normal.
+    Dim { amount: f32, seconds: f32 },
+    /// Switches the enemy spawners of a map off (or on again): `zone` = one spawner zone by
+    /// name, "" = all of them; `map` "" = the current map. Their characters on the current map
+    /// vanish. Saved.
+    SetSpawners { map: String, zone: String, active: bool },
+    /// Defeats every hostile character on the current map at once (with their loot, dropped
+    /// items and *Defeated* triggers, like a defeat in combat).
+    DefeatEnemies,
+}
+
+/// Default color of spell lights (a cool white-blue).
+pub fn spell_light_color() -> [u8; 3] {
+    [190, 210, 255]
+}
+
+/// An animated sprite for the `Fly` / `Effect` actions: frames `first..=last` of a sprite sheet
+/// (both 0 = every frame of the sheet).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FxSprite {
+    pub sheet: String,
+    pub first: u32,
+    pub last: u32,
+    /// Frames per second.
+    pub fps: f32,
+    /// Size factor (1 = the sheet's frame size).
+    pub scale: f32,
+    /// A light around it (radius in tiles, 0 = none); explosions' lights fade out.
+    pub light: f32,
+    /// The color of that light (default: a warm fire glow).
+    pub glow: [u8; 3],
+}
+
+impl Default for FxSprite {
+    fn default() -> Self {
+        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70] }
+    }
 }
 
 impl Action {
@@ -432,6 +521,25 @@ impl Action {
             Action::AddMana { .. } => "Add mana",
             Action::DamageAround { .. } => "Damage around player",
             Action::PlayerLight { .. } => "Light around player",
+            Action::Aim { .. } => "Aim (then run script)",
+            Action::Fly { .. } => "Fly sprite to point",
+            Action::Effect { .. } => "Play effect",
+            Action::DamageArea { .. } => "Damage area",
+            Action::LightAt { .. } => "Light at point",
+            Action::HealArea { .. } => "Heal area",
+            Action::Equip { .. } => "Equip item",
+            Action::Unequip { .. } => "Unequip slot",
+            Action::GiveItemTo { .. } => "Give item to character",
+            Action::TakeItemFrom { .. } => "Take item from character",
+            Action::SetUiVisible { .. } => "Show / hide UI",
+            Action::Cutscene { .. } => "Play cutscene",
+            Action::EndCutscene => "End cutscene",
+            Action::WalkTo { .. } => "Walk to tile",
+            Action::Approach { .. } => "Walk up to character",
+            Action::Place { .. } => "Place at tile",
+            Action::Dim { .. } => "Dim the scene",
+            Action::SetSpawners { .. } => "Spawners on / off",
+            Action::DefeatEnemies => "Defeat all enemies",
         }
     }
 
@@ -467,7 +575,25 @@ impl Action {
             Action::LearnSpell { spell: String::new() },
             Action::AddMana { amount: 10 },
             Action::DamageAround { damage: 2, radius: 2.0 },
-            Action::PlayerLight { radius: 5.0, seconds: 30.0 },
+            Action::PlayerLight { radius: 5.0, seconds: 30.0, color: spell_light_color(), flicker: false },
+            Action::Aim { function: s() },
+            Action::Fly { sprite: FxSprite::default(), x: 0.0, y: 0.0, speed: 8.0, function: s() },
+            Action::Effect { sprite: FxSprite::default(), x: 0.0, y: 0.0 },
+            Action::DamageArea { x: 0.0, y: 0.0, radius: 2.0, damage: 2 },
+            Action::LightAt { x: 0.0, y: 0.0, radius: 3.0, seconds: 10.0, color: [255, 190, 120], flicker: true },
+            Action::HealArea { x: 0.0, y: 0.0, radius: 2.0, amount: 2 },
+            Action::Equip { target: "self".into(), item: s() },
+            Action::Unequip { target: "self".into(), slot: crate::defs::EquipSlot::Weapon },
+            Action::GiveItemTo { target: "self".into(), item: s(), count: 1 },
+            Action::TakeItemFrom { target: "self".into(), item: s(), count: 1 },
+            Action::SetUiVisible { visible: false },
+            Action::Cutscene { function: s() },
+            Action::WalkTo { target: "self".into(), x: 0, y: 0 },
+            Action::Approach { target: "self".into(), to: "player".into() },
+            Action::Place { target: "player".into(), x: 0, y: 0 },
+            Action::Dim { amount: 0.7, seconds: 1.0 },
+            Action::SetSpawners { map: s(), zone: s(), active: false },
+            Action::DefeatEnemies,
         ]
     }
 }

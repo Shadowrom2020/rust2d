@@ -1,13 +1,18 @@
 //! The game runtime: loads a project and plays it.
 
+mod charwin;
 mod combat;
+mod cutscene;
 mod equipment;
+mod fx;
 mod inventory_ui;
 mod journal;
 mod skills;
 mod lights;
 mod creator;
 mod patrol;
+mod paperdoll;
+mod npc_items;
 mod shop_ui;
 mod locks;
 mod menu;
@@ -60,6 +65,9 @@ pub struct StartOptions {
     pub map: Option<String>,
     pub spawn: Option<String>,
     pub pos: Option<Vec2>,
+    /// Play this script function as a cut-scene right after arriving (instead of the map's
+    /// *Map enter* triggers): previews from the editor.
+    pub cutscene: Option<String>,
     /// Show the title screen (main menu) first.
     pub title: bool,
 }
@@ -91,8 +99,6 @@ struct RtEntity {
     kind: EntityKind,
     def: String,
     name: String,
-    /// Character model override ("" = the definition's sheet).
-    sheet: String,
     body: Body,
     home: Vec2,
     active: bool,
@@ -129,6 +135,11 @@ struct RtEntity {
     loot: Vec<crate::defs::LootEntry>,
     /// Light of this placed entity instead of its definition's.
     light: Option<crate::defs::LightSpec>,
+    /// Characters: the model (its definition's, or the placed character's own).
+    appearance: crate::defs::Appearance,
+    /// Characters: what they wear and hold, and carry (dropped when defeated).
+    equipment: crate::state::Equipment,
+    inventory: Vec<crate::inventory::ItemStack>,
 }
 
 struct Loaded {
@@ -166,6 +177,10 @@ pub struct Game {
     /// Short-lived visual effects: (position, age).
     effects: Vec<(Vec2, f32)>,
     projectiles: Vec<Projectile>,
+    /// Scripted effects (Fly / Effect actions).
+    fx: Vec<fx::Fx>,
+    /// Lights at a point for a while (Light at point action).
+    timed_lights: Vec<fx::TimedLight>,
     /// Click-to-move / click-to-act order.
     order: Option<Order>,
     /// Where the last click landed (marker, age).
@@ -194,8 +209,6 @@ pub struct Game {
     loaded: Loaded,
     cache: VecDeque<Map>,
     player: Body,
-    player_sheet: Option<String>,
-    player_frames: u32,
     zones_inside: HashSet<u32>,
     fade: Fade,
     ui: Ui,
@@ -203,6 +216,9 @@ pub struct Game {
     pending_events: Vec<(GameEvent, Source)>,
     /// Save slot the current game was last saved to / loaded from ("Save and quit" uses it).
     slot: Option<String>,
+    /// The HUD is hidden (H, or a script / action); not saved.
+    ui_hidden: bool,
+    cutscene: cutscene::CutsceneState,
 }
 
 impl Game {
@@ -220,9 +236,9 @@ impl Game {
         let mut scripts = ScriptHost::new();
         scripts.load_dir(&project.scripts_dir());
         let ts = assets.tile_size;
-        let (hitbox, speed, sheet, frames) = match project.db.character(&project.config.player) {
-            Some(c) => (vec2(c.hitbox[0], c.hitbox[1]), c.speed, Some(c.sheet.clone()), c.walk_frames),
-            None => (vec2(ts * 0.75, ts * 0.5), 70.0, None, 1),
+        let (hitbox, speed) = match project.db.character(&project.config.player) {
+            Some(c) => (vec2(c.hitbox[0], c.hitbox[1]), c.speed),
+            None => (vec2(ts * 0.75, ts * 0.5), 70.0),
         };
         let map_name = start.map.clone().unwrap_or_else(|| project.config.start_map.clone());
         let map = project.load_map(&map_name)?;
@@ -249,6 +265,8 @@ impl Game {
             game_over: None,
             effects: Vec::new(),
             projectiles: Vec::new(),
+            fx: Vec::new(),
+            timed_lights: Vec::new(),
             order: None,
             click_marker: None,
             spawners: Vec::new(),
@@ -265,14 +283,14 @@ impl Game {
             runner: ActionRunner::default(),
             cache: VecDeque::new(),
             player,
-            player_sheet: sheet,
-            player_frames: frames.max(1),
             zones_inside: HashSet::new(),
             fade: Fade::In { t: FADE_TIME },
             ui: Ui::default(),
             debug: false,
             pending_events: Vec::new(),
             slot: None,
+            ui_hidden: false,
+            cutscene: Default::default(),
         };
         let arrival = match (start.pos, start.spawn) {
             (Some(p), _) => Arrival::Pos(p),
@@ -287,6 +305,11 @@ impl Game {
         game.prepare_world();
         if start.title {
             game.open_title();
+        }
+        if let Some(f) = &start.cutscene {
+            // A preview: the cut-scene instead of the map's Map enter triggers.
+            game.resuming = true;
+            game.runner.push(&[Action::Cutscene { function: f.clone() }], &ActionCtx::default());
         }
         game.enter_map(map, arrival);
         Ok(game)
@@ -340,12 +363,11 @@ impl Game {
             (EntityKind::Character, Some(d)) => (d.max_hp.max(0), d.hostile, d.damage.max(0), d.weapon.clone(), d.defense),
             _ => (0, false, 0, None, 0),
         };
-        RtEntity {
+        let mut rt = RtEntity {
             uid,
             kind,
             def: def.to_string(),
             name: name.to_string(),
-            sheet: String::new(),
             body: Body { pos, facing, hitbox, speed, moving: false, anim: 0.0, move_target: None },
             home: pos,
             active,
@@ -375,7 +397,12 @@ impl Game {
                 _ => Vec::new(),
             },
             light: None,
-        }
+            appearance: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.appearance.clone()).unwrap_or_default(),
+            equipment: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.equipment.clone()).unwrap_or_default(),
+            inventory: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.inventory.clone()).unwrap_or_default(),
+        };
+        npc_items::apply_gear(&self.project.db, &mut rt);
+        rt
     }
 
     /// Switches prop `i` to the named state (sprite + solidity) and saves it.
@@ -424,13 +451,27 @@ impl Game {
                     st.map_or(e.frame, |s| s.frame),
                 );
                 rt.count = count;
-                rt.sheet = e.sheet.clone();
                 rt.light = e.light.clone();
                 if e.kind == EntityKind::Character {
                     if let Some(loot) = &e.loot {
                         rt.loot = loot.clone();
                     }
                     rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
+                    // Look and items: the placed NPC's own, then what changed in this game.
+                    if let Some(a) = &e.appearance {
+                        rt.appearance = a.clone();
+                    }
+                    if let Some(eq) = &e.equipment {
+                        rt.equipment = eq.clone();
+                    }
+                    if let Some(inv) = &e.inventory {
+                        rt.inventory = inv.clone();
+                    }
+                    if let Some(saved) = self.world.npc_items.get(&map.name).and_then(|m| m.get(&e.uid)) {
+                        rt.equipment = saved.equipment.clone();
+                        rt.inventory = saved.inventory.clone();
+                    }
+                    npc_items::apply_gear(&self.project.db, &mut rt);
                     if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
                         let p = rt.patrol.get_or_insert_with(Default::default);
                         p.restore(ps);
@@ -496,13 +537,16 @@ impl Game {
                 }
             },
         };
-        self.player.pos = pos;
+        // Never inside something solid (a gate post at a map edge, a prop placed on a spawn).
+        self.player.pos = self.free_spot(pos);
         self.player.move_target = None;
         self.world.current_map = self.loaded.map.name.clone();
         // Zones we arrive in don't fire Enter (avoids bouncing back through portals).
         self.zones_inside = self.zones_at(self.player.pos);
         self.effects.clear();
         self.projectiles.clear();
+        self.fx.clear();
+        self.timed_lights.clear();
         self.order = None;
         self.setup_spawners();
         let music = self.loaded.map.music.clone();
@@ -579,6 +623,30 @@ impl Game {
             .entities
             .iter()
             .any(|e| e.active && e.solid && Some(e.uid) != ignore && e.body.rect().overlaps(&r))
+    }
+
+    /// Where the player can stand near `pos`: `pos` itself if the player's hitbox is free there,
+    /// else the nearest spot whole tiles away (searching rings around it) that is free.
+    fn free_spot(&self, pos: Vec2) -> Vec2 {
+        let ts = self.ts();
+        let fits = |p: Vec2| !self.rect_blocked(self.player.rect_at(p), None, false);
+        if fits(pos) {
+            return pos;
+        }
+        for r in 1..=12i32 {
+            let mut ring: Vec<Vec2> = (-r..=r)
+                .flat_map(|dy| (-r..=r).map(move |dx| (dx, dy)))
+                .filter(|(dx, dy)| dx.abs().max(dy.abs()) == r)
+                .map(|(dx, dy)| pos + vec2(dx as f32, dy as f32) * ts)
+                .collect();
+            ring.sort_by(|a, b| a.distance_squared(pos).total_cmp(&b.distance_squared(pos)));
+            if let Some(p) = ring.into_iter().find(|p| fits(*p)) {
+                eprintln!("[game] arrival at {:.0},{:.0} on {} is blocked; moved to {:.0},{:.0}", pos.x, pos.y, self.loaded.map.name, p.x, p.y);
+                return p;
+            }
+        }
+        eprintln!("[game] no free spot near {:.0},{:.0} on {}", pos.x, pos.y, self.loaded.map.name);
+        pos
     }
 
     /// Moves along each axis separately so actors slide along walls.
@@ -754,6 +822,7 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32) {
+        self.sync_script_player();
         // Esc opens the pause menu (unless a window or dialog uses Esc); it pauses everything.
         // (While a bolt spell is being aimed, Esc cancels the spell instead.)
         let can_open = !self.inventory_open() && !self.ui.dialog_open() && self.game_over.is_none() && matches!(self.fade, Fade::None) && !self.aiming() && !self.world_map_open();
@@ -828,6 +897,19 @@ impl Game {
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
         let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
+        // The character window's tabs (C / I, K, L, Tab, tab clicks) before the tabs' contents.
+        let (win_key, win_mouse) = self.update_window_tabs(allow_windows && !input.consumed, input.consumed || shop_key);
+        let (shop_key, shop_mouse) = (shop_key || win_key, shop_mouse || win_mouse);
+        let allow_windows = allow_windows && !win_mouse;
+        // H hides / shows the HUD.
+        let hide_key = allow_windows && !input.consumed && !shop_key && input::pressed(KeyCode::H);
+        if hide_key {
+            self.ui_hidden = !self.ui_hidden;
+            if self.ui_hidden {
+                self.ui.toast("Interface hidden - press H to show it".into());
+            }
+        }
+        let (shop_key, shop_mouse) = (shop_key || hide_key, shop_mouse);
         let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.skills_open(), input.consumed || shop_key);
         let (k_key, k_mouse) = self.update_skills_ui(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.journal_open(), input.consumed || shop_key || j_key);
         let (j_key, j_mouse) = (j_key || k_key, j_mouse || k_mouse);
@@ -843,6 +925,7 @@ impl Game {
         let mut runner = std::mem::take(&mut self.runner);
         runner.update(self, dt);
         self.runner = runner;
+        self.update_cutscene(dt);
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
         if !frozen && !self.on_title() {
@@ -855,6 +938,10 @@ impl Game {
         if !frozen {
             self.update_projectiles(dt);
             self.update_spawners(dt);
+        }
+        // Effects and timed lights also play on during cut-scenes (they are part of the show).
+        if !frozen || self.cutscene_active() {
+            self.update_fx(dt);
         }
         if let Some(m) = &mut self.click_marker {
             m.1 += dt;
@@ -1098,6 +1185,30 @@ impl Game {
         for inv in self.world.containers.values_mut().flat_map(|m| m.values_mut()) {
             inv.set_limits(limits.clone());
         }
+        self.dress_player();
+    }
+
+    /// The player definition's equipment and carried items: a new game starts with them; a save
+    /// from before clothing existed gets the clothing once (instead of showing the underwear).
+    fn dress_player(&mut self) {
+        if self.world.dressed {
+            return;
+        }
+        self.world.dressed = true;
+        let Some(d) = self.project.db.character(&self.project.config.player) else { return };
+        let (eq, inv) = (d.equipment.clone(), d.inventory.clone());
+        let fresh = self.world.play_time == 0.0 && self.world.current_map.is_empty();
+        for slot in crate::defs::EquipSlot::ALL {
+            let mine = self.world.equipment.slot_mut(slot);
+            if mine.is_none() && (fresh || slot == crate::defs::EquipSlot::Clothing) {
+                *mine = eq.get(slot).cloned();
+            }
+        }
+        if fresh {
+            for s in inv {
+                self.world.give_item(&s.item, s.count);
+            }
+        }
     }
 
     fn use_item(&mut self, item: &str) {
@@ -1216,7 +1327,12 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.cutscene_status(),
+            self.ui_hidden,
+            self.window_status(),
+            self.npc_items_status(),
+            self.fx_status(),
             self.world_map_status(),
             self.skills_status(),
             self.clock_text(),
@@ -1228,7 +1344,7 @@ impl Game {
                 let here = self.loaded.entities.iter().filter(|e| e.active && e.uid >= crate::state::DROPPED_UID_BASE);
                 here.map(|e| format!("{}x{}@{},{}", e.def, e.count, (e.body.pos.x / ts).floor(), ((e.body.pos.y - 1.0) / ts).floor())).collect::<Vec<_>>()
             },
-            format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_sheet_id().unwrap_or("-")),
+            format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_appearance().map_or("-".to_string(), |a| a.body)),
             self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
             self.shop_status(),
@@ -1274,6 +1390,8 @@ impl Game {
         let s = std::fs::read_to_string(self.project.saves_dir().join(format!("{slot}.ron")))?;
         let world = WorldState::from_ron(&s)?;
         self.slot = Some(slot.to_string());
+        self.ui_hidden = false;
+        self.reset_cutscene();
         let map = world.current_map.clone();
         let pos = vec2(world.player_pos.0, world.player_pos.1);
         self.player.facing = world.player_facing;
@@ -1359,10 +1477,10 @@ impl Game {
                     if self.combat.invuln > 0.0 && (self.combat.invuln * 12.0) as i32 % 2 == 0 {
                         continue;
                     }
-                    let col = if self.player.moving { (self.player.anim * 8.0) as u32 % self.player_frames } else { 0 };
-                    let frame = self.player.facing as u32 * self.player_frames + col;
-                    let drawn = self.player_sheet_id().is_some_and(|s| self.assets.draw_frame(s, frame, self.player.pos, WHITE));
-                    self.draw_armor_overlays(frame, self.player.pos, WHITE);
+                    let col = if self.player.moving { (self.player.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
+                    // During a melee swing the weapon is drawn along the swing instead.
+                    let swinging = self.combat.swing > 0.0;
+                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, WHITE, swinging));
                     if !drawn {
                         let r = self.player.rect();
                         draw_rectangle(r.x, r.y - ts * 0.5, r.w, r.h + ts * 0.5, YELLOW);
@@ -1373,6 +1491,7 @@ impl Game {
         }
 
         self.draw_combat_world();
+        self.draw_fx();
         if !self.on_title() {
             self.draw_mouse_world();
             self.draw_padlocks();
@@ -1382,7 +1501,7 @@ impl Game {
             render::draw_layer(m, layer, &sets, ts, view, WHITE);
         }
 
-        if let Some(ambient) = render::lighting::ambient(self.loaded.map.lighting, self.world.hour) {
+        if let Some(ambient) = self.scene_ambient(render::lighting::ambient(self.loaded.map.lighting, self.world.hour)) {
             let lights = self.lights();
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(&cam, ambient, &lights, ts, get_time());
             set_camera(&cam);
@@ -1402,23 +1521,28 @@ impl Game {
             draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0., 0., 0., alpha));
         }
         if !self.on_title() {
-            self.draw_hud();
-            self.draw_clock();
-            self.draw_mana_bar();
+            if !self.ui_hidden {
+                self.draw_hud();
+                self.draw_clock();
+            }
             if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
-            } else if self.skills_open() {
-                self.draw_skills_ui();
             } else {
-                self.draw_inventory_ui();
+                self.draw_window_frame();
+                if self.skills_open() {
+                    self.draw_skills_ui();
+                } else {
+                    self.draw_inventory_ui();
+                }
             }
             self.draw_world_map();
         }
         if !self.on_title() {
             self.draw_aim_cursor();
         }
+        self.draw_cutscene_bars();
         self.draw_fps();
         self.ui.draw_toasts();
         self.ui.draw_dialog();
@@ -1446,12 +1570,10 @@ impl Game {
         let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { WHITE };
         let drawn = match e.kind {
             EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE)),
-            EntityKind::Character => db.character(&e.def).is_some_and(|d| {
-                let frames = d.walk_frames.max(1);
-                let col = if e.body.moving { (e.body.anim * 8.0) as u32 % frames } else { 0 };
-                let sheet = if e.sheet.is_empty() { &d.sheet } else { &e.sheet };
-                self.assets.draw_frame(sheet, e.body.facing as u32 * frames + col, e.body.pos, tint)
-            }),
+            EntityKind::Character => db.character(&e.def).is_some() && {
+                let col = if e.body.moving { (e.body.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
+                self.draw_character(&e.appearance, &e.equipment, (e.body.facing, col), e.body.pos, tint, false)
+            },
             EntityKind::Item => db.item(&e.def).is_some_and(|d| {
                 let u = self.u();
                 let bob = ((t * 3.0 + e.uid as f32).sin() * 1.5 * u).round();
@@ -1609,8 +1731,113 @@ impl ActionHost for Game {
                 self.damage_around(*damage, *radius);
                 Step::Continue
             }
-            Action::PlayerLight { radius, seconds } => {
-                self.player_light_for(*radius, *seconds);
+            Action::PlayerLight { radius, seconds, color, flicker } => {
+                self.player_light_for(*radius, *seconds, *color, *flicker);
+                Step::Continue
+            }
+            Action::Aim { function } => {
+                self.start_aim(function);
+                Step::Continue
+            }
+            Action::Fly { sprite, x, y, speed, function } => {
+                self.spawn_fly(sprite.clone(), vec2(*x, *y), *speed, function.clone());
+                Step::Continue
+            }
+            Action::Effect { sprite, x, y } => {
+                self.spawn_effect(sprite.clone(), vec2(*x, *y));
+                Step::Continue
+            }
+            Action::DamageArea { x, y, radius, damage } => {
+                let ts = self.ts();
+                self.damage_at(vec2(*x, *y) * ts, *damage, *radius);
+                Step::Continue
+            }
+            Action::LightAt { x, y, radius, seconds, color, flicker } => {
+                let ts = self.ts();
+                self.light_at(vec2(*x, *y) * ts, *radius, *seconds, *color, *flicker);
+                Step::Continue
+            }
+            Action::HealArea { x, y, radius, amount } => {
+                let ts = self.ts();
+                self.heal_area(vec2(*x, *y) * ts, *radius, *amount);
+                Step::Continue
+            }
+            Action::Equip { target, item } => {
+                if target == "player" {
+                    if self.world.item_count(item) == 0 {
+                        self.world.give_item(item, 1);
+                    }
+                    self.equip_item(item);
+                } else if let Some(i) = self.entity_index(target, ctx.owner) {
+                    self.npc_equip(i, item);
+                } else {
+                    eprintln!("[events] Equip: no character '{target}' on this map");
+                }
+                Step::Continue
+            }
+            Action::Unequip { target, slot } => {
+                if target == "player" {
+                    self.unequip(*slot, None);
+                } else if let Some(i) = self.entity_index(target, ctx.owner) {
+                    self.npc_unequip(i, *slot);
+                }
+                Step::Continue
+            }
+            Action::GiveItemTo { target, item, count } | Action::TakeItemFrom { target, item, count } => {
+                let give = matches!(action, Action::GiveItemTo { .. });
+                if target == "player" {
+                    if give {
+                        self.world.give_item(item, *count);
+                    } else {
+                        self.world.take_item(item, *count);
+                    }
+                } else if let Some(i) = self.entity_index(target, ctx.owner) {
+                    self.npc_give(i, item, if give { *count as i64 } else { -(*count as i64) });
+                } else {
+                    eprintln!("[events] {}: no character '{target}' on this map", action.label());
+                }
+                Step::Continue
+            }
+            Action::SetUiVisible { visible } => {
+                self.ui_hidden = !*visible;
+                Step::Continue
+            }
+            Action::Cutscene { function } => {
+                self.begin_cutscene(function);
+                Step::Insert(vec![(Action::RunScript { function: function.clone() }, ctx.clone()), (Action::EndCutscene, ctx.clone())])
+            }
+            Action::EndCutscene => {
+                self.end_cutscene();
+                Step::Continue
+            }
+            Action::WalkTo { target, x, y } => {
+                if self.walk_to(target, ctx, *x, *y) {
+                    Step::Block
+                } else {
+                    Step::Continue
+                }
+            }
+            Action::Approach { target, to } => {
+                if self.approach(target, to, ctx) {
+                    Step::Block
+                } else {
+                    Step::Continue
+                }
+            }
+            Action::Place { target, x, y } => {
+                self.place(target, ctx, *x, *y);
+                Step::Continue
+            }
+            Action::Dim { amount, seconds } => {
+                self.dim_to(*amount, *seconds);
+                Step::Continue
+            }
+            Action::SetSpawners { map, zone, active } => {
+                self.set_spawners(map, zone, *active);
+                Step::Continue
+            }
+            Action::DefeatEnemies => {
+                self.defeat_enemies();
                 Step::Continue
             }
             Action::OpenShop { target } => {
@@ -1663,10 +1890,12 @@ impl ActionHost for Game {
     }
 
     fn blocked(&mut self) -> bool {
-        self.ui.dialog_open()
-            || !matches!(self.fade, Fade::None)
-            || self.player.move_target.is_some()
-            || self.loaded.entities.iter().any(|e| e.body.move_target.is_some())
+        let walking = self.player.move_target.is_some() || self.loaded.entities.iter().any(|e| e.body.move_target.is_some());
+        if !walking {
+            // Characters that walked up to someone turn to face them.
+            self.apply_face_after();
+        }
+        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking
     }
 
     fn script_condition(&mut self, function: &str, ctx: &ActionCtx) -> bool {

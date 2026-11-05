@@ -1,5 +1,6 @@
-//! "New asset" wizard: creates a prop, item, character, tileset or sprite sheet in one step,
+//! "New asset" wizard: creates a prop, item, tileset, sprite sheet or structure in one step,
 //! either drawing a fresh image (opened in the pixel editor) or reusing an existing one.
+//! (Characters are assembled in the character builder, `builder.rs`.)
 
 use anyhow::{bail, Result};
 use egui_macroquad::egui;
@@ -14,7 +15,6 @@ use crate::pixel::Layout;
 pub enum WKind {
     Prop,
     Item,
-    Character,
     Tileset,
     Sheet,
     /// Multi-tile structure (assembled from tileset stamps in the structure editor).
@@ -26,7 +26,6 @@ impl WKind {
         Some(match s {
             "prop" => WKind::Prop,
             "item" => WKind::Item,
-            "character" => WKind::Character,
             "tileset" => WKind::Tileset,
             "sheet" => WKind::Sheet,
             "structure" => WKind::Structure,
@@ -53,7 +52,7 @@ pub struct Wizard {
     pub source: Source,
     /// Prop size in tiles.
     pub cells: (u32, u32),
-    /// Character / sprite sheet frame size.
+    /// Sprite sheet frame size.
     pub frame: (u32, u32),
     /// Sprite sheet frames, tileset tiles.
     pub grid: (u32, u32),
@@ -115,7 +114,6 @@ impl Editor {
         let taken = match w.kind {
             WKind::Prop => db.prop(&id).is_some(),
             WKind::Item => db.item(&id).is_some(),
-            WKind::Character => db.character(&id).is_some(),
             WKind::Tileset => db.tileset(&id).is_some(),
             WKind::Sheet => db.sheet(&id).is_some(),
             WKind::Structure => db.structure(&id).is_some(),
@@ -150,8 +148,7 @@ impl Editor {
             let (dir, frame, size, layout) = match w.kind {
                 WKind::Prop => ("sprites", (ts, ts), (ts * w.cells.0, ts * w.cells.1), Layout::Plain),
                 WKind::Item => ("sprites", (ts, ts), (ts, ts), Layout::Plain),
-                WKind::Character => ("sprites", w.frame, (w.frame.0 * 4, w.frame.1 * 4), Layout::Character),
-                WKind::Sheet => ("sprites", w.frame, (w.frame.0 * w.grid.0, w.frame.1 * w.grid.1), Layout::Plain),
+                WKind::Sheet => ("sprites", w.frame, (w.frame.0 * w.grid.0, w.frame.1 * w.grid.1), if w.frame.1 > w.frame.0 { Layout::Character } else { Layout::Plain }),
                 WKind::Tileset | WKind::Structure => ("tilesets", (ts, ts), (ts * w.grid.0, ts * w.grid.1), Layout::Plain),
             };
             let rel = free_path(&self.project, dir, &id);
@@ -179,7 +176,7 @@ impl Editor {
                     sheet_id = format!("{id}_{n}");
                     n += 1;
                 }
-                self.project.db.sheets.push(SheetDef { id: sheet_id.clone(), image: rel.clone(), frame_w: frame.0, frame_h: frame.1 });
+                self.project.db.sheets.push(SheetDef::new(&sheet_id, &rel, frame.0, frame.1));
                 sprite = if w.kind == WKind::Prop && w.source == Source::Blank { SpriteRef::block(&sheet_id, 0, w.cells.0, w.cells.1) } else { SpriteRef::new(&sheet_id, 0) };
             }
             new_image = Some((rel, frame, layout));
@@ -212,24 +209,7 @@ impl Editor {
                 value: 0,
         light: None,
         teaches: String::new(),
-            }),
-            WKind::Character => db.characters.push(CharacterDef {
-                id: id.clone(),
-                name,
-                sheet: sprite.sheet,
-                walk_frames: 4,
-                speed: 50.0 * u,
-                hitbox: [10.0 * u, 6.0 * u],
-                behavior: Behavior::Static,
-                max_hp: 0,
-                damage: 0,
-                hostile: false,
-                weapon: None,
-                defense: 0,
-                triggers: vec![],
-                shop: None,
-                loot: vec![],
-        light: None,
+        held: String::new(),
             }),
             WKind::Tileset | WKind::Sheet | WKind::Structure => {}
         }
@@ -255,7 +235,7 @@ impl Editor {
         let ts = rust2d_engine::project::TILE_SIZE;
         egui::Window::new("New asset").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                for (k, l) in [(WKind::Prop, "Prop"), (WKind::Item, "Item"), (WKind::Character, "Character"), (WKind::Tileset, "Tileset"), (WKind::Sheet, "Sprite sheet"), (WKind::Structure, "Structure")] {
+                for (k, l) in [(WKind::Prop, "Prop"), (WKind::Item, "Item"), (WKind::Tileset, "Tileset"), (WKind::Sheet, "Sprite sheet"), (WKind::Structure, "Structure")] {
                     if ui.selectable_value(&mut w.kind, k, l).clicked() && k == WKind::Structure && w.cells == (1, 1) {
                         w.cells = (6, 5);
                     }
@@ -350,7 +330,7 @@ impl Editor {
                         });
                         ui.end_row();
                     }
-                    (Source::Blank, WKind::Character | WKind::Sheet) => {
+                    (Source::Blank, WKind::Sheet) => {
                         ui.label("Frame (px)");
                         ui.horizontal(|ui| {
                             ui.add(egui::DragValue::new(&mut w.frame.0).range(4..=256));
@@ -405,7 +385,7 @@ impl Editor {
             });
             let hint = match (w.kind, w.source) {
                 (_, Source::Existing) => "The definition uses the chosen frame; nothing new is drawn.".to_string(),
-                (WKind::Character, _) => format!("Characters use 4 walk frames per row and one row per facing (down, left, right, up). Tiles are {ts}px."),
+                (WKind::Sheet, _) => format!("Frames taller than wide get the character layout (4 walk frames per row, rows down / left / right / up). Tiles are {ts}px."),
                 (WKind::Tileset, _) => format!("A tileset image of {ts}px tiles; mark solid tiles in Database \u{E13A} Tilesets."),
                 _ => format!("Tiles are {ts}px. After creating, the image opens in the pixel editor."),
             };

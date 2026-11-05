@@ -42,7 +42,7 @@ impl Game {
     }
 
     fn armor_pieces(&self) -> impl Iterator<Item = &crate::defs::Armor> {
-        [EquipSlot::Head, EquipSlot::Body, EquipSlot::Offhand]
+        [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Offhand]
             .into_iter()
             .filter_map(|s| self.world.equipment.item(s))
             .filter_map(|id| self.project.db.item(id)?.armor.as_ref())
@@ -182,44 +182,13 @@ impl Game {
     }
 
     /// Draws worn armor over the player sprite (same frame layout as the player sheet).
-    pub(super) fn draw_armor_overlays(&self, frame: u32, feet: Vec2, tint: Color) {
-        for slot in [EquipSlot::Body, EquipSlot::Head] {
-            let overlay = self
-                .world
-                .equipment
-                .item(slot)
-                .and_then(|id| self.project.db.item(id))
-                .and_then(|d| d.armor.as_ref())
-                .map(|a| a.overlay.as_str())
-                .filter(|o| !o.is_empty());
-            if let Some(sheet) = overlay {
-                self.assets.draw_frame(sheet, frame, feet, tint);
-            }
-        }
-    }
-
-    /// Draws the player's idle front frame + armor scaled into `dest` (character sheet portrait).
+    /// Draws the player's idle front frame with what they wear, scaled into `dest` (character
+    /// sheet portrait).
     pub(super) fn draw_portrait(&self, dest: Rect) {
-        let Some(sheet) = self.player_sheet_id() else { return };
-        let mut sheets = vec![sheet.to_string()];
-        for slot in [EquipSlot::Body, EquipSlot::Head] {
-            if let Some(o) = self
-                .world
-                .equipment
-                .item(slot)
-                .and_then(|id| self.project.db.item(id))
-                .and_then(|d| d.armor.as_ref())
-                .filter(|a| !a.overlay.is_empty())
-            {
-                sheets.push(o.overlay.clone());
-            }
-        }
-        for s in sheets {
-            if let Some(t) = self.assets.sheets.get(&s) {
-                let scale = (dest.w / t.frame_w).min(dest.h / t.frame_h).floor().max(1.0);
-                let (w, h) = (t.frame_w * scale, t.frame_h * scale);
-                self.assets.draw_frame_in(&s, 0, Rect::new(dest.x + (dest.w - w) / 2.0, dest.y + dest.h - h, w, h), WHITE);
-            }
-        }
+        let Some(a) = self.player_appearance() else { return };
+        let (fw, fh) = self.character_frame_size(&a);
+        let scale = (dest.w / fw).min(dest.h / fh).floor().max(1.0);
+        let (w, h) = (fw * scale, fh * scale);
+        self.draw_character_in(&a, &self.world.equipment, Rect::new(dest.x + (dest.w - w) / 2.0, dest.y + dest.h - h, w, h));
     }
 }

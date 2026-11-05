@@ -3,6 +3,131 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.0.9 — 2026-11-05
+
+### Characters and equipment
+- **Layered characters**: every character is a body (people: in underwear, with recolorable
+  skin and hair, a hair style and a beard; monsters: the whole creature) dressed by what it
+  wears. A new **Clothing** equipment slot dresses them (outfit overlays, with a **female cut**
+  worn by female bodies), armor is drawn over the clothing, and **weapons, shields and lights
+  are visible in the hands** for every facing and walk frame (melee swings sweep the weapon).
+  The pre-drawn sheet option is gone: a character of an old project keeps its sheet as its body.
+- **NPCs have equipment and carried items** (per definition and per placed NPC): visible, used in
+  combat (weapon, armor defense), dropped when defeated; actions *Equip item*, *Unequip slot*,
+  *Give item to character*, *Take item from character* and script functions `equip`, `unequip`,
+  `give_item_to`, `take_item_from` change them (saved).
+- The **character creator** offers skin color, hair style, hair color and, for men, a **beard**
+  (lists set in the editor); the pre-drawn looks are gone.
+- **Playable bodies**: body sheets have a *Playable* flag; the creator's new **Body** row offers
+  the playable bodies of the chosen sex (e.g. human or goblin; never a slime). Set it in the
+  character builder, the sprite sheet form or *Project › Character creator*. The example and
+  the starter library mark people's bodies playable and monsters' not; existing libraries get
+  the flag when the editor applies the new starter set.
+- The player character's equipment and carried items are what a new game starts with; saves from
+  before clothing get the player's clothing once.
+
+### Gameplay
+- **Cut-scenes**: the action *Play cutscene* / `cutscene("fn")` plays a script function as a
+  cut-scene (HUD hidden, black bars, everyone else waits; the HUD comes back afterwards).
+  New actions and script functions *Walk to tile* `walk_to`, *Walk up to character* `approach`
+  and *Place at tile* `place`. The example's new game opens with one: the hero walks into town
+  from the west and the guard sends them to Elder Rowan. Editor: *+ Cutscene* template and
+  *Play as cutscene* in the Scripts tab, *Preview* on the action, `rust2d-game --cutscene FN`.
+- **More for scenes**: `dim(amount, seconds)` / action *Dim the scene* (lights show by day),
+  `disable_spawners(map[, zone])` / `enable_spawners(...)` / action *Spawners on / off* (saved),
+  `defeat_enemies()` / action *Defeat all enemies*, a light `color` for effects; effects and timed lights keep playing during cut-scenes.
+- **Hide the interface**: H hides / shows the HUD (status frame, clock, quick bar, buttons);
+  dialogs and windows the player opens still show. Scripts: `hide_ui()`, `show_ui()`;
+  triggers: the new action *Show / hide UI* (e.g. for cut-scenes). Not saved.
+- **Status frame** (HUD, top left): a framed panel with a small portrait of the hero, the hero's
+  name, the hearts, the mana bar, the defense and the ammo of an equipped ranged weapon. The
+  weapon box in the bottom-left corner is gone (the held weapon is drawn on the hero).
+- **Character window**: inventory, character sheet, skills and spells are one window with the
+  tabs *Character* (C / I), *Skills* (K) and *Spells* (L); one HUD button (next to the map
+  button) replaces the three inventory / character / skills buttons. Tab cycles the tabs, the
+  key of the open tab or Esc closes it. Container loot windows stay separate.
+- Trade window: the mouse wheel moves the selection up / down (on the list under the pointer,
+  else the active side); the list scrolls along.
+- **Scripted spell effects**: new script functions (also trigger actions) `aim(fn)` (magic
+  targeting; the click calls `fn(x, y)`, a spell's cost is paid only then), `fly(sheet, x, y, fn,
+  #{ speed, frames, fps, scale, light })` (an animated, glowing sprite flies to a point and calls
+  `fn(x, y)`), `effect(sheet, x, y, #{ ... })` (an animation played once, e.g. an explosion) and
+  `damage_area(x, y, radius, damage)`. Script ids of sprite sheets in `fly` / `effect` are checked
+  and renamed with the sheet.
+- **Script light and healing**: `light_at(x, y, radius, seconds, #{ color, flicker })` (a timed
+  light at a point), `heal_area(x, y, radius, amount)` (the player and friendly characters),
+  `player_light(radius, seconds, #{ color, flicker })`, and `player_x()`, `player_y()`,
+  `player_facing()`, `player_max_hp()`. `player_light` and `damage_around` accept integers and
+  decimals in any mix (before, `player_light(5, 30.5)` failed).
+
+### Editor
+- **Character builder**: characters are assembled visually — a walking preview (facing buttons
+  or turning, the four idle directions) beside rows of clickable cards for the body, skin
+  swatches, hair style, hair color, beard, clothing (shown worn), head / body armor, weapon,
+  left hand, plus the carried items; *Randomize* and *Start from…* (copy the look and equipment
+  of a character of the project or the asset library — library sheets and items are brought
+  along). It is the *Look & equipment* part of the Characters form (project and library),
+  opens as a window for **New character…** (id, name, *Create*) and for a placed NPC's own
+  look (*Customize this one…* in the map inspector, *Use the definition's* clears it). Items get
+  a *Held sprite* and outfits a *Female cut* sheet, sheets a *Kind* and bodies a *Female body*
+  flag, the armor slot *Clothing*; the Project tab sets the creator's bodies and its skin, hair
+  style, hair color and beard choices with the same cards. The New-asset wizard no longer makes
+  characters. Editor-script commands `charnew`, `charset`, `charrandom`, `chartemplate`,
+  `charcreate` / `charapply`, `charcancel`, `charcustom`, `charreset`, `entequip`, `entskin`.
+- Trigger actions *Aim (then run script)*, *Fly sprite to point*, *Play effect*, *Damage area*,
+  *Light at point*, *Heal area*; *Light around player* gained color and flicker. The script editor
+  completes all new functions (sprite sheets for `fly` / `effect`), and `queue_set_var`, which was
+  missing; a test now fails when an engine function is missing from the completion table.
+- Script editor: the parameter hint also works for the project's own script functions, and right
+  after `(` or `,` an id argument (item, map, spawn point, sheet, script function, ...) opens its
+  suggestions at once, inserted with quotes.
+
+### Asset library
+- **Scripted skills and spells in the library and packages**: *Add to library* / *Export…* of
+  assets that use scripts open a *Script functions* dialog; the functions the assets need
+  (and what those call or pass as callbacks) are ticked, other functions only go along when
+  ticked. Functions travel in packages and the library (`scripts/library.rhai`), are appended to
+  a project's `scripts/library.rhai` when it takes the asset (existing functions are kept), follow
+  id renames, and are pruned when the library no longer needs them. Assets the functions use by
+  id (sprite sheets, sounds, items) come along. The starter library now has the Fireball spell
+  and the Scavenging skill with their functions.
+
+### Example project and starter library
+- Every character is a layered model: shared bodies (male, female, goblin, **female goblin**),
+  short / long / **ponytail** hair, **full beard and goatee**; outfits as clothing items in both
+  cuts; held sprites for sword, spear, axe, bow, crossbow, shield, lantern and torch; slimes,
+  skeletons, bats and ghosts are bodies. **Female bodies are more feminine** (narrow waist, bust,
+  slim limbs, rounder chin, fitted outfits). The guard holds a spear and wears a helmet, goblin
+  archers and the new **goblin scouts** (female, in the wilds) carry a crude bow (and drop it
+  with their rags), the villager carries apples, Tilda sells green and red tunics, the creator
+  offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
+- The forest shrine is a 3x2 monolith with lamp pillars on a larger stone platform
+  (both statues on it); touching it on the elder's quest plays a cut-scene with light effects
+  (new `magic_burst` sheet, `chime` sound), defeats the monsters left in the forest and switches
+  off its spawners. Tilda's slime hunt is done then (she rewards it); not yet taken, she only
+  thanks the hero.
+- **Fireball** spell (Tome of the Fireball, sold by Tilda; needs Arcana 3): click a target, a
+  fireball flies there and explodes, damaging everything within 2 tiles; embers glow on briefly. New sprite sheets
+  `fireball` and `explosion` (also in the starter library) and sounds `fireball`, `explosion`.
+
+### Documentation
+- `Documentation/scripting.md`: the complete scripting guide and API reference (how scripts
+  are run, immediate vs. queued functions, state, targets, units, every function, recipes,
+  limits, a Rhai primer). Tests keep it complete and its examples compiling.
+
+### Fixes
+- Fix: arriving on a map (edge, spawn, transition, loaded save) inside something solid - e.g.
+  a gate post at the village's east edge when coming back from the forest - left the player
+  stuck; the player now arrives on the nearest free tile.
+- Fix: boulders showed a stray dark mark at their upper left (the open double gate's post cap
+  spilled into the boulder's cells on the props sheet).
+- Fix: spell, skill, scroll and book icons were blank in libraries created before those icons
+  existed (the library kept its older, narrower `items` sheet image). Starter updates now replace
+  an existing sprite sheet or tileset image when the new one only adds frames and leaves the
+  existing part unchanged; images the user edited stay as they are. Existing libraries apply
+  this once on the next start.
+- Fix: `wait()` accepts whole numbers too (`wait(1)` used to be a script error).
+
 ## 0.0.8 — 2026-11-04
 
 ### Gameplay

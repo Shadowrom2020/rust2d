@@ -116,6 +116,8 @@ impl Game {
     /// Starts over with a fresh world at the project's start map / spawn.
     pub(super) fn new_game(&mut self) {
         self.reset_world();
+        self.ui_hidden = false;
+        self.reset_cutscene();
         let (map, spawn) = (self.project.config.start_map.clone(), self.project.config.start_spawn.clone());
         self.transition(&map, Arrival::Spawn(spawn));
     }
@@ -391,6 +393,21 @@ impl Game {
         }
     }
 
+    /// `DefeatEnemies`: defeats every living hostile character on the map. Returns how many.
+    pub(super) fn defeat_enemies(&mut self) -> usize {
+        let hostile: Vec<usize> = (0..self.loaded.entities.len())
+            .filter(|&i| {
+                let e = &self.loaded.entities[i];
+                e.active && e.hostile && e.max_hp > 0 && e.kind == crate::entity::EntityKind::Character
+            })
+            .collect();
+        for &i in &hostile {
+            self.loaded.entities[i].hp = 0;
+            self.defeat(i);
+        }
+        hostile.len()
+    }
+
     fn defeat(&mut self, i: usize) {
         let e = &mut self.loaded.entities[i];
         e.active = false;
@@ -400,6 +417,7 @@ impl Game {
         self.effects.push((pos, 0.0));
         self.persist(i);
         self.drop_loot(&loot, feet);
+        self.drop_npc_items(i);
         if let Some(zone) = spawned_by {
             self.spawned_defeated(zone);
         }
@@ -540,6 +558,13 @@ impl Game {
                     Color::new(1.0, 1.0, 0.85, alpha),
                 );
             }
+            // The weapon itself (out of the hand meanwhile) sweeps along the arc. Item icons
+            // point up-right, so they are turned by the arc's angle + 45 degrees.
+            let icon = self.world.equipment.item(crate::defs::EquipSlot::Weapon).and_then(|id| self.project.db.item(id)).map(|d| d.icon.clone());
+            if let Some(icon) = icon {
+                let at = center + vec2(a1.cos(), a1.sin()) * (r * 0.5).max(ts * 0.45);
+                self.assets.draw_frame_scaled(&icon.sheet, icon.frame, at, a1 + std::f32::consts::FRAC_PI_4, 1.0, WHITE);
+            }
         }
         for e in self.loaded.entities.iter().filter(|e| e.active && e.max_hp > 0 && e.hp < e.max_hp) {
             let w = 14.0 * u;
@@ -566,50 +591,117 @@ impl Game {
     }
 
     /// Hearts in the top-left corner.
+    /// The player status in the top-left corner: a framed panel with a small portrait, the
+    /// hero's name, the hearts (1 heart = 2 HP), the mana bar (with magic) and the ammo of a
+    /// ranged weapon.
     pub(super) fn draw_hud(&self) {
         if !self.combat.enabled() {
             return;
         }
-        // One heart = 2 HP; odd HP shows a half heart.
+        const HEART: f32 = 18.0;
+        const STEP: f32 = 21.0;
+        const PAD: f32 = 8.0;
+        let (x0, y0) = (10.0, 10.0);
         let hp = self.hp();
-        let size = 22.0;
         let hearts = (self.combat.max_hp + 1) / 2;
+        let name = self.world.player_name.trim().to_string();
+        let def = self.player_defense();
+        let magic = self.magic_on();
+        let ammo = self.hud_ammo();
+        // Sizes: the text column is as wide as its widest line.
+        let portrait = Rect::new(x0 + PAD, y0 + PAD, 44.0, 60.0);
+        let tx = portrait.right() + 10.0;
+        let name_w = measure_text(&name, None, 22, 1.0).width;
+        let def_text = (def > 0).then(|| format!("DEF {def}"));
+        let def_w = def_text.as_ref().map_or(0.0, |t| measure_text(t, None, 16, 1.0).width + 14.0);
+        let hearts_w = hearts as f32 * STEP;
+        let bar_w = hearts_w.max(120.0);
+        let col_w = (name_w + def_w).max(hearts_w).max(if magic { bar_w + 34.0 } else { 0.0 }).max(if ammo.is_some() { 80.0 } else { 0.0 });
+        let mut h = 24.0 + HEART + 6.0;
+        if magic {
+            h += 16.0;
+        }
+        if ammo.is_some() {
+            h += 22.0;
+        }
+        let frame = Rect::new(x0, y0, tx + col_w + PAD + 2.0 - x0, h.max(portrait.h) + 2.0 * PAD);
+
+        // Frame: dark backing, a gold border with an inner line and corner studs.
+        let gold = Color::new(0.85, 0.72, 0.38, 1.0);
+        let dim_gold = Color::new(0.55, 0.45, 0.22, 1.0);
+        draw_rectangle(frame.x, frame.y, frame.w, frame.h, Color::new(0.05, 0.05, 0.1, 0.78));
+        draw_rectangle_lines(frame.x, frame.y, frame.w, frame.h, 2.5, gold);
+        draw_rectangle_lines(frame.x + 4.0, frame.y + 4.0, frame.w - 8.0, frame.h - 8.0, 1.0, dim_gold);
+        for (cx, cy) in [(frame.x, frame.y), (frame.right(), frame.y), (frame.x, frame.bottom()), (frame.right(), frame.bottom())] {
+            draw_poly(cx, cy, 4, 5.0, 45.0, gold);
+            draw_poly(cx, cy, 4, 2.5, 45.0, Color::new(0.95, 0.88, 0.6, 1.0));
+        }
+
+        // Portrait: the hero as dressed now, on a darker plate.
+        draw_rectangle(portrait.x, portrait.y, portrait.w, portrait.h, Color::new(0.0, 0.0, 0.0, 0.45));
+        draw_rectangle_lines(portrait.x, portrait.y, portrait.w, portrait.h, 1.5, dim_gold);
+        if let Some(a) = self.player_appearance() {
+            let (fw, fh) = self.character_frame_size(&a);
+            let scale = ((portrait.w - 4.0) / fw).min((portrait.h - 4.0) / fh);
+            let (w, hh) = (fw * scale, fh * scale);
+            self.draw_character_in(&a, &self.world.equipment, Rect::new(portrait.x + (portrait.w - w) / 2.0, portrait.bottom() - 2.0 - hh, w, hh));
+        }
+
+        // Name, defense.
+        let mut y = y0 + PAD;
+        draw_text(&name, tx + 1.0, y + 19.0, 22.0, Color::new(0.0, 0.0, 0.0, 0.7));
+        draw_text(&name, tx, y + 18.0, 22.0, Color::new(1.0, 0.86, 0.45, 1.0));
+        if let Some(t) = &def_text {
+            let w = measure_text(t, None, 16, 1.0).width;
+            draw_text(t, tx + col_w - w, y + 17.0, 16.0, LIGHTGRAY);
+        }
+        y += 24.0;
+
+        // Hearts.
         let (full, empty) = (Color::new(0.9, 0.15, 0.2, 1.0), Color::new(0.2, 0.2, 0.25, 0.9));
         for i in 0..hearts {
-            let (x, y) = (14.0 + i as f32 * (size + 4.0), 14.0);
-            draw_heart(x, y, size + 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
+            let x = tx + i as f32 * STEP;
+            draw_heart(x, y, HEART + 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
             let left = hp - i * 2;
-            draw_heart(x + 1.0, y + 1.0, size, if left >= 1 { full } else { empty });
+            draw_heart(x + 1.0, y + 1.0, HEART, if left >= 1 { full } else { empty });
             if left == 1 {
-                draw_heart_right_half(x + 1.0, y + 1.0, size, empty);
+                draw_heart_right_half(x + 1.0, y + 1.0, HEART, empty);
             }
         }
-        let def = self.player_defense();
-        if def > 0 {
-            draw_text(format!("DEF {def}"), 14.0 + hearts as f32 * (size + 4.0) + 6.0, 32.0, 20.0, LIGHTGRAY);
+        y += HEART + 6.0;
+
+        // Mana bar.
+        if magic {
+            let max = self.max_mana().max(1) as f32;
+            let (bx, bh) = (tx, 9.0);
+            draw_rectangle(bx - 1.0, y - 1.0, bar_w + 2.0, bh + 2.0, Color::new(0.0, 0.0, 0.0, 0.7));
+            let fill = bar_w * (self.world.mana / max).clamp(0.0, 1.0);
+            draw_rectangle(bx, y, fill, bh, Color::new(0.3, 0.45, 1.0, 1.0));
+            draw_rectangle(bx, y, fill, 3.0, Color::new(0.55, 0.7, 1.0, 1.0));
+            draw_rectangle_lines(bx - 1.0, y - 1.0, bar_w + 2.0, bh + 2.0, 1.0, Color::new(0.6, 0.7, 1.0, 0.8));
+            draw_text(format!("{:.0}", self.world.mana), bx + bar_w + 6.0, y + 9.0, 15.0, Color::new(0.75, 0.82, 1.0, 1.0));
+            y += 16.0;
         }
-        // Equipped weapon and ammo: bottom-left corner, "Q: switch" above it.
-        let (x, y) = (14.0, screen_height() - 54.0);
-        draw_rectangle(x, y, 40.0, 40.0, Color::new(0.0, 0.0, 0.0, 0.5));
-        draw_rectangle_lines(x, y, 40.0, 40.0, 2.0, Color::new(0.85, 0.8, 0.6, 0.8));
+
+        // Ammo of an equipped bow / crossbow.
+        if let Some((sprite, n)) = ammo {
+            if let Some(s) = &sprite {
+                self.assets.draw_frame_in(&s.sheet, s.frame, Rect::new(tx - 2.0, y - 2.0, 20.0, 20.0), WHITE);
+            }
+            let col = if n == 0 { Color::new(1.0, 0.4, 0.4, 1.0) } else { WHITE };
+            draw_text(format!("x{n}"), tx + 22.0, y + 13.0, 18.0, col);
+        }
+    }
+
+    /// Icon and count of the ammo the equipped ranged weapon uses (None = no such weapon).
+    fn hud_ammo(&self) -> Option<(Option<SpriteRef>, u32)> {
         let db = &self.project.db;
-        match self.world.equipment.item(crate::defs::EquipSlot::Weapon).and_then(|id| db.item(id)) {
-            Some(d) => {
-                self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, Rect::new(x + 4.0, y + 4.0, 32.0, 32.0), WHITE);
-                if let Some(ammo) = d.weapon.as_ref().and_then(|w| w.ranged.as_ref()).map(|r| r.ammo.clone()).filter(|a| !a.is_empty()) {
-                    let n = self.world.item_count(&ammo);
-                    if let Some(a) = db.item(&ammo) {
-                        self.assets.draw_frame_in(&a.icon.sheet, a.icon.frame, Rect::new(x + 46.0, y + 8.0, 24.0, 24.0), WHITE);
-                    }
-                    let col = if n == 0 { Color::new(1.0, 0.4, 0.4, 1.0) } else { WHITE };
-                    draw_text(format!("x{n}"), x + 72.0, y + 28.0, 24.0, col);
-                }
-            }
-            None => {
-                draw_text("fist", x + 6.0, y + 26.0, 18.0, LIGHTGRAY);
-            }
+        let d = self.world.equipment.item(crate::defs::EquipSlot::Weapon).and_then(|id| db.item(id))?;
+        let ammo = d.weapon.as_ref()?.ranged.as_ref()?.ammo.clone();
+        if ammo.is_empty() {
+            return None;
         }
-        draw_text("Q: switch", x, y - 6.0, 16.0, Color::new(1.0, 1.0, 1.0, 0.5));
+        Some((db.item(&ammo).map(|a| a.icon.clone()), self.world.item_count(&ammo)))
     }
 
     pub(super) fn draw_game_over(&self) {

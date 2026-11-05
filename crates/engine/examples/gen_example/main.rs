@@ -13,7 +13,6 @@ use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
 use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
 use rust2d_engine::skills::{SkillDef, SpellDef};
-use rust2d_engine::state::Sex;
 
 mod art;
 mod structures;
@@ -93,7 +92,17 @@ fn song(melody: &[i32], bass: &[i32], step: f32) -> Vec<f32> {
 
 type SoundFn = fn() -> Vec<f32>;
 
-const SOUNDS: [(&str, SoundFn); 11] = [
+const SOUNDS: [(&str, SoundFn); 14] = [
+    // A bright, bell-like arpeggio for magic (the forest shrine).
+    ("chime", || {
+        let mut out = vec![0.0; (1.6 * RATE as f32) as usize];
+        for (k, n) in [76, 80, 83, 88, 92].iter().enumerate() {
+            let f = midi(*n);
+            mix(&mut out, &tone(f, f, 1.2, Wave::Triangle, 0.22, 2.2), k * (0.09 * RATE as f32) as usize);
+            mix(&mut out, &tone(f * 2.0, f * 2.0, 0.6, Wave::Triangle, 0.06, 4.0), k * (0.09 * RATE as f32) as usize);
+        }
+        out
+    }),
     ("unlock", || concat(&[tone(1800.0, 1800.0, 0.03, Wave::Square, 0.25, 40.0), tone(900.0, 700.0, 0.06, Wave::Square, 0.25, 25.0), tone(2400.0, 2400.0, 0.04, Wave::Square, 0.2, 40.0)])),
     ("creak", || concat(&[tone(90.0, 160.0, 0.18, Wave::Square, 0.18, 4.0), tone(160.0, 120.0, 0.12, Wave::Triangle, 0.4, 6.0)])),
     ("pickup", || concat(&[tone(880.0, 880.0, 0.06, Wave::Square, 0.3, 10.0), tone(1320.0, 1320.0, 0.12, Wave::Square, 0.3, 12.0)])),
@@ -102,6 +111,9 @@ const SOUNDS: [(&str, SoundFn); 11] = [
     ("hurt", || tone(500.0, 120.0, 0.3, Wave::Square, 0.4, 6.0)),
     ("defeat", || concat(&[tone(400.0, 800.0, 0.08, Wave::Square, 0.3, 5.0), tone(4000.0, 300.0, 0.3, Wave::Noise, 0.35, 8.0)])),
     ("blip", || tone(1200.0, 1200.0, 0.03, Wave::Square, 0.15, 30.0)),
+    // Fireball: a whoosh when it leaves the hand, a rumbling blast when it lands.
+    ("fireball", || tone(500.0, 1600.0, 0.22, Wave::Noise, 0.35, 7.0)),
+    ("explosion", || concat(&[tone(2000.0, 200.0, 0.12, Wave::Noise, 0.55, 6.0), tone(400.0, 40.0, 0.5, Wave::Noise, 0.6, 3.0)])),
     ("door", || concat(&[tone(150.0, 110.0, 0.12, Wave::Triangle, 0.6, 8.0), tone(200.0, 140.0, 0.15, Wave::Triangle, 0.5, 8.0)])),
     ("music_village", || {
         let m = [72, 76, 79, 76, 77, 76, 74, 0, 71, 74, 77, 74, 76, 74, 72, 0, 72, 76, 79, 84, 81, 79, 77, 76, 74, 77, 76, 74, 72, 0, 0, 0];
@@ -247,6 +259,8 @@ fn spells() -> Vec<SpellDef> {
         SpellDef::new("light", "Light", "A glow around you for a minute - handy in the old mine.", icon(it::SPELL_LIGHT), 6, 1.0, E::Light { radius: 5.0, seconds: 60.0 }),
         SpellDef::new("spark", "Spark", "Hurls a bolt of lightning in the direction you face.", icon(it::SPELL_SPARK), 5, 0.6, E::Bolt { damage: 3, projectile: icon(it::SPARK_SHOT), speed: 320.0 * R, range: 7.0 }).requires("arcana", 1),
         SpellDef::new("fire_burst", "Fire Burst", "Flames burst out around you, hitting everything nearby.", icon(it::SPELL_BLAST), 15, 4.0, E::Blast { damage: 4, radius: 2.0 }).requires("arcana", 2),
+        // A scripted spell: cast_fireball() in main.rhai aims, throws and explodes it.
+        SpellDef::new("fireball", "Fireball", "Click a target: a ball of fire flies there and explodes, burning everything within 2 tiles.", SpriteRef::new("fireball", 0), 12, 1.5, E::Script { function: "cast_fireball".into() }).requires("arcana", 3),
     ]
 }
 
@@ -282,8 +296,9 @@ fn village() -> Map {
         let (x, y) = (rng.range(w) as i32, rng.range(h) as i32);
         b.set(0, x, y, if rng.chance(0.5) { t::FLOWERS } else { t::TALL_GRASS });
     }
-    // Main road west -> east edge (y = 18), and north-south street.
-    b.fill(0, 4, 17, w as i32 - 4, 3, t::PATH);
+    // Main road from the west edge (where travellers arrive) to the east edge (y = 18), and
+    // the north-south street.
+    b.fill(0, 0, 17, w as i32, 3, t::PATH);
     b.fill(0, 21, 8, 3, 12, t::PATH);
     // Pond with sand rim and bridge-less shore.
     b.fill(0, 5, 24, 11, 7, t::SAND);
@@ -307,14 +322,14 @@ fn village() -> Map {
             b.set(1, x, y, t::BUSH);
         }
     }
-    // Tree border, leaving the road gap open to the east.
+    // Tree border, leaving the road open to the west and the east.
     for x in 0..w as i32 {
         b.tree(x, 1);
         b.tree(x, h as i32 - 1);
     }
     for y in 2..h as i32 - 1 {
-        b.tree(0, y);
         if !(16..=20).contains(&y) {
+            b.tree(0, y);
             b.tree(w as i32 - 1, y);
         }
     }
@@ -449,12 +464,15 @@ fn village() -> Map {
     guard.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "guard_talk".into() }])];
 
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
-    b.m.triggers = vec![Trigger {
+    b.m.triggers = vec![
+        // A new game's intro: a cut-scene (the script's intro_cutscene()), then the welcome.
+        Trigger { once: true, ..trig(TriggerOn::MapEnter, vec![], vec![Action::Cutscene { function: "intro_cutscene".into() }]) },
+        Trigger {
         on: TriggerOn::MapEnter,
         conditions: vec![],
         actions: vec![dialog(
             "",
-            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Inventory & character: I or C. Quest journal: J. Save/Load: F5/F9. Debug: F3.",
+            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Character & inventory: C or I, skills: K, spells: L. Quest journal: J. Map: M. Save/Load: F5/F9. Debug: F3.",
         )],
         once: true,
     }];
@@ -506,6 +524,9 @@ fn shop() -> Map {
             ShopEntry::new("wooden_shield", 1, 0),
             ShopEntry::new("scroll_heal", 2, 0),
             ShopEntry::new("scroll_light", 1, 0),
+            ShopEntry::new("tunic_green", 1, 0),
+            ShopEntry::new("tunic_red", 1, 0),
+            ShopEntry::new("tome_fireball", 1, 0),
             ShopEntry { unlimited: true, ..ShopEntry::new("mana_potion", 0, 0) },
         ],
         sell_rate: 50,
@@ -522,10 +543,11 @@ fn shop() -> Map {
                 dialog("Tilda", "Welcome, welcome, {good sir|my lady}! Potions, arrows, armor - and I pay fair coin for whatever you find out there."),
             ],
         ),
-        // Quest "Pest Control": offered until accepted, rewarded once five slimes are gone.
+        // Quest "Pest Control": offered until accepted (not any more once the shrine has driven
+        // the monsters out of Whisperwood), rewarded once the slimes are gone.
         trig(
             TriggerOn::Interact,
-            vec![quest_is("pest_control", QuestCheck::NotStarted, 0)],
+            vec![quest_is("pest_control", QuestCheck::NotStarted, 0), not(flag("shrine_lit"))],
             vec![
                 Action::Choice {
                     speaker: "Tilda".into(),
@@ -544,11 +566,21 @@ fn shop() -> Map {
             TriggerOn::Interact,
             vec![quest_is("pest_control", QuestCheck::AtStage, 1)],
             vec![
-                dialog("Tilda", "Five slimes? My deliveries are safe again - thank you, {player}! Here, as promised."),
+                dialog("Tilda", "The slimes are gone? My deliveries are safe again - thank you, {player}! Here, as promised."),
                 Action::GiveItem { item: "coin".into(), count: 30 },
                 Action::GiveItem { item: "potion".into(), count: 1 },
                 Action::GiveSkillPoints { amount: 1 },
                 quest("pest_control", QuestOp::Complete, 0),
+            ],
+        ),
+        // The shrine was lit before her quest was taken: no slimes left to hunt - she thanks the hero.
+        trig(
+            TriggerOn::Interact,
+            vec![quest_is("pest_control", QuestCheck::NotStarted, 0), cond(flag("shrine_lit")), not(flag("tilda_thanked"))],
+            vec![
+                Action::SetFlag { name: "tilda_thanked".into(), value: true },
+                dialog("Tilda", "So you're the one who woke the old shrine! Not a single slime has touched my deliveries since. You're a hero, {player} - the whole town owes you."),
+                dialog("Tilda", "Now, care to look at my wares?"),
             ],
         ),
     ];
@@ -621,9 +653,9 @@ fn forest() -> Map {
             b.fill(0, x, y, 1, 3, t::PATH);
         }
     }
-    // Clearing with the shrine.
+    // Clearing with the shrine on a stone platform (centered on the 3-tile shrine at 46-48).
     b.fill(0, 40, 16, 14, 14, t::GRASS);
-    b.fill(0, 44, 20, 6, 6, t::STONE_FLOOR);
+    b.fill(0, 43, 19, 9, 7, t::STONE_FLOOR);
     // Stream; where it crosses the path it becomes a bridge.
     for yy in 0..h as i32 {
         let x = 28 + ((yy as f32 / 6.0).sin() * 2.0) as i32;
@@ -658,12 +690,13 @@ fn forest() -> Map {
     }
 
     b.spawn("west", 2, 24);
+    // Two statues guard the shrine, one tile in from the platform's edges.
     b.big("statue", 44, 21, 1, 2);
     b.big("statue", 50, 21, 1, 2);
     b.big("big_oak", 39, 15, 3, 4);
     b.big("big_pine", 54, 28, 2, 4);
     b.big("big_oak", 24, 12, 3, 4);
-    let shrine = b.entity(EntityKind::Prop, "shrine", 47, 21);
+    let shrine = b.big("shrine", 47, 21, 3, 2);
     shrine.name = "shrine".into();
     shrine.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "shrine_touch".into() }])];
     let clearing = b.zone("clearing", 40, 16, 14, 14, ZoneKind::Trigger);
@@ -721,7 +754,7 @@ fn forest() -> Map {
     b.m.triggers = vec![trig(
         TriggerOn::Custom { name: "shrine_lit".into() },
         vec![],
-        vec![Action::Wait { seconds: 0.4 }, dialog("", "A warm light spreads through the forest.")],
+        vec![Action::Wait { seconds: 0.4 }, dialog("", "A warm light spreads through the forest. The slime den and the goblin camp fall silent.")],
     )];
     b.m.edges.west = Some(EdgeLink { target_map: "village".into(), offset: -6, depth: 1 });
     b.m.background = [10, 25, 10];
@@ -821,6 +854,7 @@ fn wilds() -> Map {
         let (character, count, respawn) = match placed % 4 {
             0 => ("goblin", 2, Respawn::After { seconds: 45.0 }),
             1 => ("slime", 5, Respawn::Never),
+            2 => ("goblin_f", 2, Respawn::After { seconds: 45.0 }),
             _ => ("slime", 4, Respawn::After { seconds: 30.0 }),
         };
         b.zone(&format!("spawner_{placed}"), x, y, 12, 12, ZoneKind::Spawner { character: character.into(), count, respawn });
@@ -889,11 +923,11 @@ fn database() -> Database {
         light: None,
     };
     let state = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid, light: None };
-    let ch = |id: &str, name: &str, sheet: &str, speed: f32, behavior: Behavior| CharacterDef {
+    // `body` = the body sheet of monsters; people get their layered look in `layered_characters`.
+    let ch = |id: &str, name: &str, body: &str, speed: f32, behavior: Behavior| CharacterDef {
         id: id.into(),
         name: name.into(),
-        sheet: sheet.into(),
-        walk_frames: 4,
+        sheet: String::new(),
         speed: speed * R,
         hitbox: [10.0 * R, 6.0 * R],
         behavior,
@@ -906,6 +940,9 @@ fn database() -> Database {
         shop: None,
         loot: vec![],
         light: None,
+        appearance: Appearance { body: body.into(), ..Default::default() },
+        equipment: Default::default(),
+        inventory: Vec::new(),
     };
     let item = |id: &str, name: &str, desc: &str, frame: u32, consumable: bool, on_use: Vec<Trigger>| ItemDef {
         id: id.into(),
@@ -920,6 +957,7 @@ fn database() -> Database {
         value: 0,
         light: None,
         teaches: String::new(),
+        held: String::new(),
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -941,14 +979,16 @@ fn database() -> Database {
     slime.hostile = true;
     slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
     slime.loot = vec![LootEntry::new("coin", 50.0, 1, 3), LootEntry::new("apple", 10.0, 1, 1)];
-    let mut goblin = ch("goblin", "Goblin Archer", "goblin", 38.0, Behavior::Chase { sight: 7.0 });
+    let mut goblin = ch("goblin", "Goblin Archer", "", 38.0, Behavior::Chase { sight: 7.0 });
     goblin.max_hp = 2;
     goblin.damage = 1;
     goblin.hostile = true;
     goblin.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 150.0 * R, range: 6.0, ammo: String::new() }));
     // Goblin archers drop arrows (and sometimes coins) from their loot table.
     goblin.loot = vec![LootEntry::new("arrows", 70.0, 2, 4), LootEntry::new("coin", 25.0, 1, 2)];
-    let mut hero = ch("hero", "Hero", "hero", 70.0, Behavior::Static);
+    // Goblin scouts (female) roam the wilds with the archers.
+    let goblin_f = CharacterDef { id: "goblin_f".into(), name: "Goblin Scout".into(), speed: 42.0 * R, ..goblin.clone() };
+    let mut hero = ch("hero", "Hero", "", 70.0, Behavior::Static);
     hero.max_hp = 12; // 6 hearts
     hero.damage = 1;
     let mut db = Database {
@@ -982,25 +1022,18 @@ fn database() -> Database {
         ],
         sounds: SOUNDS.iter().map(|(id, _)| SoundDef { id: id.to_string(), file: format!("sounds/{id}.wav"), volume: if id.starts_with("music") { 0.35 } else { 0.6 } }).collect(),
         sheets: vec![
-            SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 32, frame_h: 48 },
-            // More looks for the character creator.
-            SheetDef { id: "hero_2".into(), image: "sprites/hero_2.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "hero_3".into(), image: "sprites/hero_3.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "hero_f".into(), image: "sprites/hero_f.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "hero_f2".into(), image: "sprites/hero_f2.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "hero_f3".into(), image: "sprites/hero_f3.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "elder".into(), image: "sprites/elder.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "villager".into(), image: "sprites/villager.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "guard".into(), image: "sprites/guard.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "merchant_f".into(), image: "sprites/merchant_f.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "slime".into(), image: "sprites/slime.png".into(), frame_w: 32, frame_h: 32 },
-            SheetDef { id: "goblin".into(), image: "sprites/goblin.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "ov_cap".into(), image: "sprites/ov_cap.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "ov_helmet".into(), image: "sprites/ov_helmet.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "ov_leather".into(), image: "sprites/ov_leather.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "ov_chain".into(), image: "sprites/ov_chain.png".into(), frame_w: 32, frame_h: 48 },
-            SheetDef { id: "props".into(), image: "sprites/props.png".into(), frame_w: 32, frame_h: 32 },
-            SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 32, frame_h: 32 },
+            SheetDef { kind: SheetKind::Body, ..SheetDef::new("slime", "sprites/slime.png", 32, 32) },
+            SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_cap", "sprites/ov_cap.png", 32, 48) },
+            SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_helmet", "sprites/ov_helmet.png", 32, 48) },
+            SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_leather", "sprites/ov_leather.png", 32, 48) },
+            SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_chain", "sprites/ov_chain.png", 32, 48) },
+            SheetDef::new("props", "sprites/props.png", 32, 32),
+            SheetDef::new("items", "sprites/items.png", 32, 32),
+            // Spell effects (the Fireball script).
+            SheetDef::new("fireball", "sprites/fireball.png", 32, 32),
+            SheetDef::new("explosion", "sprites/explosion.png", 64, 64),
+            // The forest shrine's awakening (cut-scene).
+            SheetDef::new("magic_burst", "sprites/magic_burst.png", 64, 64),
         ],
         items: vec![
             stack(item("key", "Gate Key", "An old iron key. Opens the east gate.", it::KEY, false, vec![]), 1),
@@ -1038,20 +1071,21 @@ fn database() -> Database {
             stack(weapon(item("spear", "Spear", "Hits from two tiles away, but only straight ahead.", it::SPEAR, false, vec![]), Weapon { reach: 1.9, arc: 22.0, knockback: 0.7, ..Weapon::melee(2, 0.55) }), 1),
             stack(weapon(item("axe", "Battle Axe", "Slow, wide swings that send enemies flying.", it::AXE, false, vec![]), Weapon { reach: 1.0, arc: 85.0, knockback: 1.8, ..Weapon::melee(4, 0.85) }), 1),
             // Armor: helmets and body armor.
-            stack(armor(item("leather_cap", "Leather Cap", "Light head protection.", it::CAP, false, vec![]), Armor { slot: EquipSlot::Head, defense: 1, speed: 0.0, overlay: "ov_cap".into() }), 1),
-            stack(armor(item("iron_helmet", "Iron Helmet", "Sturdy, a little heavy.", it::HELMET, false, vec![]), Armor { slot: EquipSlot::Head, defense: 2, speed: -0.05, overlay: "ov_helmet".into() }), 1),
-            stack(armor(item("leather_armor", "Leather Armor", "Light body armor.", it::LEATHER, false, vec![]), Armor { slot: EquipSlot::Body, defense: 1, speed: 0.0, overlay: "ov_leather".into() }), 1),
-            stack(armor(item("chainmail", "Chainmail", "Strong protection, but you move slower.", it::CHAIN, false, vec![]), Armor { slot: EquipSlot::Body, defense: 3, speed: -0.15, overlay: "ov_chain".into() }), 1),
+            stack(armor(item("leather_cap", "Leather Cap", "Light head protection.", it::CAP, false, vec![]), Armor { slot: EquipSlot::Head, defense: 1, speed: 0.0, overlay: "ov_cap".into(), overlay_f: String::new() }), 1),
+            stack(armor(item("iron_helmet", "Iron Helmet", "Sturdy, a little heavy.", it::HELMET, false, vec![]), Armor { slot: EquipSlot::Head, defense: 2, speed: -0.05, overlay: "ov_helmet".into(), overlay_f: String::new() }), 1),
+            stack(armor(item("leather_armor", "Leather Armor", "Light body armor.", it::LEATHER, false, vec![]), Armor { slot: EquipSlot::Body, defense: 1, speed: 0.0, overlay: "ov_leather".into(), overlay_f: String::new() }), 1),
+            stack(armor(item("chainmail", "Chainmail", "Strong protection, but you move slower.", it::CHAIN, false, vec![]), Armor { slot: EquipSlot::Body, defense: 3, speed: -0.15, overlay: "ov_chain".into(), overlay_f: String::new() }), 1),
             // Left hand: lights and a shield (not together with a two-handed weapon).
-            light(stack(armor(item("lantern", "Lantern", "A steady light for dark places. Hold it in your left hand.", it::LANTERN, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new() }), 1), LightSpec::new(5.5, [255, 220, 170], false)),
-            light(stack(armor(item("torch", "Torch", "A flickering torch for the left hand. Cheap, but it lights less than a lantern.", it::TORCH, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new() }), 5), LightSpec::torch(4.0)),
+            light(stack(armor(item("lantern", "Lantern", "A steady light for dark places. Hold it in your left hand.", it::LANTERN, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new(), overlay_f: String::new() }), 1), LightSpec::new(5.5, [255, 220, 170], false)),
+            light(stack(armor(item("torch", "Torch", "A flickering torch for the left hand. Cheap, but it lights less than a lantern.", it::TORCH, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 0, speed: 0.0, overlay: String::new(), overlay_f: String::new() }), 5), LightSpec::torch(4.0)),
             // Magic: scrolls and books teach spells (scrolls are used up), mana potions.
             teach(stack(item("scroll_heal", "Scroll of Healing", "Reading it teaches the Heal spell. The scroll crumbles afterwards.", it::SCROLL, true, vec![]), 5), "heal"),
             teach(stack(item("scroll_light", "Scroll of Light", "Teaches the Light spell: a glow around you in dark places.", it::SCROLL, true, vec![]), 5), "light"),
             teach(stack(item("spellbook_spark", "Book of Sparks", "A worn spell book. Teaches Spark - but it takes some arcane knowledge to understand.", it::BOOK, false, vec![]), 1), "spark"),
+            teach(stack(item("tome_fireball", "Tome of the Fireball", "Teaches Fireball: aim it at a spot and it explodes there. Needs Arcana 3.", it::BOOK, false, vec![]), 1), "fireball"),
             teach(stack(item("tome_fire", "Tome of Fire", "Fire Burst: flames around you. Needs a trained arcanist.", it::BOOK, false, vec![]), 1), "fire_burst"),
             stack(item("mana_potion", "Blue Potion", "Restores 20 mana.", it::MANA_POTION, true, use_trig(vec![Action::AddMana { amount: 20 }])), 10),
-            stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new() }), 1),
+            stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new(), overlay_f: String::new() }), 1),
             stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
         ],
         props: vec![
@@ -1081,10 +1115,12 @@ fn database() -> Database {
                 ..prop("gate", "Iron Gate", p::GATE, true, [16.0, 16.0])
             },
             PropDef { container: Some(ContainerSpec { size: 4, ..Default::default() }), ..prop("barrel", "Barrel", p::BARREL, true, [10.0, 6.0]) },
+            // The forest shrine: 3x2 cells, a monolith between two lamp pillars on a dais.
             PropDef {
                 default_state: "dormant".into(),
-                states: vec![state("glowing", sprite("props", p::SHRINE + 1), true)],
-                ..prop("shrine", "Shrine", p::SHRINE, true, [10.0, 6.0])
+                states: vec![state("glowing", SpriteRef::block("props", p::GRAND_SHRINE + 3, 3, 2), true)],
+                sprite: SpriteRef::block("props", p::GRAND_SHRINE, 3, 2),
+                ..prop("shrine", "Shrine", p::GRAND_SHRINE, true, [40.0, 7.0])
             },
             prop("well", "Well", p::WELL, true, [14.0, 8.0]),
             // Multi-tile props.
@@ -1127,23 +1163,25 @@ fn database() -> Database {
         ],
         characters: vec![
             hero,
-            ch("elder", "Elder", "elder", 40.0, Behavior::Static),
-            ch("villager", "Villager", "villager", 35.0, Behavior::Wander { radius: 3.0 }),
-            ch("guard", "Town Guard", "guard", 40.0, Behavior::Static),
+            ch("elder", "Elder", "", 40.0, Behavior::Static),
+            ch("villager", "Villager", "", 35.0, Behavior::Wander { radius: 3.0 }),
+            ch("guard", "Town Guard", "", 40.0, Behavior::Static),
             slime,
             goblin,
+            goblin_f,
             // Every merchant sells these by default; the one in the village has their own stock.
             CharacterDef {
                 shop: Some(ShopSpec {
                     items: vec![ShopEntry { unlimited: true, ..ShopEntry::new("apple", 0, 0) }, ShopEntry::new("potion", 3, 0)],
                     ..Default::default()
                 }),
-                ..ch("merchant_f", "Merchant (female)", "merchant_f", 35.0, Behavior::Static)
+                ..ch("merchant_f", "Merchant (female)", "", 35.0, Behavior::Static)
             },
         ],
         skills: skills(),
         spells: spells(),
     };
+    layered_characters(&mut db);
     // Trade values (merchants use them unless their stock sets a price).
     for (id, v) in [
         ("potion", 15),
@@ -1167,6 +1205,9 @@ fn database() -> Database {
         ("scroll_light", 12),
         ("spellbook_spark", 60),
         ("tome_fire", 120),
+        ("tome_fireball", 150),
+        ("tunic_green", 25),
+        ("tunic_red", 25),
         ("mana_potion", 12),
     ] {
         db.items.iter_mut().find(|i| i.id == id).expect(id).value = v;
@@ -1177,7 +1218,7 @@ fn database() -> Database {
     }
     // The shrine glows once it is lit.
     if let Some(st) = db.props.iter_mut().find(|p| p.id == "shrine").and_then(|p| p.states.iter_mut().find(|s| s.name == "glowing")) {
-        st.light = Some(LightSpec { intensity: 0.85, ..LightSpec::new(5.0, [150, 200, 255], false) });
+        st.light = Some(LightSpec { intensity: 0.9, ..LightSpec::new(6.5, [150, 210, 255], true) });
     }
     db
 }
@@ -1264,6 +1305,8 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
 //               open_shop(target) set_state(target, state)
 //               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
+// Cut-scenes:   cutscene(fn) walk_to(target, x, y) approach(target, other) place(target, x, y)
+//               hide_ui() show_ui() dim(amount, seconds) disable_spawners(map) enable_spawners(map)
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
 //               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
 //               quest_done(id)
@@ -1271,8 +1314,13 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               text("...") fills in placeholders: {player} {sir|madam} {variable}
 // Skills/magic: skill(id) skill_points() knows_spell(id) mana(); queued: set_skill(id, level)
 //               give_skill_points(n) learn_spell(id) add_mana(n) damage_around(dmg, radius)
-//               player_light(radius, seconds)
-// Other:        player_hp() random(n) current_map()
+//               player_light(radius, seconds, #{ color: [r, g, b], flicker })
+//               heal_area(x, y, radius, n) light_at(x, y, radius, seconds, #{ ... })
+// Spell effects (queued; x, y in tiles): aim(fn) calls fn(x, y) with the player's target;
+//               fly(sheet, x, y, fn, #{ speed, frames: [a, b], fps, scale, light }) calls
+//               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
+// Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
+//               random(n) current_map()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -1309,17 +1357,50 @@ fn mira_walk() {
 
 fn shrine_touch() {
     if flag("shrine_lit") {
-        say("The shrine glows softly.");
+        say("The shrine glows softly. The forest is calm.");
         return;
     }
     if !flag("quest_accepted") {
         say("An old stone shrine. It seems dormant.");
         return;
     }
-    say("You touch the shrine. Ancient runes begin to glow!");
+    cutscene("shrine_awakening");
+}
+
+// The shrine awakens (a cut-scene, the first time it is touched on the elder's quest): the
+// clearing darkens, the statues' eyes and the shrine light up, a burst of magic rolls out -
+// every monster left in the forest is destroyed and its spawners go quiet. Tilda's slime
+// hunt can't go on then: accepted, it is done (she rewards it); not accepted, she won't offer it.
+fn shrine_awakening() {
+    face("player", "up");
+    say("You lay your hand on the cold stone. It begins to hum under your fingers...");
+    dim(0.8, 1.5);
+    play_sound("chime");
+    wait(1.6);
+    let blue = #{ color: [120, 200, 255], flicker: true };
+    light_at(47.5, 20.5, 1.5, 8, blue);         // a glow in the crystal
+    wait(0.8);
+    light_at(44.5, 20.2, 2.5, 7, blue);         // the statues' eyes
+    wait(0.4);
+    light_at(50.5, 20.2, 2.5, 6.6, blue);
+    wait(0.6);
+    set_state("shrine", "glowing");
+    play_sound("chime");
+    effect("magic_burst", 47.5, 20.5, #{ scale: 1.5, fps: 14, light: 5, color: [140, 210, 255] });
+    wait(0.5);
+    effect("magic_burst", 47.5, 20.5, #{ scale: 3.5, fps: 9, light: 9, color: [170, 230, 255] });
+    light_at(47.5, 21, 9, 3.5, #{ color: [180, 230, 255] });
+    wait(1.0);
+    say("Ancient runes flare up! A wave of light rolls out from the shrine, deep into Whisperwood.");
+    defeat_enemies();                           // every monster left in the forest
+    disable_spawners("forest");                 // and no new ones
+    if quest_active("pest_control") && quest_stage("pest_control") == 0 {
+        set_quest_stage("pest_control", 1);     // the slimes are gone: back to Tilda
+    }
     set_flag("shrine_lit", true);
-    set_state("self", "glowing");
     set_quest_stage("strange_lights", 2);
+    dim(0, 2);
+    wait(1.5);
     emit("shrine_lit");
 }
 
@@ -1350,6 +1431,21 @@ fn slime_defeated() {
 
 // The town guard patrols the road (see his patrol route in the map inspector). Once the
 // shrine is lit he stops: stop_patrol(target) / patrol(target) / patrol(target, [[x, y], ...]).
+// The intro of a new game, a cut-scene (village Map enter trigger, once): the player walks
+// into town from the west, the guard comes over and sends them to the elder.
+fn intro_cutscene() {
+    place("player", 0, 18);
+    face("player", "right");
+    wait(0.8);
+    walk_to("player", 5, 18);
+    wait(0.4);
+    approach("guard", "player");
+    say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("Guard", "Something is not right in Whisperwood, east of town. Strange lights flicker between the trees at night, and the slimes grow bolder every day.");
+    say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well in the middle of town.");
+    wait(0.3);
+}
+
 fn guard_talk() {
     if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
@@ -1362,26 +1458,126 @@ fn guard_talk() {
 fn count_coins() {
     say("You have " + item_count("coin") + " coins.");
 }
+
+// Fireball, a scripted spell (Database > Spells > Fireball, effect "Script"). Casting it calls
+// cast_fireball(); aim() lets the player click a target and calls fireball_at(x, y) with it (in
+// tiles). The spell's mana is only spent once a target is chosen.
+fn cast_fireball() {
+    aim("fireball_at");
+}
+
+fn fireball_at(x, y) {
+    play_sound("fireball");
+    // An animated sprite (all frames of the "fireball" sheet) flies there and glows on the way.
+    fly("fireball", x, y, "fireball_hit", #{ speed: 9, fps: 14, light: 2.5 });
+}
+
+fn fireball_hit(x, y) {
+    play_sound("explosion");
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    damage_area(x, y, 2, 5);
+    // Embers glow on for a few seconds.
+    light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });
+}
 "#;
+
+fn rgb(v: u32) -> [u8; 3] {
+    [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+}
+
+/// The example's outfits (clothing items): id, name, look they come from, description.
+fn outfits() -> Vec<(&'static str, &'static str, Look, &'static str)> {
+    let l = |shirt: u32, pants: u32| Look { shirt, pants, ..Default::default() };
+    vec![
+        ("tunic_blue", "Blue Tunic", l(0x2e6fdb, 0x3b3b4f), "A simple traveller's tunic."),
+        ("tunic_green", "Green Tunic", l(0x2e8b57, 0x4a3a2a), "A sturdy green tunic."),
+        ("tunic_red", "Red Tunic", l(0xb03a2e, 0x2f2f3f), "A bright red tunic."),
+        ("elder_garb", "Elder's Garb", l(0x7b4fa0, 0x4a3a5a), "A dignified purple coat."),
+        ("villager_clothes", "Villager Clothes", l(0x2e9d5b, 0x6b4a2a), "Plain work clothes."),
+        ("merchant_dress", "Merchant Dress", Look { robe: Some(0x6a3a7a), apron: Some(0xe8dcc0), ..l(0x7a3a8a, 0x4a3a2a) }, "A long dress with an apron."),
+        ("guard_uniform", "Guard Uniform", l(0x2b4c8c, 0x3a3a44), "The blue uniform of the town guard."),
+        ("goblin_rags", "Goblin Rags", l(0x5d4037, 0x3e2723), "Smelly, but they cover the essentials."),
+    ]
+}
+
+/// Characters as layered models (body + hair in their colors, wearing outfit items), the
+/// clothing items and sheets they use, held sprites of weapons, shields and lights.
+fn layered_characters(db: &mut Database) {
+    use SheetKind as K;
+    let sheet = |id: &str, kind: K, female: bool| SheetDef { kind, female, ..SheetDef::new(id, &format!("sprites/{id}.png"), 32, 48) };
+    // The shared bodies are people: playable (the slime's body is not).
+    for (id, _, kind, female) in shared_layers() {
+        db.sheets.push(SheetDef { playable: kind == K::Body, ..sheet(&id, kind, female) });
+    }
+    for (k, (id, name, _, desc)) in outfits().into_iter().enumerate() {
+        db.sheets.push(sheet(&format!("outfit_{id}"), K::Outfit, false));
+        db.sheets.push(sheet(&format!("outfit_{id}_f"), K::Outfit, false));
+        db.items.push(clothing_item(id, name, desc, "outfit_icons", k as u32, id, 0));
+    }
+    db.sheets.push(SheetDef::new("outfit_icons", "sprites/outfit_icons.png", 32, 32));
+    // What weapons, shields and lights look like in a hand.
+    for (item, held) in [("sword", "held_sword"), ("spear", "held_spear"), ("axe", "held_axe"), ("bow", "held_bow"), ("crossbow", "held_crossbow"), ("wooden_shield", "held_shield"), ("lantern", "held_lantern"), ("torch", "held_torch")] {
+        db.items.iter_mut().find(|d| d.id == item).expect(item).held = held.into();
+    }
+    // The goblins' own bow: what they shoot with, dropped when they are defeated.
+    let goblin_weapon = db.character("goblin").and_then(|d| d.weapon.clone()).expect("goblin weapon");
+    let mut crude = db.item("bow").cloned().expect("bow");
+    crude.id = "crude_bow".into();
+    crude.name = "Crude Bow".into();
+    crude.description = "A goblin's bow: weak and wobbly, but it shoots arrows.".into();
+    crude.weapon = Some(Weapon { ranged: goblin_weapon.ranged.map(|r| Ranged { ammo: "arrows".into(), ..r }), ..goblin_weapon });
+    crude.value = 2;
+    db.items.push(crude);
+    let look = |body: &str, skin: u32, hair: &str, hair_color: u32, beard: bool| Appearance {
+        body: body.into(),
+        skin: rgb(skin),
+        hair: hair.into(),
+        hair_color: rgb(hair_color),
+        beard: if beard { "beard_full".into() } else { String::new() },
+    };
+    let worn = |slots: &[(EquipSlot, &str)]| {
+        let mut e = rust2d_engine::state::Equipment::default();
+        for (slot, item) in slots {
+            *e.slot_mut(*slot) = Some(ItemStack::new(item, 1));
+        }
+        e
+    };
+    for d in &mut db.characters {
+        let (app, eq): (Appearance, Vec<(EquipSlot, &str)>) = match d.id.as_str() {
+            "hero" => (look("body_male", 0xf2c49b, "hair_short", 0x5d3a1a, false), vec![(EquipSlot::Clothing, "tunic_blue")]),
+            "elder" => (look("body_male", 0xe8b88a, "hair_short", 0xdedede, true), vec![(EquipSlot::Clothing, "elder_garb")]),
+            "villager" => (look("body_male", 0xc68a5e, "hair_short", 0xc0392b, false), vec![(EquipSlot::Clothing, "villager_clothes")]),
+            "guard" => (look("body_male", 0xe8b88a, "hair_short", 0x3a2a1e, false), vec![(EquipSlot::Clothing, "guard_uniform"), (EquipSlot::Head, "iron_helmet"), (EquipSlot::Weapon, "spear")]),
+            "merchant_f" => (look("body_female", 0xe8b88a, "hair_long", 0x3a2418, false), vec![(EquipSlot::Clothing, "merchant_dress")]),
+            "goblin" => (look("body_goblin", 0x7cb342, "hair_short", 0x33691e, false), vec![(EquipSlot::Clothing, "goblin_rags"), (EquipSlot::Weapon, "crude_bow")]),
+            "goblin_f" => (look("body_goblin_female", 0x8bc34a, "hair_ponytail", 0x2a4a14, false), vec![(EquipSlot::Clothing, "goblin_rags"), (EquipSlot::Weapon, "crude_bow")]),
+            _ => continue,
+        };
+        d.appearance = app;
+        d.equipment = worn(&eq);
+    }
+    // The villager carries a few apples (dropped if anyone ever defeats him).
+    if let Some(v) = db.characters.iter_mut().find(|d| d.id == "villager") {
+        v.inventory = vec![ItemStack::new("apple", 2)];
+    }
+}
 
 fn main() {
     let out = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "example_project".into()));
     std::fs::create_dir_all(&out).unwrap();
     terrain(&out);
-    character(&out, "hero", &Look { skin: 0xf2c49b, hair: 0x5d3a1a, shirt: 0x2e6fdb, pants: 0x3b3b4f, beard: false, ears: false, ..Default::default() });
-    // Character creator looks (hero_f matches the library's "Heroine").
-    character(&out, "hero_2", &Look { skin: 0xe8b88a, hair: 0xe0c060, shirt: 0x2e8b57, pants: 0x4a3a2a, ..Default::default() });
-    character(&out, "hero_3", &Look { skin: 0x8d5a3b, hair: 0x1e1612, shirt: 0xb03a2e, pants: 0x2f2f3f, ..Default::default() });
-    character(&out, "hero_f", &Look { skin: 0xf2c49b, hair: 0x7a4a22, shirt: 0x2e6fdb, pants: 0x3b3b4f, female: true, ..Default::default() });
-    character(&out, "hero_f2", &Look { skin: 0xf5d0b0, hair: 0xd35400, shirt: 0x8e44ad, pants: 0x3b3b4f, female: true, ..Default::default() });
-    character(&out, "hero_f3", &Look { skin: 0x8d5a3b, hair: 0x101010, shirt: 0x16a085, pants: 0x4a3a2a, female: true, ..Default::default() });
-    character(&out, "elder", &Look { skin: 0xe8b88a, hair: 0xdedede, shirt: 0x7b4fa0, pants: 0x4a3a5a, beard: true, ears: false, ..Default::default() });
-    character(&out, "villager", &Look { skin: 0xc68a5e, hair: 0xc0392b, shirt: 0x2e9d5b, pants: 0x6b4a2a, beard: false, ears: false, ..Default::default() });
-    // Same look as the library's "Merchant (female)".
-    character(&out, "merchant_f", &Look { skin: 0xe8b88a, hair: 0x3a2418, shirt: 0x7a3a8a, pants: 0x4a3a2a, robe: Some(0x6a3a7a), apron: Some(0xe8dcc0), female: true, ..Default::default() });
-    // Same look as the library's "Town Guard".
-    character(&out, "guard", &Look { skin: 0xe8b88a, hair: 0x3a2a1e, shirt: 0x2b4c8c, pants: 0x3a3a44, hat: Hat::Helmet, ..Default::default() });
-    character(&out, "goblin", &Look { skin: 0x7cb342, hair: 0x33691e, shirt: 0x5d4037, pants: 0x3e2723, beard: false, ears: true, ..Default::default() });
+    // Layered characters: bodies in underwear, hair, beards, held items, and the outfits (in
+    // both cuts).
+    for (id, canvas, _, _) in shared_layers() {
+        canvas.save(&out.join(format!("sprites/{id}.png")));
+    }
+    let outfit_looks: Vec<Look> = outfits().into_iter().map(|o| o.2).collect();
+    for (id, _, look, _) in outfits() {
+        for (sheet, canvas) in outfit_cuts(id, &look) {
+            canvas.save(&out.join(format!("sprites/{sheet}.png")));
+        }
+    }
+    outfit_icons(&outfit_looks).save(&out.join("sprites/outfit_icons.png"));
     overlay(&out, "ov_cap", Gear::Cap);
     overlay(&out, "ov_helmet", Gear::Helmet);
     overlay(&out, "ov_leather", Gear::Leather);
@@ -1389,6 +1585,9 @@ fn main() {
     slime(&out);
     props(&out);
     items(&out);
+    fireball(&out);
+    explosion(&out);
+    magic_burst(&out);
     let (_, png) = art::extra::dungeon_tileset();
     std::fs::write(out.join("tilesets/dungeon.png"), png).unwrap();
     std::fs::create_dir_all(out.join("sounds")).unwrap();
@@ -1421,17 +1620,13 @@ fn main() {
                 enabled: true,
                 sex: rust2d_engine::project::SexChoice::Both,
                 default_name: "Alex".into(),
-                looks: [
-                    ("hero", Sex::Male, "Blue tunic"),
-                    ("hero_2", Sex::Male, "Green tunic"),
-                    ("hero_3", Sex::Male, "Red tunic"),
-                    ("hero_f", Sex::Female, "Blue tunic"),
-                    ("hero_f2", Sex::Female, "Purple tunic"),
-                    ("hero_f3", Sex::Female, "Teal tunic"),
-                ]
-                .iter()
-                .map(|(sheet, sex, label)| rust2d_engine::project::PlayerLook { sheet: sheet.to_string(), sex: *sex, label: label.to_string() })
-                .collect(),
+                // The player picks skin, hair style, hair color and (men) a beard.
+                body_male: "body_male".into(),
+                body_female: "body_female".into(),
+                skin_colors: [0xf2c49b, 0xe8b88a, 0xd09068, 0x8d5a3b, 0x5a3a24, 0x7cb342].map(rgb).to_vec(),
+                hair_styles: vec!["hair_short".into(), "hair_long".into(), "hair_ponytail".into(), String::new()],
+                hair_colors: [0x5d3a1a, 0xe0c060, 0x1e1612, 0x7a4a22, 0xd35400, 0xdedede].map(rgb).to_vec(),
+                beards: vec![String::new(), "beard_full".into(), "beard_goatee".into()],
             },
         day_minutes: 24.0, start_hour: 8.0,
         skills: rust2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
@@ -1451,7 +1646,8 @@ fn main() {
 }
 
 /// The editor's starter asset library: every asset of the example project. Triggers that run
-/// Rhai functions are dropped (scripts are not part of asset packages).
+/// Rhai functions are dropped (they belong to the example's story); skills and spells made of
+/// scripts keep the functions they need.
 fn write_starter_pack(project: &Project) {
     use rust2d_engine::library::{all_assets, Bundle};
     let mut b = Bundle::collect(&project.db, &project.root, TS, "rust2d starter assets", &all_assets(&project.db)).unwrap();
@@ -1464,6 +1660,8 @@ fn write_starter_pack(project: &Project) {
     b.db.tilesets.extend(extra.db.tilesets.into_iter().filter(|d| !tilesets.contains(&d.id)));
     b.db.sheets.extend(extra.db.sheets.into_iter().filter(|d| !sheets.contains(&d.id)));
     b.db.props.extend(extra.db.props);
+    let items: Vec<String> = b.db.items.iter().map(|d| d.id.clone()).collect();
+    b.db.items.extend(extra.db.items.into_iter().filter(|d| !items.contains(&d.id)));
     b.db.characters.extend(extra.db.characters.into_iter().filter(|d| !chars.contains(&d.id)));
     b.db.structures.extend(structures::library_structures());
     for (path, bytes) in extra.files {
@@ -1479,6 +1677,13 @@ fn write_starter_pack(project: &Project) {
     for d in &mut b.db.characters {
         d.triggers.retain(|t| !scripted(t));
     }
+    // Script functions the remaining assets need travel along (Fireball's cast_fireball() and
+    // what it calls, Scavenging's scavenging()); everything else in main.rhai stays behind.
+    let fns = rust2d_engine::library::read_scripts(&project.root);
+    let roots: Vec<String> = all_assets(&b.db).iter().flat_map(|a| rust2d_engine::library::script_roots(&b.db, a)).collect();
+    let needed = rust2d_engine::script_refs::needed_functions(&fns, &roots);
+    b.scripts = fns.into_iter().filter(|f| needed.contains(&f.name)).map(|f| (f.name, f.text)).collect();
+    println!("starter scripts: {:?}", b.scripts.keys().collect::<Vec<_>>());
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../editor/assets/starter.r2dpack");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let bytes = b.to_pack().unwrap();

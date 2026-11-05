@@ -1,17 +1,16 @@
 //! Skills and magic at runtime: skill bonuses, skill points, mana, learning and casting
-//! spells, the Skills & Magic screen (K) and the mana bar.
+//! spells and the Skills (K) and Spells (L) tabs of the character window (the mana bar is
+//! part of the HUD's status frame, `combat.rs`).
 
 use std::collections::HashMap;
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Game};
+use super::{input, Game};
 use crate::defs::LightSpec;
 use crate::render::wrap_text;
 use crate::skills::{SkillEffect, SpellEffect, SPELL_PREFIX};
 
-const W: f32 = 820.0;
-const H: f32 = 520.0;
 const LIST_W: f32 = 300.0;
 const PAD: f32 = 16.0;
 const ROW: f32 = 40.0;
@@ -27,17 +26,26 @@ pub(super) struct Skills {
     cooldown: HashMap<String, f32>,
     /// A "Light" spell around the player: (light, seconds left).
     light: Option<(LightSpec, f32)>,
-    /// A bolt spell waiting for the player to click its target.
-    aiming: Option<String>,
+    /// Magic targeting: waiting for the player to click a target.
+    aiming: Option<Aim>,
+    /// A script spell being cast: its cost is paid when the script's aim gets a target.
+    casting: Option<String>,
 }
 
-fn rect() -> Rect {
-    let (sw, sh) = (screen_width(), screen_height());
-    Rect::new(((sw - W) / 2.0).max(4.0).round(), ((sh - H) / 2.0).max(4.0).round(), W, H)
+/// What the player is aiming.
+#[derive(Debug)]
+struct Aim {
+    /// The spell paid for when the target is chosen ("" = none, e.g. aim() from a trigger).
+    spell: String,
+    /// Script function called with the target (tile coordinates); `None` = a bolt spell.
+    script: Option<String>,
 }
+
+/// Top of the list and details below the header line.
+const LIST_TOP: f32 = 56.0;
 
 fn row_rect(r: Rect, i: usize) -> Rect {
-    Rect::new(r.x + PAD, r.y + 84.0 + i as f32 * ROW, LIST_W - PAD, ROW - 4.0)
+    Rect::new(r.x + PAD, r.y + LIST_TOP + i as f32 * ROW, LIST_W - PAD, ROW - 4.0)
 }
 
 impl Game {
@@ -283,28 +291,52 @@ impl Game {
         }
         // Bolts are aimed with the mouse first; mana and cooldown are taken when they fly.
         if matches!(d.effect, SpellEffect::Bolt { .. }) {
-            self.skills.aiming = Some(id.to_string());
+            self.skills.aiming = Some(Aim { spell: id.to_string(), script: None });
             show_mouse(false);
             self.ui.toast(format!("{}: click an enemy to aim  (right-click cancels, X: straight ahead)", d.name));
             return true;
         }
-        self.world.mana -= d.mana as f32;
-        if d.cooldown > 0.0 {
-            self.skills.cooldown.insert(id.to_string(), d.cooldown);
+        // A script that starts aiming (aim()) pays when the target is chosen.
+        if let SpellEffect::Script { function } = &d.effect {
+            let actions = self.scripts.call(&mut self.world, function, None);
+            if actions.iter().any(|a| matches!(a, crate::events::Action::Aim { .. })) {
+                self.skills.casting = Some(id.to_string());
+            } else {
+                self.pay_spell(&d);
+                self.ui.toast(d.name.to_string());
+            }
+            self.runner.push(&actions, &crate::events::runner::ActionCtx::default());
+            return true;
         }
-        self.audio.play(&self.project.config.sfx.attack);
+        self.pay_spell(&d);
         match &d.effect {
             SpellEffect::Heal { amount } => self.heal(*amount),
             SpellEffect::Bolt { .. } => {}
             SpellEffect::Blast { damage, radius } => self.damage_around(*damage, *radius),
-            SpellEffect::Light { radius, seconds } => self.player_light_for(*radius, *seconds),
-            SpellEffect::Script { function } => {
-                let actions = self.scripts.call(&mut self.world, function, None);
-                self.runner.push(&actions, &crate::events::runner::ActionCtx::default());
-            }
+            SpellEffect::Light { radius, seconds } => self.player_light_for(*radius, *seconds, crate::events::spell_light_color(), false),
+            SpellEffect::Script { .. } => {}
         }
         self.ui.toast(d.name.to_string());
         true
+    }
+
+    /// Spends a spell's mana, starts its cooldown and plays the cast sound.
+    fn pay_spell(&mut self, d: &crate::skills::SpellDef) {
+        self.world.mana -= d.mana as f32;
+        if d.cooldown > 0.0 {
+            self.skills.cooldown.insert(d.id.clone(), d.cooldown);
+        }
+        self.audio.play(&self.project.config.sfx.attack);
+    }
+
+    /// Starts magic targeting for a script (the Aim action / `aim()`): the chosen target goes
+    /// to `function(x, y)`. Inside a spell's script the spell is paid for then.
+    pub(super) fn start_aim(&mut self, function: &str) {
+        let spell = self.skills.casting.take().unwrap_or_default();
+        let name = self.project.db.spell(&spell).map_or("Magic".to_string(), |d| d.name.clone());
+        self.skills.aiming = Some(Aim { spell, script: Some(function.to_string()) });
+        show_mouse(false);
+        self.ui.toast(format!("{name}: click a target  (right-click cancels, X: straight ahead)"));
     }
 
     pub(super) fn aiming(&self) -> bool {
@@ -317,30 +349,46 @@ impl Game {
         }
     }
 
-    /// Fires the bolt spell being aimed towards `aim` (world point; `None` = facing direction).
-    fn fire_bolt(&mut self, aim: Option<Vec2>) {
-        let Some(id) = self.skills.aiming.take() else { return };
+    /// Fires what is being aimed towards `aim` (world point; `None` = straight ahead).
+    fn fire_aim(&mut self, aim: Option<Vec2>) {
+        let Some(Aim { spell, script }) = self.skills.aiming.take() else { return };
         show_mouse(true);
-        let Some(d) = self.project.db.spell(&id).cloned() else { return };
-        let SpellEffect::Bolt { damage, projectile, speed, range } = &d.effect else { return };
-        if self.world.mana < d.mana as f32 {
-            self.ui.toast("Not enough mana".into());
+        let def = self.project.db.spell(&spell).cloned();
+        if let Some(d) = &def {
+            if self.world.mana < d.mana as f32 {
+                self.ui.toast("Not enough mana".into());
+                return;
+            }
+        }
+        let origin = self.cast_origin();
+        let ts = self.ts();
+        let Some(function) = script else {
+            // A bolt spell.
+            let Some(d) = def else { return };
+            let SpellEffect::Bolt { damage, projectile, speed, range } = &d.effect else { return };
+            self.pay_spell(&d);
+            let dir = aim.and_then(|t| (t - origin).try_normalize()).unwrap_or_else(|| Vec2::from(self.player.facing.dir()));
+            if let Some(f) = crate::entity::Facing::from_vec(dir.x, dir.y) {
+                self.player.facing = f;
+            }
+            let r = crate::defs::Ranged { projectile: projectile.clone(), speed: *speed, range: *range, ammo: String::new() };
+            let dmg = (*damage as f32 * self.spell_damage_factor()).round() as i32;
+            self.shoot(origin, dir, &r, dmg, true, None);
+            self.ui.toast(d.name);
             return;
+        };
+        if let Some(d) = &def {
+            self.pay_spell(d);
+            self.ui.toast(d.name.clone());
         }
-        self.world.mana -= d.mana as f32;
-        if d.cooldown > 0.0 {
-            self.skills.cooldown.insert(id.clone(), d.cooldown);
-        }
-        let origin = self.player.pos - vec2(0.0, self.player.hitbox.y / 2.0 + 2.0);
-        let dir = aim.and_then(|t| (t - origin).try_normalize()).unwrap_or_else(|| Vec2::from(self.player.facing.dir()));
-        if let Some(f) = crate::entity::Facing::from_vec(dir.x, dir.y) {
+        // Straight ahead: five tiles in the facing direction.
+        let target = aim.unwrap_or_else(|| origin + Vec2::from(self.player.facing.dir()) * 5.0 * ts);
+        if let Some(f) = crate::entity::Facing::from_vec(target.x - origin.x, target.y - origin.y) {
             self.player.facing = f;
         }
-        let r = crate::defs::Ranged { projectile: projectile.clone(), speed: *speed, range: *range, ammo: String::new() };
-        let dmg = (*damage as f32 * self.spell_damage_factor()).round() as i32;
-        self.audio.play(&self.project.config.sfx.attack);
-        self.shoot(origin, dir, &r, dmg, true, None);
-        self.ui.toast(d.name);
+        let args = vec![rhai::Dynamic::from((target.x / ts) as f64), rhai::Dynamic::from((target.y / ts) as f64)];
+        let actions = self.scripts.call_args(&mut self.world, &function, args, None);
+        self.runner.push(&actions, &crate::events::runner::ActionCtx::default());
     }
 
     /// Center of the enemy under the mouse while aiming.
@@ -366,7 +414,7 @@ impl Game {
             return (true, false);
         }
         if !key_consumed && input::pressed(KeyCode::X) {
-            self.fire_bolt(None);
+            self.fire_aim(None);
             return (true, false);
         }
         if mouse_consumed {
@@ -379,7 +427,7 @@ impl Game {
         }
         if input::mouse_pressed(MouseButton::Left) {
             let aim = self.aim_target().unwrap_or_else(|| self.mouse_world());
-            self.fire_bolt(Some(aim));
+            self.fire_aim(Some(aim));
             return (false, true);
         }
         (false, false)
@@ -413,8 +461,13 @@ impl Game {
 
     /// Damages every character within `radius` tiles of the player.
     pub(super) fn damage_around(&mut self, damage: i32, radius: f32) {
+        self.damage_at(self.player.pos, damage, radius);
+    }
+
+    /// Damages every character within `radius` tiles of `center` (world pixels), scaled by the
+    /// spell damage skills.
+    pub(super) fn damage_at(&mut self, center: Vec2, damage: i32, radius: f32) {
         let ts = self.ts();
-        let center = self.player.pos;
         let dmg = (damage as f32 * self.spell_damage_factor()).round() as i32;
         let targets: Vec<usize> = (0..self.loaded.entities.len())
             .filter(|&i| {
@@ -428,8 +481,8 @@ impl Game {
         self.effects.push((center, 0.0));
     }
 
-    pub(super) fn player_light_for(&mut self, radius: f32, seconds: f32) {
-        self.skills.light = Some((LightSpec { intensity: 0.9, ..LightSpec::new(radius, [190, 210, 255], false) }, seconds.max(0.1)));
+    pub(super) fn player_light_for(&mut self, radius: f32, seconds: f32, color: [u8; 3], flicker: bool) {
+        self.skills.light = Some((LightSpec { intensity: 0.9, ..LightSpec::new(radius, color, flicker) }, seconds.max(0.1)));
     }
 
     /// Whether a quick bar entry is a spell (and its id).
@@ -443,11 +496,26 @@ impl Game {
         self.skills.open
     }
 
-    /// Opens the Skills & Magic screen (the HUD button).
-    pub(super) fn open_skills(&mut self) {
+    /// 0 = the Skills tab, 1 = the Spells tab.
+    pub(super) fn skills_tab(&self) -> usize {
+        self.skills.tab
+    }
+
+    /// Shows the Skills (0) or Spells (1) tab of the character window.
+    pub(super) fn show_skills(&mut self, tab: usize) {
         if self.skills_on() {
             self.skills.open = true;
+            self.skills.tab = if self.magic_on() { tab.min(1) } else { 0 };
         }
+    }
+
+    pub(super) fn close_skills(&mut self) {
+        self.skills.open = false;
+    }
+
+    /// The tab's area: the character window's content.
+    fn skills_rect(&self) -> Rect {
+        self.window_content()
     }
 
     /// Rows of the current tab: skill or spell ids.
@@ -462,36 +530,18 @@ impl Game {
         }
     }
 
-    /// Handles K and the open screen. Returns (key consumed, mouse consumed).
-    pub(super) fn update_skills_ui(&mut self, allow: bool, key_consumed: bool) -> (bool, bool) {
-        if !allow || !self.skills_on() {
+    /// Handles the open Skills / Spells tab (the keys that open, switch and close tabs are the
+    /// character window's). Returns (key consumed, mouse consumed).
+    pub(super) fn update_skills_ui(&mut self, allow: bool, _key_consumed: bool) -> (bool, bool) {
+        if !allow || !self.skills_on() || !self.skills.open {
             return (false, false);
         }
-        if !self.skills.open {
-            if !key_consumed && input::pressed(KeyCode::K) {
-                self.skills.open = true;
-                return (true, false);
-            }
-            return (false, false);
-        }
-        let r = rect();
+        let r = self.skills_rect();
         let m = input::mouse_pos();
-        let close = Rect::new(r.x + r.w - 30.0, r.y + 8.0, 22.0, 22.0);
-        if input::any_pressed(&[KeyCode::K, KeyCode::Escape]) || (input::mouse_pressed(MouseButton::Left) && close.contains(m)) {
+        let click = input::mouse_pressed(MouseButton::Left);
+        if input::pressed(KeyCode::Escape) || (click && !self.window_rect().contains(m)) {
             self.skills.open = false;
             return (true, true);
-        }
-        let tabs = if self.magic_on() { 2 } else { 1 };
-        if tabs > 1 && (input::any_pressed(&[KeyCode::Left, KeyCode::A, KeyCode::Right, KeyCode::D, KeyCode::Tab])) {
-            self.skills.tab = (self.skills.tab + 1) % tabs;
-        }
-        let click = input::mouse_pressed(MouseButton::Left);
-        if click {
-            for t in 0..tabs {
-                if Self::tab_rect(r, t).contains(m) {
-                    self.skills.tab = t;
-                }
-            }
         }
         let rows = self.skill_rows();
         let tab = self.skills.tab;
@@ -531,9 +581,6 @@ impl Game {
         (true, true)
     }
 
-    fn tab_rect(r: Rect, t: usize) -> Rect {
-        Rect::new(r.x + PAD + t as f32 * 120.0, r.y + 48.0, 112.0, 26.0)
-    }
     fn plus_rect(row: Rect) -> Rect {
         Rect::new(row.x + row.w - 30.0, row.y + 5.0, 26.0, 26.0)
     }
@@ -545,41 +592,29 @@ impl Game {
         if !self.skills.open {
             return;
         }
-        let r = rect();
+        // The window frame (panel, tabs, close button) is drawn by `draw_window_frame`.
+        let r = self.skills_rect();
         let m = input::mouse_pos();
-        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
-        panel(r.x, r.y, r.w, r.h);
-        draw_text(if self.magic_on() { "Skills & Magic" } else { "Skills" }, r.x + PAD, r.y + 34.0, 30.0, GOLD);
-        let c = Rect::new(r.x + r.w - 30.0, r.y + 8.0, 22.0, 22.0);
-        draw_rectangle_lines(c.x, c.y, c.w, c.h, 1.5, Color::new(0.85, 0.8, 0.6, 1.0));
-        draw_line(c.x + 6.0, c.y + 6.0, c.x + c.w - 6.0, c.y + c.h - 6.0, 2.0, WHITE);
-        draw_line(c.x + c.w - 6.0, c.y + 6.0, c.x + 6.0, c.y + c.h - 6.0, 2.0, WHITE);
         let points = self.world.skill_points;
-        let head = format!("Skill points: {points}");
-        let hw = measure_text(&head, None, 20, 1.0).width;
-        draw_text(&head, r.x + r.w - PAD - hw - 40.0, r.y + 34.0, 20.0, if points > 0 { GOLD } else { LIGHTGRAY });
-        // Tabs.
-        let tabs: &[&str] = if self.magic_on() { &["Skills", "Magic"] } else { &["Skills"] };
-        for (t, name) in tabs.iter().enumerate() {
-            let tr = Self::tab_rect(r, t);
-            let on = self.skills.tab == t;
-            draw_rectangle(tr.x, tr.y, tr.w, tr.h, if on { Color::new(0.85, 0.7, 0.3, 0.25) } else { Color::new(1.0, 1.0, 1.0, 0.06) });
-            draw_rectangle_lines(tr.x, tr.y, tr.w, tr.h, if on { 2.0 } else { 1.0 }, if on { GOLD } else { Color::new(0.85, 0.8, 0.6, 0.5) });
-            draw_text(name, tr.x + 10.0, tr.y + 19.0, 18.0, if on { WHITE } else { LIGHTGRAY });
-        }
-        let help = if self.skills.tab == 0 {
-            "Up/Down: select   Enter or +: spend a point   Left/Right: tab   K / Esc: close"
+        let head = if self.skills.tab == 0 {
+            format!("Skill points: {points}")
         } else {
-            "Up/Down: select   Enter: cast   1-8: put on the quick bar   Left/Right: tab   K / Esc: close"
+            format!("Mana {:.0} / {}   -   spells known: {}", self.world.mana, self.max_mana(), self.world.spells.len())
+        };
+        draw_text(&head, r.x + PAD, r.y + 32.0, 22.0, if self.skills.tab == 0 && points > 0 { GOLD } else { LIGHTGRAY });
+        let help = if self.skills.tab == 0 {
+            "Up/Down: select   Enter or +: spend a point   Tab: next tab   K / Esc: close"
+        } else {
+            "Up/Down: select   Enter: cast   1-8: put on the quick bar   Tab: next tab   L / Esc: close"
         };
         draw_text(help, r.x + PAD, r.y + r.h - 14.0, 16.0, GRAY);
-        draw_line(r.x + LIST_W + 8.0, r.y + 84.0, r.x + LIST_W + 8.0, r.y + r.h - 40.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
+        draw_line(r.x + LIST_W + 8.0, r.y + LIST_TOP, r.x + LIST_W + 8.0, r.y + r.h - 40.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
 
         let rows = self.skill_rows();
         let tab = self.skills.tab;
         let sel = self.skills.sel[tab].min(rows.len().saturating_sub(1));
         if rows.is_empty() {
-            draw_text(if tab == 0 { "No skills in this game." } else { "No spells in this game." }, r.x + PAD, r.y + 110.0, 22.0, LIGHTGRAY);
+            draw_text(if tab == 0 { "No skills in this game." } else { "No spells in this game." }, r.x + PAD, r.y + LIST_TOP + 26.0, 22.0, LIGHTGRAY);
             return;
         }
         for (i, id) in rows.iter().enumerate() {
@@ -635,7 +670,7 @@ impl Game {
         // Details.
         let x = r.x + LIST_W + 26.0;
         let w = r.x + r.w - PAD - x;
-        let mut y = r.y + 108.0;
+        let mut y = r.y + LIST_TOP + 24.0;
         let id = &rows[sel];
         if tab == 0 {
             let Some(d) = self.project.db.skill(id) else { return };
@@ -702,19 +737,6 @@ impl Game {
             let mana = format!("Mana {:.0} / {}", self.world.mana, self.max_mana());
             draw_text(&mana, b.x + b.w + 16.0, b.y + 21.0, 18.0, Color::new(0.6, 0.7, 1.0, 1.0));
         }
-    }
-
-    /// Mana bar under the hearts (HUD).
-    pub(super) fn draw_mana_bar(&self) {
-        if !self.magic_on() || !self.combat.enabled() {
-            return;
-        }
-        let max = self.max_mana().max(1) as f32;
-        let (x, y, w, h) = (14.0, 44.0, 120.0, 10.0); // right under the hearts
-        draw_rectangle(x - 1.0, y - 1.0, w + 2.0, h + 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
-        draw_rectangle(x, y, w * (self.world.mana / max).clamp(0.0, 1.0), h, Color::new(0.35, 0.5, 1.0, 1.0));
-        draw_rectangle_lines(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 1.0, Color::new(0.6, 0.7, 1.0, 0.8));
-        draw_text(format!("{:.0}", self.world.mana), x + w + 6.0, y + 10.0, 15.0, Color::new(0.75, 0.82, 1.0, 1.0));
     }
 
     /// For automated play-throughs.

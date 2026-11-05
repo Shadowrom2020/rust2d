@@ -26,7 +26,7 @@ fn root_arg() -> Option<PathBuf> {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--map" | "--spawn" | "--pos" => {
+            "--map" | "--spawn" | "--pos" | "--cutscene" => {
                 args.next();
             }
             s if s.starts_with('-') => {}
@@ -48,13 +48,14 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
             "--no-title" => no_title = true,
             "--engine-build" => {}
             "--spawn" => start.spawn = Some(value()?),
+            "--cutscene" => start.cutscene = Some(value()?),
             "--pos" => {
                 let v = value()?;
                 let (x, y) = v.split_once(',').context("--pos expects X,Y")?;
                 start.pos = Some(vec2(x.trim().parse()?, y.trim().parse()?));
             }
             "-h" | "--help" => {
-                println!("usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title]");
+                println!("usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--cutscene FUNCTION]");
                 std::process::exit(0);
             }
             s if s.starts_with('-') => bail!("unknown option {s}"),
@@ -132,6 +133,7 @@ async fn main() {
             for (cmd, id) in std::mem::take(&mut a.skill_cmds) {
                 match cmd.as_str() {
                     "skillpoint" => game.spend_skill_point(&id),
+                    "call" => game.run_script(&id),
                     "cast" => {
                         game.cast_spell(&id);
                     }
@@ -241,6 +243,15 @@ impl Autoplay {
                     click(&mut self.mouse_frames, p, MouseButton::Left);
                     return true;
                 }
+                // wintab character|skills|spells: click a tab of the open character window
+                "wintab" => {
+                    let Some(p) = game.window_tab_pos(arg(1)) else {
+                        println!("[autoplay] wintab: no such tab (or the window is closed)");
+                        continue;
+                    };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
                 // opt ROW prev|next|row: click the "<" / ">" arrows (or the label) of an Options row
                 "opt" => {
                     let Some(p) = game.option_click_pos(secs(1) as usize, arg(2)) else {
@@ -327,7 +338,8 @@ impl Autoplay {
                 // settime H: jump to a time of day (hours)
                 "settime" => self.hour = arg(1).parse().ok(),
                 // skillpoint ID: spend a skill point · cast ID: cast a spell · learn ID: learn a spell
-                "skillpoint" | "cast" | "learn" => self.skill_cmds.push((arg(0).to_string(), arg(1).to_string())),
+                // call FN: runs a script function (its queued actions too)
+                "skillpoint" | "cast" | "learn" | "call" => self.skill_cmds.push((arg(0).to_string(), arg(1).to_string())),
                 "quit" => return false,
                 // close: as if the window's close button was clicked
                 "close" => {

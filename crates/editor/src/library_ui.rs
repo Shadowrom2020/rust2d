@@ -2,8 +2,8 @@
 //! see `library_window.rs`: import / export packages, remove, jump to editing) and the main
 //! editor's "Add from library" dialog. Both use the same thumbnail grid.
 
-use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle};
@@ -12,6 +12,7 @@ use rust2d_engine::imageio::Rgba;
 use rust2d_engine::library::{self, kind_label, AssetRef, Bundle, KINDS};
 use rust2d_engine::project::Project;
 use rust2d_engine::refactor::RefKind;
+use rust2d_engine::script_refs::ScriptFn;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -37,6 +38,30 @@ pub struct AddDialog {
     pub search: String,
 }
 
+/// Where project assets go once their script functions are picked.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SendTo {
+    Library,
+    /// A `.r2dpack` file.
+    Package(PathBuf),
+}
+
+/// The "Script functions" dialog: project assets that use scripts are about to be copied into
+/// the library or a package, and the user picks which functions go along.
+pub struct ScriptPick {
+    pub assets: Vec<AssetRef>,
+    pub to: SendTo,
+    /// Every function of the project's scripts.
+    pub fns: Vec<ScriptFn>,
+    pub picked: BTreeSet<String>,
+    /// Functions the assets need, with what needs them ("Spell 'Fireball'", "cast_fireball()").
+    pub needed: BTreeMap<String, String>,
+    /// Functions the assets call that no script defines: (function, who calls it).
+    pub missing: Vec<(String, String)>,
+    /// Functions the library has already: name -> identical?
+    pub in_library: BTreeMap<String, bool>,
+}
+
 #[derive(Default)]
 pub struct LibState {
     /// The library as a project-like store (main editor: loaded for the add dialog and the
@@ -44,6 +69,9 @@ pub struct LibState {
     pub lib: Option<Project>,
     pub error: Option<String>,
     tex: HashMap<String, Tex>,
+    /// Sheet images (for recolored layered characters) and their recolored textures.
+    raw: HashMap<String, Rgba>,
+    colored: std::cell::RefCell<HashMap<rust2d_engine::render::ColorKey, Tex>>,
     pub tex_dirty: bool,
     pub filter: Option<RefKind>,
     pub search: String,
@@ -52,6 +80,7 @@ pub struct LibState {
     /// Assets waiting for the user to confirm their removal (the confirmation dialog is open).
     pub confirm_remove: Option<Vec<AssetRef>>,
     pub add: Option<AddDialog>,
+    pub script_pick: Option<ScriptPick>,
 }
 
 impl LibState {
@@ -92,18 +121,62 @@ impl LibState {
         }
         self.tex_dirty = false;
         self.tex.clear();
+        self.raw.clear();
+        self.colored.borrow_mut().clear();
         let images = store.db.tilesets.iter().map(|t| (format!("ts:{}", t.id), &t.image)).chain(store.db.sheets.iter().map(|s| (format!("sh:{}", s.id), &s.image)));
         for (key, rel) in images {
             let Ok(img) = std::fs::read(store.root.join(rel)).map_err(anyhow::Error::from).and_then(|b| Rgba::decode(&b)) else { continue };
             let ci = egui::ColorImage::from_rgba_unmultiplied([img.w as usize, img.h as usize], &img.px);
             let handle = ctx.load_texture(format!("lib:{key}"), ci, egui::TextureOptions::NEAREST);
-            self.tex.insert(key, Tex { handle, w: img.w as f32, h: img.h as f32 });
+            self.tex.insert(key.clone(), Tex { handle, w: img.w as f32, h: img.h as f32 });
+            if key.starts_with("sh:") {
+                self.raw.insert(key, img);
+            }
         }
     }
 
-    /// Paints a sprite of a library sheet into `rect` (aspect kept, bottom-centered).
-    pub(crate) fn paint_sprite(&self, ui: &egui::Ui, sprite: &SpriteRef, rect: Rect) -> bool {
-        self.lib.as_ref().is_some_and(|lib| self.paint_sprite_in(ui, &lib.db, sprite, rect))
+    /// Paints a library character facing `facing` into `rect` (idle frame).
+    pub(crate) fn paint_character(&self, ui: &egui::Ui, id: &str, facing: rust2d_engine::entity::Facing, rect: Rect) -> bool {
+        self.lib.as_ref().is_some_and(|lib| self.paint_character_in(ui, &lib.db, id, facing, rect))
+    }
+
+    /// Paints a character of `db` (its layers) into `rect`, idle frame facing `facing`.
+    fn paint_character_in(&self, ui: &egui::Ui, db: &Database, id: &str, facing: rust2d_engine::entity::Facing, rect: Rect) -> bool {
+        use rust2d_engine::render::character;
+        let Some(d) = db.character(id) else { return false };
+        let layers = character::layers(db, &d.appearance, &d.equipment, facing, 0, false);
+        let Some(base) = layers.iter().find_map(|l| db.sheet(&l.sheet)) else { return false };
+        let (fw, fh) = (base.frame_w.max(1) as f32, base.frame_h.max(1) as f32);
+        let scale = (rect.width() / fw).min(rect.height() / fh);
+        let size = vec2(fw * scale, fh * scale);
+        let dest = Rect::from_min_size(pos2(rect.center().x - size.x / 2.0, rect.max.y - size.y), size);
+        let mut any = false;
+        for l in &layers {
+            let Some(s) = db.sheet(&l.sheet) else { continue };
+            let key = format!("sh:{}", l.sheet);
+            let colored = l.skin.is_some() || l.hair.is_some();
+            let mut cache = self.colored.borrow_mut();
+            let t = if colored {
+                let Some(img) = self.raw.get(&key) else { continue };
+                cache.entry((l.sheet.clone(), l.skin, l.hair)).or_insert_with(|| {
+                    let mut px = img.px.clone();
+                    rust2d_engine::render::recolor::recolor(&mut px, l.skin, l.hair);
+                    let ci = egui::ColorImage::from_rgba_unmultiplied([img.w as usize, img.h as usize], &px);
+                    let handle = ui.ctx().load_texture(format!("libc:{key}:{:?}:{:?}", l.skin, l.hair), ci, egui::TextureOptions::NEAREST);
+                    Tex { handle, w: img.w as f32, h: img.h as f32 }
+                })
+            } else {
+                let Some(t) = self.tex.get(&key) else { continue };
+                t
+            };
+            let (sw, sh) = (s.frame_w.max(1) as f32, s.frame_h.max(1) as f32);
+            let cols = (t.w / sw).floor().max(1.0) as u32;
+            let (x, y) = ((l.frame % cols) as f32 * sw, (l.frame / cols) as f32 * sh);
+            let uv = Rect::from_min_max(pos2(x / t.w, y / t.h), pos2((x + sw) / t.w, (y + sh) / t.h));
+            ui.painter().image(t.handle.id(), dest, uv, Color32::WHITE);
+            any = true;
+        }
+        any
     }
 
     fn paint_sprite_in(&self, ui: &egui::Ui, db: &Database, sprite: &SpriteRef, rect: Rect) -> bool {
@@ -133,7 +206,7 @@ impl LibState {
         let sprite = match a.0 {
             RefKind::Item => db.item(&a.1).map(|d| d.icon.clone()),
             RefKind::Prop => db.prop(&a.1).map(|d| d.sprite.clone()),
-            RefKind::Character => db.character(&a.1).map(|d| SpriteRef::new(&d.sheet, 0)),
+            RefKind::Character => None,
             RefKind::Sheet => Some(SpriteRef::new(&a.1, 0)),
             RefKind::Skill => db.skill(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
             RefKind::Spell => db.spell(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
@@ -146,6 +219,7 @@ impl LibState {
                 ui.painter().image(t.handle.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 true
             }),
+            (RefKind::Character, _) => self.paint_character_in(ui, db, &a.1, rust2d_engine::entity::Facing::Down, rect),
             (_, Some(s)) => self.paint_sprite_in(ui, db, &s, rect),
             _ => false,
         };
@@ -265,35 +339,194 @@ impl Editor {
     pub fn library_to_project(&mut self, assets: &[AssetRef]) -> Result<String> {
         self.lib.ensure_loaded();
         let lib = self.lib.lib.as_ref().context("library not available")?;
-        let mut b = Bundle::collect(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "library", assets)?;
+        let mut b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "library", assets)?;
         b.rescale(rust2d_engine::project::TILE_SIZE)?;
         let root = self.project.root.clone();
         let report = b.merge_into(&mut self.project.db, &root)?;
         self.defs_dirty = true;
+        self.after_scripts_merged();
         self.reload_assets();
         Ok(format!("Added to the project: {}. Save the definitions to keep them.", report.summary()))
     }
 
-    /// Copies project assets (with their dependencies) into the library.
-    pub fn project_to_library(&mut self, assets: &[AssetRef]) -> Result<String> {
-        self.lib.ensure_loaded();
-        let b = Bundle::collect(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, &self.project.config.name, assets)?;
-        let lib = self.lib.lib.as_mut().context("library not available")?;
-        let report = library::add_to_library(lib, b)?;
-        self.lib.tex_dirty = true;
-        Ok(format!("Library: {}", report.summary()))
+    /// Copies project assets (with their dependencies) into the library or a package. When
+    /// they use scripts, the "Script functions" dialog asks which functions go along first.
+    pub fn send_project_assets(&mut self, assets: Vec<AssetRef>, to: SendTo) {
+        match self.script_pick_for(&assets, &to) {
+            Ok(Some(pick)) => self.lib.script_pick = Some(pick),
+            Ok(None) => {
+                let r = self.finish_send(&assets, &to, &[]);
+                self.show_result(r);
+            }
+            Err(e) => self.show_result(Err(e)),
+        }
     }
 
-    pub fn export_package(&mut self, from_library: bool, assets: &[AssetRef], path: &Path) -> Result<String> {
-        let b = if from_library {
-            let lib = self.lib_store().context("library not available")?;
-            Bundle::collect(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "rust2d assets", assets)?
-        } else {
-            Bundle::collect(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, &self.project.config.name, assets)?
-        };
+    /// The dialog's contents, or `None` if the assets (and what they bring) use no scripts.
+    fn script_pick_for(&mut self, assets: &[AssetRef], to: &SendTo) -> Result<Option<ScriptPick>> {
+        let b = Bundle::collect(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, "", assets)?;
+        let fns = library::read_scripts(&self.project.root);
+        let names: BTreeSet<String> = fns.iter().map(|f| f.name.clone()).collect();
+        let mut needed: BTreeMap<String, String> = BTreeMap::new();
+        let mut missing = Vec::new();
+        let mut stack = Vec::new();
+        for a in library::all_assets(&b.db) {
+            for root in library::script_roots(&b.db, &a) {
+                let who = format!("{} '{}'", kind_label(a.0), name_of(&b.db, &a));
+                if !names.contains(&root) {
+                    missing.push((root, who));
+                } else if !needed.contains_key(&root) {
+                    needed.insert(root.clone(), who);
+                    stack.push(root);
+                }
+            }
+        }
+        // What those functions call or pass on (aim, fly, then_call), transitively.
+        while let Some(n) = stack.pop() {
+            let Some(f) = fns.iter().find(|f| f.name == n) else { continue };
+            for u in rust2d_engine::script_refs::used_functions(f, &names) {
+                if !needed.contains_key(&u) {
+                    needed.insert(u.clone(), format!("{n}()"));
+                    stack.push(u);
+                }
+            }
+        }
+        if needed.is_empty() && missing.is_empty() {
+            return Ok(None);
+        }
+        let mut in_library = BTreeMap::new();
+        if *to == SendTo::Library {
+            self.lib.ensure_loaded();
+            if let Some(lib) = &self.lib.lib {
+                for f in library::read_scripts(&lib.root) {
+                    if let Some(mine) = fns.iter().find(|m| m.name == f.name) {
+                        in_library.insert(f.name.clone(), mine.text.trim() == f.text.trim());
+                    }
+                }
+            }
+        }
+        let picked = needed.keys().cloned().collect();
+        Ok(Some(ScriptPick { assets: assets.to_vec(), to: to.clone(), fns, picked, needed, missing, in_library }))
+    }
+
+    /// Copies the assets plus the picked script functions (and the assets those refer to).
+    fn finish_send(&mut self, assets: &[AssetRef], to: &SendTo, fns: &[ScriptFn]) -> Result<String> {
+        let b = Bundle::collect_with_scripts(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, &self.project.config.name, assets, fns)?;
+        let n_fns = b.scripts.len();
+        match to {
+            SendTo::Library => {
+                self.lib.ensure_loaded();
+                let lib = self.lib.lib.as_mut().context("library not available")?;
+                let report = library::add_to_library(lib, b)?;
+                self.lib.tex_dirty = true;
+                Ok(format!("Library: {}", report.summary()))
+            }
+            SendTo::Package(path) => {
+                let path = with_ext(path);
+                std::fs::write(&path, b.to_pack()?).with_context(|| format!("writing {}", path.display()))?;
+                Ok(format!("Exported {} asset(s) and {n_fns} script function(s) to {}", library::all_assets(&b.db).len(), path.display()))
+            }
+        }
+    }
+
+    /// Ends the "Script functions" dialog: `ok` copies with the picked functions.
+    pub fn close_script_pick(&mut self, ok: bool) {
+        let Some(p) = self.lib.script_pick.take() else { return };
+        if ok {
+            let chosen: Vec<ScriptFn> = p.fns.iter().filter(|f| p.picked.contains(&f.name)).cloned().collect();
+            let r = self.finish_send(&p.assets, &p.to, &chosen);
+            self.show_result(r);
+        }
+    }
+
+    /// Exports library assets (with the script functions they need) to a package.
+    pub fn export_package(&mut self, assets: &[AssetRef], path: &Path) -> Result<String> {
+        let lib = self.lib_store().context("library not available")?;
+        let b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "rust2d assets", assets)?;
         let path = with_ext(path);
         std::fs::write(&path, b.to_pack()?).with_context(|| format!("writing {}", path.display()))?;
-        Ok(format!("Exported {} asset(s) to {}", library::all_assets(&b.db).len(), path.display()))
+        Ok(format!("Exported {} asset(s) and {} script function(s) to {}", library::all_assets(&b.db).len(), b.scripts.len(), path.display()))
+    }
+
+    /// The "Script functions" dialog (see [`ScriptPick`]).
+    pub(crate) fn script_pick_dialog(&mut self, ctx: &egui::Context) {
+        let Some(p) = &mut self.lib.script_pick else { return };
+        let mut choice: Option<bool> = None;
+        let to_lib = p.to == SendTo::Library;
+        let modal = egui::Modal::new(egui::Id::new("lib_script_pick")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.heading(ui::t(ph::CODE, if to_lib { "Script functions for the library" } else { "Script functions for the package" }));
+            ui.label("These assets use scripts. Only the functions ticked here are copied with them; the rest of your scripts stay in the project.");
+            ui.add_space(6.0);
+            let row = |ui: &mut egui::Ui, f: &ScriptFn, picked: &mut BTreeSet<String>, why: Option<&String>, lib: Option<&bool>| {
+                ui.horizontal(|ui| {
+                    let mut on = picked.contains(&f.name);
+                    let label = egui::RichText::new(format!("{}({})", f.name, f.params.join(", "))).monospace();
+                    let resp = ui.checkbox(&mut on, label);
+                    resp.on_hover_ui(|ui| {
+                        ui.label(egui::RichText::new(f.text.trim()).monospace().size(11.0));
+                    });
+                    if on {
+                        picked.insert(f.name.clone());
+                    } else {
+                        picked.remove(&f.name);
+                    }
+                    if let Some(w) = why {
+                        ui.weak(format!("used by {w}"));
+                    }
+                    match lib {
+                        Some(true) => {
+                            ui.weak("· already in the library");
+                        }
+                        Some(false) => {
+                            ui.colored_label(Color32::YELLOW, "· the library has a different version (kept)");
+                        }
+                        None => {}
+                    }
+                });
+            };
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                ui.strong("Needed by these assets");
+                for f in p.fns.iter().filter(|f| p.needed.contains_key(&f.name)) {
+                    row(ui, f, &mut p.picked, p.needed.get(&f.name), p.in_library.get(&f.name));
+                }
+                for (m, who) in &p.missing {
+                    ui.colored_label(Color32::LIGHT_RED, format!("{who} calls {m}(), which no script of the project defines."));
+                }
+                let others: Vec<&ScriptFn> = p.fns.iter().filter(|f| !p.needed.contains_key(&f.name)).collect();
+                if !others.is_empty() {
+                    ui.add_space(4.0);
+                    egui::CollapsingHeader::new(format!("Other functions of the project ({})", others.len())).id_salt("lib_pick_others").show(ui, |ui| {
+                        ui.weak("Not used by these assets. Tick one only if you want to share it too.");
+                        for f in others {
+                            row(ui, f, &mut p.picked, None, p.in_library.get(&f.name));
+                        }
+                    });
+                }
+            });
+            let left_out: Vec<&String> = p.needed.keys().filter(|n| !p.picked.contains(*n)).collect();
+            if !left_out.is_empty() {
+                let list: Vec<String> = left_out.iter().map(|n| format!("{n}()")).collect();
+                ui.colored_label(Color32::YELLOW, format!("Not copied although needed: {}. The assets only work where those functions exist.", list.join(", ")));
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let n = p.picked.len();
+                let go = if to_lib { format!("Add to library ({n} function{})", if n == 1 { "" } else { "s" }) } else { format!("Export ({n} function{})", if n == 1 { "" } else { "s" }) };
+                if ui.button(ui::t(if to_lib { ph::UPLOAD_SIMPLE } else { ph::PACKAGE }, &go)).clicked() {
+                    choice = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && choice.is_none() {
+            choice = Some(false);
+        }
+        if let Some(ok) = choice {
+            self.close_script_pick(ok);
+        }
     }
 
     pub fn import_package(&mut self, into_library: bool, path: &Path) -> Result<String> {
@@ -309,8 +542,19 @@ impl Editor {
             let root = self.project.root.clone();
             let report = b.merge_into(&mut self.project.db, &root)?;
             self.defs_dirty = true;
+            self.after_scripts_merged();
             self.reload_assets();
             Ok(format!("Imported into the project: {}. Save the definitions to keep them.", report.summary()))
+        }
+    }
+
+    /// A merge may have appended functions to the project's scripts/library.rhai: an unchanged
+    /// open copy of it in the script editor is reloaded.
+    fn after_scripts_merged(&mut self) {
+        let path = self.project.scripts_dir().join(library::LIBRARY_SCRIPT);
+        if self.db.script_file.as_deref() == Some(path.as_path()) && !self.db.script_dirty {
+            self.db.script_text = std::fs::read_to_string(&path).unwrap_or_default();
+            self.db.script_saved = self.db.script_text.clone();
         }
     }
 

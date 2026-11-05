@@ -1,4 +1,5 @@
-//! Inventory window and container loot window (grid of slots, mouse + keyboard).
+//! Inventory (the character window's Character tab: sheet + grid) and the container loot
+//! window (grid of slots, mouse + keyboard), the quick bar and the HUD buttons.
 //!
 //! Inventory: click selects, double-click / right-click / Enter uses or equips, drag rearranges.
 //! Loot: click a container stack to take it, right-click takes one, click your own stack to
@@ -43,7 +44,7 @@ fn quick_rects() -> Vec<Rect> {
     (0..QUICK_SLOTS).map(|k| Rect::new(x0 + k as f32 * (QUICK_SLOT + GAP), sh - QUICK_SLOT - 12.0, QUICK_SLOT, QUICK_SLOT)).collect()
 }
 
-const EQUIP_SLOTS: [EquipSlot; 4] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
+const EQUIP_SLOTS: [EquipSlot; 5] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
 const SHEET_W: f32 = 270.0;
 
 #[derive(Default)]
@@ -83,6 +84,8 @@ struct Grid {
 }
 
 struct Layout {
+    /// The character window around the Character tab (None while looting).
+    window: Option<Rect>,
     grids: Vec<Grid>,
     take_all: Option<Rect>,
     close: Rect,
@@ -97,39 +100,32 @@ impl Layout {
         self.grids.iter().find(|g| g.side == side)
     }
     fn contains(&self, p: Vec2) -> bool {
-        self.grids.iter().any(|g| g.panel.contains(p)) || self.detail.contains(p)
+        self.window.is_some_and(|w| w.contains(p)) || self.grids.iter().any(|g| g.panel.contains(p)) || self.detail.contains(p)
     }
 }
 
-/// Buttons in the bottom-right corner: inventory (bag), character sheet, skills & magic, map.
+/// Buttons in the bottom-right corner: the character window (character, inventory, skills,
+/// spells) and the map.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HudButton {
-    Bag,
-    Character,
-    Skills,
+    Window,
     Map,
 }
+
+/// Help line of the inventory (Character tab).
+const INVENTORY_HINT: &str = "Double-click / Enter: use or equip · Drag to slots or quick bar (1-8) · G / drag out: drop (Shift+G: one) · Tab: next tab · Esc: close";
 
 impl Game {
     /// The HUD buttons with their screen rects, right to left.
     fn hud_buttons(&self) -> Vec<(HudButton, Rect)> {
         let (sw, sh) = (screen_width(), screen_height());
-        let mut out = vec![HudButton::Bag, HudButton::Character];
-        if self.skills_on() {
-            out.push(HudButton::Skills);
-        }
-        out.push(HudButton::Map);
-        out.into_iter().enumerate().map(|(k, b)| (b, Rect::new(sw - 64.0 - k as f32 * 60.0, sh - 64.0, 52.0, 52.0))).collect()
+        [HudButton::Window, HudButton::Map].into_iter().enumerate().map(|(k, b)| (b, Rect::new(sw - 64.0 - k as f32 * 60.0, sh - 64.0, 52.0, 52.0))).collect()
     }
 
-    /// Screen position of a HUD button ("bag", "character", "skills", "map") for automated play-throughs.
+    /// Screen position of a HUD button ("window" - also "character", "bag", "skills" - or
+    /// "map") for automated play-throughs.
     pub fn hud_button_pos(&self, name: &str) -> Option<Vec2> {
-        let want = match name {
-            "character" => HudButton::Character,
-            "skills" => HudButton::Skills,
-            "map" => HudButton::Map,
-            _ => HudButton::Bag,
-        };
+        let want = if name == "map" { HudButton::Map } else { HudButton::Window };
         self.hud_buttons().into_iter().find(|(b, _)| *b == want).map(|(_, r)| r.center())
     }
 
@@ -140,36 +136,22 @@ impl Game {
             draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.06, 0.06, 0.12, if hover { 0.95 } else { 0.7 }));
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, Color::new(0.85, 0.8, 0.6, 1.0));
             let key = match b {
-                HudButton::Bag => {
-                    let c = Color::new(0.65, 0.45, 0.25, 1.0);
-                    draw_circle(r.x + 26.0, r.y + 31.0, 13.0, c);
-                    draw_rectangle(r.x + 19.0, r.y + 12.0, 14.0, 8.0, c);
-                    draw_line(r.x + 18.0, r.y + 20.0, r.x + 34.0, r.y + 20.0, 2.0, Color::new(0.35, 0.22, 0.1, 1.0));
-                    "I"
-                }
-                HudButton::Character => {
-                    // Head and shoulders.
+                HudButton::Window => {
+                    // Head and shoulders with a bag at the side: character, inventory, skills.
                     let c = Color::new(0.85, 0.8, 0.6, 1.0);
-                    draw_circle(r.x + 26.0, r.y + 18.0, 8.0, c);
-                    draw_circle(r.x + 26.0, r.y + 42.0, 15.0, c);
-                    draw_rectangle(r.x + 4.0, r.y + 42.0, 44.0, 10.0, Color::new(0.06, 0.06, 0.12, 1.0));
-                    "C"
-                }
-                HudButton::Skills => {
-                    // A star.
-                    let (cx, cy) = (r.x + 26.0, r.y + 28.0);
-                    let pts: Vec<Vec2> = (0..10)
-                        .map(|k| {
-                            let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 5.0;
-                            let rad = if k % 2 == 0 { 15.0 } else { 6.5 };
-                            vec2(cx + a.cos() * rad, cy + a.sin() * rad)
-                        })
-                        .collect();
-                    let c = Color::new(0.95, 0.8, 0.3, 1.0);
-                    for k in 0..10 {
-                        draw_triangle(vec2(cx, cy), pts[k], pts[(k + 1) % 10], c);
+                    draw_circle(r.x + 22.0, r.y + 18.0, 8.0, c);
+                    // Shoulders: the upper half of a disc, ending at the button's bottom edge.
+                    let (cx, cy, rad) = (r.x + 22.0, r.y + 46.0, 15.0);
+                    let n = 16;
+                    for k in 0..n {
+                        let a0 = std::f32::consts::PI * (1.0 + k as f32 / n as f32);
+                        let a1 = std::f32::consts::PI * (1.0 + (k + 1) as f32 / n as f32);
+                        draw_triangle(vec2(cx, cy), vec2(cx + a0.cos() * rad, cy + a0.sin() * rad), vec2(cx + a1.cos() * rad, cy + a1.sin() * rad), c);
                     }
-                    "K"
+                    let bag = Color::new(0.65, 0.45, 0.25, 1.0);
+                    draw_circle(r.x + 38.0, r.y + 30.0, 7.0, bag);
+                    draw_rectangle(r.x + 34.5, r.y + 20.0, 7.0, 5.0, bag);
+                    "C"
                 }
                 HudButton::Map => {
                     // A folded parchment map with a red cross.
@@ -201,8 +183,11 @@ fn grid_size(n: usize, cols: usize) -> Vec2 {
     vec2(cols as f32 * (SLOT + GAP) - GAP + 2.0 * PAD, rows as f32 * (SLOT + GAP) - GAP + 2.0 * PAD + TITLE_H)
 }
 
+/// Vertical distance of the equipment slots.
+const EQUIP_STEP: f32 = 56.0;
+
 /// Height of the character sheet panel.
-const SHEET_H: f32 = 470.0;
+const SHEET_H: f32 = 500.0;
 
 /// Container panels are at least this wide (title + "Take all" button).
 const MIN_CONTAINER_W: f32 = 300.0;
@@ -222,6 +207,30 @@ fn make_grid(side: Side, title: String, origin: Vec2, n: usize, cols: usize) -> 
 }
 
 impl Game {
+    /// A container's loot window is open.
+    pub(super) fn looting(&self) -> bool {
+        self.inv.loot.is_some()
+    }
+
+    /// Opens the inventory (Character tab) with slot 0 of `side` selected.
+    pub(super) fn open_inventory(&mut self, side: Side) {
+        if !self.inv.open {
+            self.inv.open = true;
+            self.inv.sel = Some((side, 0));
+        }
+    }
+
+    pub(super) fn inv_select(&mut self, side: Side, i: usize) {
+        self.inv.sel = Some((side, i));
+    }
+
+    /// Size of the Character tab's contents: character sheet + inventory grid, and the details
+    /// line below.
+    pub(super) fn character_content_size(&self) -> Vec2 {
+        let g = grid_size(self.world.inventory.capacity(), 6);
+        vec2(SHEET_W + 24.0 + g.x, g.y.max(SHEET_H) + 6.0 + DETAIL_H)
+    }
+
     pub(super) fn inventory_open(&self) -> bool {
         self.inv.is_open() || self.shop.is_open() || self.journal.is_open() || self.skills_open()
     }
@@ -280,13 +289,15 @@ impl Game {
         let mut take_all = None;
         match self.inv.loot {
             None => {
-                // Character sheet on the left, inventory grid on the right.
+                // Character sheet on the left, inventory grid on the right (in the character
+                // window's content area).
+                let c = self.window_content();
                 let size = grid_size(cap, cols);
                 let h = size.y.max(SHEET_H);
                 let total = SHEET_W + 24.0 + size.x;
-                let top = ((sh - h - DETAIL_H) / 2.0).max(10.0).round();
-                let x0 = ((sw - total) / 2.0).round();
-                let slots = (0..EQUIP_SLOTS.len()).map(|k| Rect::new(x0 + 134.0, top + 50.0 + k as f32 * 60.0, SLOT, SLOT)).collect();
+                let top = c.y + super::charwin::MARGIN;
+                let x0 = (c.x + (c.w - total) / 2.0).round();
+                let slots = (0..EQUIP_SLOTS.len()).map(|k| Rect::new(x0 + 134.0, top + 50.0 + k as f32 * EQUIP_STEP, SLOT, SLOT)).collect();
                 grids.push(Grid { side: Side::Equip, title: "Character".into(), panel: Rect::new(x0, top, SHEET_W, h), slots, cols: 1 });
                 let mut g = make_grid(Side::Player, player_title, vec2(x0 + SHEET_W + 24.0, top), cap, cols);
                 g.panel.h = h;
@@ -313,12 +324,21 @@ impl Game {
         let slots = quick_rects();
         let bar = Rect::new(slots[0].x - 6.0, slots[0].y - 6.0, slots[QUICK_SLOTS - 1].right() - slots[0].x + 12.0, QUICK_SLOT + 12.0);
         grids.push(Grid { side: Side::Quick, title: String::new(), panel: bar, slots, cols: QUICK_SLOTS });
+        let close = if self.inv.loot.is_some() { Rect::new(last.x + last.w - 30.0, last.y + 8.0, 22.0, 22.0) } else { self.window_close() };
         Layout {
-            close: Rect::new(last.x + last.w - 30.0, last.y + 8.0, 22.0, 22.0),
-            detail: {
-                // At least wide enough for the help line.
-                let w = (right - left).max(measure_text(self.hint(), None, 16, 1.0).width + 2.0 * PAD);
-                Rect::new(((left + right) / 2.0 - w / 2.0).round(), bottom + 6.0, w, DETAIL_H)
+            window: self.inv.loot.is_none().then(|| self.window_rect()),
+            close,
+            detail: match self.inv.loot {
+                // The character window: across its content.
+                None => {
+                    let c = self.window_content();
+                    Rect::new(c.x + super::charwin::MARGIN, bottom + 6.0, c.w - 2.0 * super::charwin::MARGIN, DETAIL_H)
+                }
+                // Loot: at least wide enough for the help line.
+                Some(_) => {
+                    let w = (right - left).max(measure_text(self.hint(), None, 16, 1.0).width + 2.0 * PAD);
+                    Rect::new(((left + right) / 2.0 - w / 2.0).round(), bottom + 6.0, w, DETAIL_H)
+                }
             },
             grids,
             take_all,
@@ -570,24 +590,15 @@ impl Game {
         }
         let m = input::mouse_pos();
         let (click, rclick) = (input::mouse_pressed(MouseButton::Left), input::mouse_pressed(MouseButton::Right));
-        if self.inv.loot.is_none() && !key_consumed && input::any_pressed(&[KeyCode::I, KeyCode::Tab, KeyCode::C]) {
-            self.inv.open = !self.inv.open;
-            self.inv.sel = Some((Side::Player, 0));
-            return (true, false);
-        }
         if !self.inv.is_open() {
-            if click {
+            // A hidden HUD: its buttons and the quick bar can't be clicked (keys still work).
+            if click && !self.ui_hidden {
                 if let Some((b, _)) = self.hud_buttons().into_iter().find(|(_, r)| r.contains(m)) {
                     match b {
-                        HudButton::Bag => {
-                            self.inv.open = true;
-                            self.inv.sel = Some((Side::Player, 0));
-                        }
-                        HudButton::Character => {
-                            self.inv.open = true;
+                        HudButton::Window => {
+                            self.open_tab(super::charwin::WinTab::Character);
                             self.inv.sel = Some((Side::Equip, 0));
                         }
-                        HudButton::Skills => self.open_skills(),
                         HudButton::Map => self.open_world_map(),
                     }
                     return (false, true);
@@ -600,7 +611,7 @@ impl Game {
                     return (true, false);
                 }
             }
-            if click || rclick {
+            if (click || rclick) && !self.ui_hidden {
                 if let Some(k) = quick_rects().iter().position(|r| r.contains(m)) {
                     self.use_quick(k);
                     return (false, true);
@@ -756,11 +767,11 @@ impl Game {
 
     pub(super) fn draw_inventory_ui(&mut self) {
         let m = input::mouse_pos();
-        if !self.ui.dialog_open() || self.inv.is_open() {
+        if (!self.ui.dialog_open() && !self.ui_hidden) || self.inv.is_open() {
             self.draw_quickbar();
         }
         if !self.inv.is_open() {
-            if !self.ui.dialog_open() && !self.skills_open() {
+            if !self.ui.dialog_open() && !self.skills_open() && !self.ui_hidden {
                 self.draw_hud_buttons();
             }
             return;
@@ -814,8 +825,10 @@ impl Game {
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, GOLD);
             draw_text("Take all (T)", r.x + 6.0, r.y + 18.0, 16.0, WHITE);
         }
-        let c = layout.close;
-        draw_text("x", c.x + 6.0, c.y + 17.0, 24.0, if c.contains(m) { WHITE } else { GRAY });
+        if self.inv.loot.is_some() {
+            let c = layout.close;
+            draw_text("x", c.x + 6.0, c.y + 17.0, 24.0, if c.contains(m) { WHITE } else { GRAY });
+        }
 
         // Details of the hovered or selected stack.
         let d = layout.detail;
@@ -837,8 +850,10 @@ impl Game {
                 }
             }
         }
+        // The help line, smaller if it doesn't fit.
         let hint = self.hint();
-        draw_text(hint, d.x + PAD, d.y + d.h - 8.0, 16.0, GRAY);
+        let size = (12..=16u16).rev().find(|s| measure_text(hint, None, *s, 1.0).width <= d.w - 2.0 * PAD).unwrap_or(12);
+        draw_text(hint, d.x + PAD, d.y + d.h - 8.0, size as f32, GRAY);
 
         // The stack being dragged follows the cursor.
         if let Some((side, i)) = dragging {
@@ -914,7 +929,7 @@ impl Game {
             format!("Attack time {:.2}s", st.cooldown),
             reach,
         ];
-        let y0 = p.y + 50.0 + EQUIP_SLOTS.len() as f32 * 60.0 + 20.0;
+        let y0 = p.y + 50.0 + EQUIP_SLOTS.len() as f32 * EQUIP_STEP + 20.0;
         draw_line(p.x + PAD, y0 - 12.0, p.x + p.w - PAD, y0 - 12.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
         for (n, l) in lines.iter().enumerate() {
             draw_text(l, p.x + PAD, y0 + 8.0 + n as f32 * 22.0, 19.0, WHITE);
@@ -1036,7 +1051,7 @@ impl Game {
         if self.inv.loot.is_some() {
             "Click: take/store stack · Right-click: one · Drag: move · T: take all · Esc: close"
         } else {
-            "Double-click / right-click / Enter: use or equip · Drag to slots or quick bar (or 1-8) · G / drag out: drop (Shift+G: one) · Esc: close"
+            INVENTORY_HINT
         }
     }
 }

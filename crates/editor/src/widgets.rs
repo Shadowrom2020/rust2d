@@ -14,6 +14,10 @@ use rust2d_engine::render::Assets;
 pub struct Textures {
     pub tilesets: HashMap<String, TextureHandle>,
     pub sheets: HashMap<String, TextureHandle>,
+    /// Idle front layers of layered character definitions (painted for `@char:` sprites).
+    pub characters: HashMap<String, Vec<rust2d_engine::render::character::Layer>>,
+    /// Recolored body / hair sheets of layered characters, made on first use.
+    colored: std::cell::RefCell<HashMap<rust2d_engine::render::ColorKey, TextureHandle>>,
 }
 
 impl Textures {
@@ -25,8 +29,65 @@ impl Textures {
         Textures {
             tilesets: assets.tilesets.iter().map(|(id, t)| (id.clone(), load(&format!("ts:{id}"), &t.image))).collect(),
             sheets: assets.sheets.iter().map(|(id, s)| (id.clone(), load(&format!("sh:{id}"), &s.image))).collect(),
+            colored: Default::default(),
+            characters: HashMap::new(),
         }
     }
+
+    /// Refreshes the layers of the character definitions (cheap; every frame, so previews
+    /// follow edits at once).
+    pub fn set_characters(&mut self, db: &rust2d_engine::defs::Database) {
+        use rust2d_engine::render::character;
+        self.characters.clear();
+        for d in &db.characters {
+            self.characters.insert(d.id.clone(), character::layers(db, &d.appearance, &d.equipment, Facing::Down, 0, false));
+        }
+    }
+
+    /// A sheet's texture with skin / hair recolored (layered characters).
+    pub fn colored(&self, ctx: &egui::Context, assets: &Assets, sheet: &str, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> Option<egui::TextureId> {
+        if skin.is_none() && hair.is_none() {
+            return self.sheets.get(sheet).map(|t| t.id());
+        }
+        let img = &assets.sheets.get(sheet)?.image;
+        let mut cache = self.colored.borrow_mut();
+        let t = cache.entry((sheet.to_string(), skin, hair)).or_insert_with(|| {
+            let mut px = img.bytes.clone();
+            rust2d_engine::render::recolor::recolor(&mut px, skin, hair);
+            let ci = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &px);
+            ctx.load_texture(format!("shc:{sheet}:{skin:?}:{hair:?}"), ci, egui::TextureOptions::NEAREST)
+        });
+        Some(t.id())
+    }
+}
+
+/// Paints a character's layers (see `render::character::layers`) into `rect`, keeping the
+/// aspect ratio, bottom-centered. False if none of its sheets exist.
+pub fn paint_character(ui: &Ui, tex: &Textures, assets: &Assets, layers: &[rust2d_engine::render::character::Layer], rect: Rect) -> bool {
+    let Some(base) = layers.iter().find_map(|l| assets.sheets.get(&l.sheet)) else { return false };
+    let (fw, fh) = (base.frame_w, base.frame_h);
+    let scale = (rect.width() / fw).min(rect.height() / fh);
+    let size = vec2(fw * scale, fh * scale);
+    let dest = Rect::from_min_size(pos2(rect.center().x - size.x / 2.0, rect.max.y - size.y), size);
+    let mut any = false;
+    for l in layers {
+        let (Some(s), Some(id)) = (assets.sheets.get(&l.sheet), tex.colored(ui.ctx(), assets, &l.sheet, l.skin, l.hair)) else { continue };
+        let src = s.src_rect(l.frame);
+        let (w, h) = (s.image.width as f32, s.image.height as f32);
+        let uv = Rect::from_min_max(pos2(src.x / w, src.y / h), pos2((src.x + src.w) / w, (src.y + src.h) / h));
+        ui.painter().image(id, dest, uv, Color32::WHITE);
+        any = true;
+    }
+    any
+}
+
+/// Sheet name prefix of a layered character's thumbnail sprite (see [`character_sprite`]).
+pub const CHAR_PREFIX: &str = "@char:";
+
+/// The thumbnail sprite of a character definition: a `@char:` marker that [`paint_sprite`]
+/// paints from its layers.
+pub fn character_sprite(d: &rust2d_engine::defs::CharacterDef) -> SpriteRef {
+    SpriteRef::new(&format!("{CHAR_PREFIX}{}", d.id), 0)
 }
 
 /// Paints one frame of a sheet into `rect`.
@@ -36,6 +97,9 @@ pub fn paint_frame(ui: &Ui, tex: &Textures, assets: &Assets, sheet: &str, frame:
 
 /// Paints a (possibly multi-cell) sprite into `rect`, keeping its aspect ratio, bottom-centered.
 pub fn paint_sprite(ui: &Ui, tex: &Textures, assets: &Assets, sprite: &SpriteRef, rect: Rect) -> bool {
+    if let Some(id) = sprite.sheet.strip_prefix(CHAR_PREFIX) {
+        return tex.characters.get(id).is_some_and(|l| paint_character(ui, tex, assets, l, rect));
+    }
     let (Some(t), Some(s)) = (tex.sheets.get(&sprite.sheet), assets.sheets.get(&sprite.sheet)) else { return false };
     let (cw, ch) = sprite.cells();
     let src = s.region(sprite.frame, cw, ch);
@@ -559,6 +623,8 @@ pub struct Refs {
     pub quest_stages: HashMap<String, Vec<String>>,
     pub skills: Vec<String>,
     pub spells: Vec<String>,
+    /// Sprite sheet ids (effects).
+    pub sheets: Vec<String>,
 }
 
 /// Placeholders understood in dialog / choice texts (and quest texts).
@@ -631,6 +697,34 @@ pub fn suggest_described(ui: &mut Ui, id: &str, value: &mut String, options: &[(
 fn speaker_field(ui: &mut Ui, id: &str, speaker: &mut String, refs: &Refs) {
     labeled(ui, "speaker", |ui| {
         suggest_described(ui, &format!("{id}/speaker"), speaker, &refs.speakers, 160.0);
+    });
+}
+
+/// The animated sprite of the Fly / Effect actions.
+fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs) {
+    labeled(ui, "sheet", |ui| suggest(ui, &format!("{id}/sheet"), &mut s.sheet, &refs.sheets, 120.0));
+    labeled(ui, "frames", |ui| {
+        ui.add(egui::DragValue::new(&mut s.first).range(0..=999));
+        ui.label("to");
+        ui.add(egui::DragValue::new(&mut s.last).range(0..=999)).on_hover_text("0 to 0 = every frame of the sheet");
+        ui.add(egui::DragValue::new(&mut s.fps).range(0.5..=60.0).speed(0.2).suffix(" fps"));
+    });
+    labeled(ui, "size", |ui| {
+        ui.add(egui::DragValue::new(&mut s.scale).range(0.1..=10.0).speed(0.05).prefix("x "));
+        ui.label("light");
+        ui.add(egui::DragValue::new(&mut s.light).range(0.0..=16.0).speed(0.1).suffix(" tiles")).on_hover_text("0 = no glow");
+        if s.light > 0.0 {
+            ui.color_edit_button_srgb(&mut s.glow).on_hover_text("Color of the light");
+        }
+    });
+}
+
+/// A point in tile coordinates (10.5 = the middle of tile 10).
+fn tile_point_ui(ui: &mut Ui, label: &str, x: &mut f32, y: &mut f32) {
+    labeled(ui, label, |ui| {
+        ui.add(egui::DragValue::new(x).speed(0.1).prefix("x "));
+        ui.add(egui::DragValue::new(y).speed(0.1).prefix("y "));
+        ui.weak("tiles");
     });
 }
 
@@ -914,6 +1008,36 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 suggest(ui, id, item, &refs.items, 110.0);
             });
         }
+        Action::Equip { target, item } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "item", |ui| suggest(ui, &format!("{id}/eq"), item, &refs.items, 120.0));
+            ui.weak("Goes into its slot; what was worn there is carried instead. The player takes it from the inventory (or gets one).");
+        }
+        Action::Unequip { target, slot } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "slot", |ui| {
+                egui::ComboBox::from_id_salt(format!("{id}/slot")).selected_text(slot.label()).show_ui(ui, |ui| {
+                    for s in rust2d_engine::defs::EquipSlot::ALL {
+                        ui.selectable_value(slot, s, s.label());
+                    }
+                });
+            });
+        }
+        Action::GiveItemTo { target, item, count } | Action::TakeItemFrom { target, item, count } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(count).range(1..=9999));
+                ui.label("x");
+                suggest(ui, &format!("{id}/it"), item, &refs.items, 110.0);
+            });
+        }
+        Action::SetUiVisible { visible } => {
+            ui.horizontal(|ui| {
+                ui.radio_value(visible, false, "Hide");
+                ui.radio_value(visible, true, "Show");
+                ui.weak("the HUD (status, clock, quick bar, buttons); dialogs still show");
+            });
+        }
         Action::SetFlag { name, value } => {
             ui.horizontal(|ui| {
                 suggest(ui, id, name, &refs.flags, 120.0);
@@ -973,12 +1097,63 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
             });
         }
-        Action::PlayerLight { radius, seconds } => {
+        Action::Aim { function } => {
+            labeled(ui, "then call", |ui| suggest(ui, id, function, &refs.functions, 130.0));
+            ui.weak("The player clicks a target; the script function gets it as (x, y) in tiles.");
+        }
+        Action::Fly { sprite, x, y, speed, function } => {
+            fx_sprite_ui(ui, id, sprite, refs);
+            tile_point_ui(ui, "to", x, y);
+            labeled(ui, "speed", |ui| {
+                ui.add(egui::DragValue::new(speed).range(0.5..=60.0).speed(0.1).suffix(" tiles/s"));
+            });
+            labeled(ui, "then call", |ui| suggest(ui, &format!("{id}/fn"), function, &refs.functions, 130.0));
+        }
+        Action::Effect { sprite, x, y } => {
+            fx_sprite_ui(ui, id, sprite, refs);
+            tile_point_ui(ui, "at", x, y);
+        }
+        Action::DamageArea { x, y, radius, damage } => {
+            tile_point_ui(ui, "at", x, y);
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+            labeled(ui, "damage", |ui| {
+                ui.add(egui::DragValue::new(damage).range(0..=999));
+            });
+        }
+        Action::PlayerLight { radius, seconds, color, flicker } => {
             labeled(ui, "radius", |ui| {
                 ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
             });
             labeled(ui, "for", |ui| {
                 ui.add(egui::DragValue::new(seconds).range(0.5..=3600.0).speed(0.5).suffix(" s"));
+            });
+            labeled(ui, "color", |ui| {
+                ui.color_edit_button_srgb(color);
+                ui.checkbox(flicker, "flicker");
+            });
+        }
+        Action::LightAt { x, y, radius, seconds, color, flicker } => {
+            tile_point_ui(ui, "at", x, y);
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+            labeled(ui, "for", |ui| {
+                ui.add(egui::DragValue::new(seconds).range(0.1..=3600.0).speed(0.2).suffix(" s")).on_hover_text("Fades out during the last second");
+            });
+            labeled(ui, "color", |ui| {
+                ui.color_edit_button_srgb(color);
+                ui.checkbox(flicker, "flicker");
+            });
+        }
+        Action::HealArea { x, y, radius, amount } => {
+            tile_point_ui(ui, "at", x, y);
+            labeled(ui, "radius", |ui| {
+                ui.add(egui::DragValue::new(radius).range(0.5..=32.0).speed(0.1).suffix(" tiles"));
+            });
+            labeled(ui, "heal", |ui| {
+                ui.add(egui::DragValue::new(amount).range(1..=999).suffix(" HP")).on_hover_text("The player and friendly characters in range");
             });
         }
         Action::SetTime { hour } => {
@@ -1031,6 +1206,57 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "frame offset", |ui| {
                 ui.add(egui::DragValue::new(frame).range(0..=255));
             });
+        }
+        Action::Cutscene { function } => {
+            ui.horizontal(|ui| {
+                labeled(ui, "function", |ui| suggest(ui, id, function, &refs.functions, 130.0));
+                if ui.add_enabled(!function.is_empty(), egui::Button::new("\u{E3D0} Preview")).on_hover_text("Play-test just this cut-scene on the open map (saves first)").clicked() {
+                    request_play_cutscene(function);
+                }
+            });
+            ui.weak("Plays the script function as a cut-scene: the HUD hides, black bars slide in, everyone else waits until its walks, dialogs and waits are done (Scripts tab: + Cutscene template).");
+        }
+        Action::Dim { amount, seconds } => {
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(amount, 0.0..=1.0).text("dark"));
+                ui.label("over");
+                ui.add(egui::DragValue::new(seconds).range(0.0..=30.0).speed(0.1).suffix(" s"));
+            });
+            ui.weak("0 = normal, 1 = deep night: makes lights show by day (e.g. in a cut-scene, which brightens again when it ends). Not saved.");
+        }
+        Action::SetSpawners { map, zone, active } => {
+            labeled(ui, "map", |ui| {
+                suggest(ui, &format!("{id}/map"), map, &refs.maps, 110.0);
+                ui.weak("(empty = this map)");
+            });
+            labeled(ui, "spawner zone", |ui| {
+                ui.add(egui::TextEdit::singleline(zone).hint_text("all").desired_width(110.0));
+            });
+            ui.horizontal(|ui| {
+                ui.radio_value(active, false, "Off");
+                ui.radio_value(active, true, "On");
+            });
+            ui.weak("Off: no more enemies from these spawners (theirs on the current map vanish). Saved.");
+        }
+        Action::DefeatEnemies => {
+            ui.weak("Every hostile character on the current map is defeated at once (loot drops, their 'Defeated' triggers run).");
+        }
+        Action::EndCutscene => {
+            ui.weak("(ends the cut-scene; added automatically after a cut-scene's actions)");
+        }
+        Action::WalkTo { target, x, y } | Action::Place { target, x, y } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.label("tile x");
+                ui.add(egui::DragValue::new(x).range(0..=4096));
+                ui.label("y");
+                ui.add(egui::DragValue::new(y).range(0..=4096));
+            });
+        }
+        Action::Approach { target, to } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "walks up to", |ui| suggest(ui, &format!("{id}/to"), to, &refs.targets, 100.0));
+            ui.weak("(stops a tile before it; then both face each other)");
         }
         Action::Move { target, dx, dy } => {
             target_field(ui, id, target, refs);
@@ -1095,6 +1321,21 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
 thread_local! {
     /// Debug-script request to open the chooser of the field with this id.
     static OPEN_CHOOSER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// A cut-scene to preview (the *Preview* button of a *Play cutscene* action).
+    static PLAY_CUTSCENE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Asks the editor to play-test script function `function` as a cut-scene.
+pub fn request_play_cutscene(function: &str) {
+    PLAY_CUTSCENE.with(|r| *r.borrow_mut() = Some(function.to_string()));
+}
+
+/// The cut-scene preview requested this frame, if any.
+pub fn take_play_cutscene() -> Option<String> {
+    PLAY_CUTSCENE.with(|r| r.borrow_mut().take())
 }
 
 /// Opens the sprite chooser of field `id` the next time it is shown (editor debug scripts).
@@ -1411,4 +1652,58 @@ pub fn light_ui(ui: &mut Ui, id: &str, l: &mut Option<rust2d_engine::defs::Light
         let _ = id;
     }
     *l != before
+}
+
+// ------------------------------------------------------------------ layered characters
+
+/// Skin tones offered as one-click presets.
+pub const SKIN_PRESETS: [[u8; 3]; 8] = [[0xf6, 0xd0, 0xb0], [0xf2, 0xc4, 0x9b], [0xe8, 0xb8, 0x8a], [0xd0, 0x90, 0x68], [0xb5, 0x79, 0x4c], [0x8d, 0x5a, 0x3b], [0x5a, 0x3a, 0x24], [0x7c, 0xb3, 0x42]];
+/// Hair colors offered as presets.
+pub const HAIR_PRESETS: [[u8; 3]; 10] = [
+    [0x1e, 0x16, 0x12],
+    [0x3a, 0x24, 0x18],
+    [0x5d, 0x3a, 0x1a],
+    [0x8a, 0x5a, 0x2e],
+    [0xe0, 0xc0, 0x60],
+    [0xd3, 0x54, 0x00],
+    [0xc0, 0x39, 0x2b],
+    [0xde, 0xde, 0xde],
+    [0x3b, 0x3b, 0x9e],
+    [0x2e, 0x8b, 0x57],
+];
+
+/// List editor of carried items (count + item).
+pub fn carried_ui(ui: &mut Ui, id: &str, inv: &mut Vec<ItemStack>, items: &[String]) {
+    let mut remove = None;
+    for (k, s) in inv.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut s.count).range(1..=9999));
+            ui.label("x");
+            suggest(ui, &format!("{id}/inv{k}"), &mut s.item, items, 130.0);
+            if ui.small_button("\u{E4F6}").on_hover_text("Remove").clicked() {
+                remove = Some(k);
+            }
+        });
+    }
+    if let Some(k) = remove {
+        inv.remove(k);
+    }
+    if ui.small_button("+ Item").clicked() {
+        inv.push(ItemStack::new(items.first().map_or("", |s| s.as_str()), 1));
+    }
+}
+
+/// The four directions of a character, side by side (idle frames).
+pub fn character_preview(ui: &mut Ui, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database, a: &rust2d_engine::defs::Appearance, eq: &rust2d_engine::state::Equipment) {
+    use rust2d_engine::render::character;
+    ui.horizontal(|ui| {
+        for f in [Facing::Down, Facing::Left, Facing::Up, Facing::Right] {
+            let (rect, _) = ui.allocate_exact_size(vec2(64.0, 96.0), Sense::hover());
+            ui.painter().rect_filled(rect, 3.0, Color32::from_gray(36));
+            let layers = character::layers(db, a, eq, f, 0, false);
+            if !paint_character(ui, tex, assets, &layers, rect.shrink(2.0)) {
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "?", egui::FontId::default(), Color32::RED);
+            }
+        }
+    });
 }

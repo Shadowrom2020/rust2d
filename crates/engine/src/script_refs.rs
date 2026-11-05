@@ -5,7 +5,7 @@
 //! comments and other strings. Renames use it to update scripts; the editor's script check
 //! uses it to report ids that don't exist.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::defs::Database;
 use crate::refactor::RefKind;
@@ -23,6 +23,8 @@ pub enum IdKind {
     State,
     Skill,
     Spell,
+    /// A sprite sheet (animated effects).
+    Sheet,
 }
 
 impl IdKind {
@@ -36,6 +38,7 @@ impl IdKind {
             IdKind::State => "prop state",
             IdKind::Skill => "skill",
             IdKind::Spell => "spell",
+            IdKind::Sheet => "sprite sheet",
         }
     }
     /// The definition kind renamed together with this id kind.
@@ -44,6 +47,9 @@ impl IdKind {
             IdKind::Item => Some(RefKind::Item),
             IdKind::Map => Some(RefKind::Map),
             IdKind::Sound => Some(RefKind::Sound),
+            IdKind::Sheet => Some(RefKind::Sheet),
+            IdKind::Skill => Some(RefKind::Skill),
+            IdKind::Spell => Some(RefKind::Spell),
             _ => None,
         }
     }
@@ -57,6 +63,8 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("item_count", 0, IdKind::Item),
     ("teleport", 0, IdKind::Map),
     ("teleport", 1, IdKind::Spawn),
+    ("disable_spawners", 0, IdKind::Map),
+    ("enable_spawners", 0, IdKind::Map),
     ("play_sound", 0, IdKind::Sound),
     ("play_music", 0, IdKind::Sound),
     ("start_quest", 0, IdKind::Quest),
@@ -72,6 +80,11 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("set_skill", 0, IdKind::Skill),
     ("knows_spell", 0, IdKind::Spell),
     ("learn_spell", 0, IdKind::Spell),
+    ("fly", 0, IdKind::Sheet),
+    ("equip", 1, IdKind::Item),
+    ("give_item_to", 1, IdKind::Item),
+    ("take_item_from", 1, IdKind::Item),
+    ("effect", 0, IdKind::Sheet),
 ];
 
 /// A string literal argument of a function call.
@@ -260,6 +273,118 @@ pub fn rename_in_script(src: &str, kind: RefKind, old: &str, new: &str) -> (Stri
     (out, lines)
 }
 
+/// A top-level function of a script file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptFn {
+    pub name: String,
+    pub params: Vec<String>,
+    /// The whole definition, with the `//` comment lines right above it.
+    pub text: String,
+}
+
+/// The top-level functions of a script source, in order.
+pub fn functions(src: &str) -> Vec<ScriptFn> {
+    let toks = tokenize(src);
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut k = 0;
+    while k < toks.len() {
+        match &toks[k].0 {
+            Tok::Punct('{') => depth += 1,
+            Tok::Punct('}') => depth -= 1,
+            Tok::Ident(kw) if kw == "fn" && depth == 0 => {
+                let Some((Tok::Ident(name), _)) = toks.get(k + 1) else {
+                    k += 1;
+                    continue;
+                };
+                // Parameters up to ")", then the body from "{" to its matching "}".
+                let mut j = k + 2;
+                let mut params = Vec::new();
+                while j < toks.len() && toks[j].0 != Tok::Punct(')') {
+                    if let Tok::Ident(p) = &toks[j].0 {
+                        params.push(p.clone());
+                    }
+                    j += 1;
+                }
+                while j < toks.len() && toks[j].0 != Tok::Punct('{') {
+                    j += 1;
+                }
+                let mut d = 0;
+                let mut end = src.len();
+                while j < toks.len() {
+                    match toks[j].0 {
+                        Tok::Punct('{') => d += 1,
+                        Tok::Punct('}') => {
+                            d -= 1;
+                            if d == 0 {
+                                end = toks[j].1 + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                // Comment lines directly above belong to the function.
+                let mut start = src[..toks[k].1].rfind('\n').map_or(0, |i| i + 1);
+                while start > 0 {
+                    let prev_start = src[..start - 1].rfind('\n').map_or(0, |i| i + 1);
+                    if !src[prev_start..start - 1].trim_start().starts_with("//") {
+                        break;
+                    }
+                    start = prev_start;
+                }
+                out.push(ScriptFn { name: name.clone(), params, text: src[start..end].to_string() });
+                k = j + 1;
+                continue;
+            }
+            _ => {}
+        }
+        k += 1;
+    }
+    out
+}
+
+/// Script functions (of `names`) a function uses: calls, and names passed as strings
+/// (`then_call("f")`, `aim("f")`, `fly(..., "f")`, `cutscene("f")`).
+pub fn used_functions(f: &ScriptFn, names: &BTreeSet<String>) -> BTreeSet<String> {
+    let toks = tokenize(&f.text);
+    let mut out = BTreeSet::new();
+    for k in 0..toks.len() {
+        match &toks[k].0 {
+            Tok::Ident(n) if names.contains(n) => {
+                let call = toks.get(k + 1).is_some_and(|t| t.0 == Tok::Punct('('));
+                let def = k > 0 && toks[k - 1].0 == Tok::Ident("fn".into());
+                if call && !def {
+                    out.insert(n.clone());
+                }
+            }
+            Tok::Str(v, _, _) if names.contains(v) => {
+                out.insert(v.clone());
+            }
+            _ => {}
+        }
+    }
+    out.remove(&f.name);
+    out
+}
+
+/// `roots` and every function they use, directly or through others.
+pub fn needed_functions(fns: &[ScriptFn], roots: &[String]) -> BTreeSet<String> {
+    let names: BTreeSet<String> = fns.iter().map(|f| f.name.clone()).collect();
+    let mut seen = BTreeSet::new();
+    let mut stack: Vec<String> = roots.iter().filter(|r| names.contains(*r)).cloned().collect();
+    while let Some(n) = stack.pop() {
+        if !seen.insert(n.clone()) {
+            continue;
+        }
+        if let Some(f) = fns.iter().find(|f| f.name == n) {
+            stack.extend(used_functions(f, &names).into_iter().filter(|u| !seen.contains(u)));
+        }
+    }
+    seen
+}
+
 /// A problem found by [`check_script`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScriptIssue {
@@ -287,6 +412,7 @@ pub fn check_script(src: &str, db: &Database, maps: &[String], spawns: &HashMap<
             IdKind::State => states.iter().any(|s| s == v),
             IdKind::Skill => db.skill(v).is_some(),
             IdKind::Spell => db.spell(v).is_some(),
+            IdKind::Sheet => db.sheet(v).is_some(),
         };
         if !known {
             let extra = match kind {
@@ -377,6 +503,7 @@ fn reward() {
             value: 0,
         light: None,
         teaches: String::new(),
+        held: String::new(),
         });
         let maps = vec!["village".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("village".to_string(), vec!["gate".to_string()])].into();

@@ -60,9 +60,32 @@ pub struct CharacterCreation {
     /// character definition's name.
     #[serde(default)]
     pub default_name: String,
-    /// Selectable looks (sprite sheets in the player character's layout).
-    #[serde(default)]
-    pub looks: Vec<PlayerLook>,
+    /// The body sheets of a male / female player ("" = the player character's own body). The
+    /// player picks skin, hair style, hair color and (men) a beard from the lists below.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub body_male: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub body_female: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skin_colors: Vec<[u8; 3]>,
+    /// Hair sheets ("" = no hair).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hair_styles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hair_colors: Vec<[u8; 3]>,
+    /// Beard sheets offered to male players ("" = no beard).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beards: Vec<String>,
+}
+
+impl CharacterCreation {
+    /// Body sheet of a player of `sex` ("" = the player character's own body).
+    pub fn body(&self, sex: crate::state::Sex) -> &str {
+        match sex {
+            crate::state::Sex::Male => &self.body_male,
+            crate::state::Sex::Female => &self.body_female,
+        }
+    }
 }
 
 /// Whether the player may choose the player character's sex.
@@ -92,15 +115,6 @@ impl SexChoice {
             SexChoice::Female => Some(crate::state::Sex::Female),
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PlayerLook {
-    pub sheet: String,
-    pub sex: crate::state::Sex,
-    /// Shown under the preview ("" = the sheet id).
-    #[serde(default)]
-    pub label: String,
 }
 
 /// Edge length of every tile in pixels. Sprites, hitboxes and speeds are designed for it.
@@ -224,6 +238,7 @@ impl Project {
         };
         let mut db = db;
         db.upgrade_prop_states();
+        db.upgrade_characters();
         Ok(Project { root, config, db })
     }
 

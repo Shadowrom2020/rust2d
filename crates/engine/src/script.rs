@@ -7,16 +7,28 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use rhai::{Array, Dynamic, Engine, Scope, AST};
+use rhai::{Array, Dynamic, Engine, Map, Scope, AST};
 
 use crate::entity::Facing;
-use crate::events::{Action, VarOp};
+use crate::events::{Action, FxSprite, VarOp};
 use crate::state::WorldState;
 
 #[derive(Default)]
 struct Ctx {
     world: WorldState,
     actions: Vec<Action>,
+    player: PlayerInfo,
+}
+
+/// What scripts can read about the player besides the world state (the game updates it every
+/// frame with [`ScriptHost::set_player`]).
+#[derive(Clone, Debug, Default)]
+pub struct PlayerInfo {
+    /// Position in tiles (the feet).
+    pub x: f32,
+    pub y: f32,
+    pub max_hp: i32,
+    pub facing: Facing,
 }
 
 pub struct ScriptHost {
@@ -35,6 +47,10 @@ impl ScriptHost {
         engine.on_print(|s| println!("[script] {s}"));
         register_api(&mut engine, &ctx);
         ScriptHost { engine, ast: AST::empty(), ctx, errors: Vec::new() }
+    }
+
+    pub fn set_player(&mut self, info: PlayerInfo) {
+        self.ctx.borrow_mut().player = info;
     }
 
     /// Compiles every `*.rhai` file in `dir` into one module (functions are global).
@@ -198,10 +214,66 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("give_skill_points", with!(ctx, |c, n: i64| c.actions.push(Action::GiveSkillPoints { amount: n as i32 })));
     engine.register_fn("learn_spell", with!(ctx, |c, id: &str| c.actions.push(Action::LearnSpell { spell: id.into() })));
     engine.register_fn("add_mana", with!(ctx, |c, n: i64| c.actions.push(Action::AddMana { amount: n as i32 })));
-    engine.register_fn("damage_around", with!(ctx, |c, d: i64, r: f64| c.actions.push(Action::DamageAround { damage: d as i32, radius: r as f32 })));
-    engine.register_fn("damage_around", with!(ctx, |c, d: i64, r: i64| c.actions.push(Action::DamageAround { damage: d as i32, radius: r as f32 })));
-    engine.register_fn("player_light", with!(ctx, |c, r: f64, s: f64| c.actions.push(Action::PlayerLight { radius: r as f32, seconds: s as f32 })));
-    engine.register_fn("player_light", with!(ctx, |c, r: i64, s: i64| c.actions.push(Action::PlayerLight { radius: r as f32, seconds: s as f32 })));
+    // (Numbers may be integers or floats in any mix.)
+    engine.register_fn("damage_around", with!(ctx, |c, d: Dynamic, r: Dynamic| c.actions.push(Action::DamageAround { damage: num(&d).round() as i32, radius: num(&r) })));
+    engine.register_fn("player_light", with!(ctx, |c, r: Dynamic, s: Dynamic| c.actions.push(player_light(&r, &s, &Map::new()))));
+    engine.register_fn("player_light", with!(ctx, |c, r: Dynamic, s: Dynamic, o: Map| c.actions.push(player_light(&r, &s, &o))));
+    engine.register_fn("light_at", with!(ctx, |c, x: Dynamic, y: Dynamic, r: Dynamic, s: Dynamic| c.actions.push(light_at(&x, &y, &r, &s, &Map::new()))));
+    engine.register_fn("light_at", with!(ctx, |c, x: Dynamic, y: Dynamic, r: Dynamic, s: Dynamic, o: Map| c.actions.push(light_at(&x, &y, &r, &s, &o))));
+    engine.register_fn("heal_area", with!(ctx, |c, x: Dynamic, y: Dynamic, r: Dynamic, n: Dynamic| c.actions.push(Action::HealArea {
+        x: num(&x),
+        y: num(&y),
+        radius: num(&r),
+        amount: num(&n).round() as i32
+    })));
+    // Equipment and carried items of characters ("player", "self" or an entity name).
+    engine.register_fn("equip", with!(ctx, |c, t: &str, item: &str| c.actions.push(Action::Equip { target: t.into(), item: item.into() })));
+    engine.register_fn("unequip", with!(ctx, |c, t: &str, slot: &str| match crate::defs::EquipSlot::parse(slot) {
+        Some(slot) => c.actions.push(Action::Unequip { target: t.into(), slot }),
+        None => eprintln!("[script] unequip: unknown slot '{slot}' (clothing, head, body, weapon, offhand)"),
+    }));
+    engine.register_fn("give_item_to", with!(ctx, |c, t: &str, item: &str, n: i64| c.actions.push(Action::GiveItemTo {
+        target: t.into(),
+        item: item.into(),
+        count: n.max(0) as u32
+    })));
+    engine.register_fn("take_item_from", with!(ctx, |c, t: &str, item: &str, n: i64| c.actions.push(Action::TakeItemFrom {
+        target: t.into(),
+        item: item.into(),
+        count: n.max(0) as u32
+    })));
+    // The player (position in tiles, updated every frame).
+    engine.register_fn("player_x", with!(ctx, |c| c.player.x as f64));
+    engine.register_fn("player_y", with!(ctx, |c| c.player.y as f64));
+    engine.register_fn("player_max_hp", with!(ctx, |c| c.player.max_hp as i64));
+    engine.register_fn("player_facing", with!(ctx, |c| match c.player.facing {
+        Facing::Up => "up",
+        Facing::Down => "down",
+        Facing::Left => "left",
+        Facing::Right => "right",
+    }
+    .to_string()));
+    // Spell effects: targeting, flying sprites, one-shot animations, area damage. Positions are
+    // tile coordinates (numbers, fractions allowed: 10.5 = middle of tile 10).
+    engine.register_fn("aim", with!(ctx, |c, f: &str| c.actions.push(Action::Aim { function: f.into() })));
+    engine.register_fn("fly", with!(ctx, |c, sheet: &str, x: Dynamic, y: Dynamic, f: &str| c.actions.push(fly(sheet, &x, &y, f, &Map::new()))));
+    engine.register_fn("fly", with!(ctx, |c, sheet: &str, x: Dynamic, y: Dynamic, f: &str, o: Map| c.actions.push(fly(sheet, &x, &y, f, &o))));
+    engine.register_fn("effect", with!(ctx, |c, sheet: &str, x: Dynamic, y: Dynamic| c.actions.push(Action::Effect {
+        sprite: fx_sprite(sheet, &Map::new()),
+        x: num(&x),
+        y: num(&y)
+    })));
+    engine.register_fn("effect", with!(ctx, |c, sheet: &str, x: Dynamic, y: Dynamic, o: Map| c.actions.push(Action::Effect {
+        sprite: fx_sprite(sheet, &o),
+        x: num(&x),
+        y: num(&y)
+    })));
+    engine.register_fn("damage_area", with!(ctx, |c, x: Dynamic, y: Dynamic, r: Dynamic, d: Dynamic| c.actions.push(Action::DamageArea {
+        x: num(&x),
+        y: num(&y),
+        radius: num(&r),
+        damage: num(&d).round() as i32
+    })));
     engine.register_fn("is_night", with!(ctx, |c| crate::render::lighting::is_night(c.world.hour)));
     engine.register_fn("set_hour", with!(ctx, |c, h: f64| c.actions.push(Action::SetTime { hour: h as f32 })));
     engine.register_fn("set_hour", with!(ctx, |c, h: i64| c.actions.push(Action::SetTime { hour: h as f32 })));
@@ -241,6 +313,32 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
+    // The HUD (status frame, clock, quick bar, buttons), e.g. for cut-scenes.
+    engine.register_fn("hide_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: false })));
+    // Cut-scenes and scripted walking (tile coordinates; fractional ones are rounded down).
+    engine.register_fn("cutscene", with!(ctx, |c, f: &str| c.actions.push(Action::Cutscene { function: f.into() })));
+    engine.register_fn("dim", with!(ctx, |c, amount: Dynamic, seconds: Dynamic| c.actions.push(Action::Dim {
+        amount: num(&amount).clamp(0.0, 1.0),
+        seconds: num(&seconds).max(0.0),
+    })));
+    // Enemy spawners of a map ("" = the current one), all or one zone by name.
+    engine.register_fn("disable_spawners", with!(ctx, |c, map: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: String::new(), active: false })));
+    engine.register_fn("disable_spawners", with!(ctx, |c, map: &str, zone: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: zone.into(), active: false })));
+    engine.register_fn("enable_spawners", with!(ctx, |c, map: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: String::new(), active: true })));
+    engine.register_fn("defeat_enemies", with!(ctx, |c| c.actions.push(Action::DefeatEnemies)));
+    engine.register_fn("enable_spawners", with!(ctx, |c, map: &str, zone: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: zone.into(), active: true })));
+    engine.register_fn("walk_to", with!(ctx, |c, t: &str, x: Dynamic, y: Dynamic| c.actions.push(Action::WalkTo {
+        target: t.into(),
+        x: num(&x).floor() as i32,
+        y: num(&y).floor() as i32,
+    })));
+    engine.register_fn("approach", with!(ctx, |c, t: &str, to: &str| c.actions.push(Action::Approach { target: t.into(), to: to.into() })));
+    engine.register_fn("place", with!(ctx, |c, t: &str, x: Dynamic, y: Dynamic| c.actions.push(Action::Place {
+        target: t.into(),
+        x: num(&x).floor() as i32,
+        y: num(&y).floor() as i32,
+    })));
+    engine.register_fn("show_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: true })));
     engine.register_fn("set_state", with!(ctx, |c, t: &str, s: &str| c.actions.push(Action::SetState { target: t.into(), state: s.into() })));
     engine.register_fn("move_by", with!(ctx, |c, t: &str, dx: i64, dy: i64| c.actions.push(Action::Move {
         target: t.into(),
@@ -256,7 +354,7 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         };
         c.actions.push(Action::Face { target: t.into(), facing })
     }));
-    engine.register_fn("wait", with!(ctx, |c, s: f64| c.actions.push(Action::Wait { seconds: s as f32 })));
+    engine.register_fn("wait", with!(ctx, |c, s: Dynamic| c.actions.push(Action::Wait { seconds: num(&s) })));
     engine.register_fn("emit", with!(ctx, |c, n: &str| c.actions.push(Action::Emit { name: n.into() })));
     engine.register_fn("heal", with!(ctx, |c, n: i64| c.actions.push(Action::Heal { amount: n as i32 })));
     engine.register_fn("set_locked", with!(ctx, |c, t: &str, locked: bool| c.actions.push(Action::SetLocked {
@@ -275,6 +373,57 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         op: VarOp::Set,
         value: v
     })));
+}
+
+/// A script number (integer or float) as `f32` (anything else: 0).
+fn num(d: &Dynamic) -> f32 {
+    d.as_float().map(|f| f as f32).or_else(|_| d.as_int().map(|i| i as f32)).unwrap_or(0.0)
+}
+
+/// The sprite of `fly` / `effect` from the sheet and the options map: `frames: [first, last]`,
+/// `fps`, `scale`, `light`, `color: [r, g, b]` (of the light).
+fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
+    let opt = |k: &str| o.get(k).map(num);
+    let mut s = FxSprite { sheet: sheet.into(), ..Default::default() };
+    if let Some(f) = o.get("frames").and_then(|f| f.clone().try_cast::<Array>()) {
+        s.first = f.first().map_or(0.0, num).max(0.0) as u32;
+        s.last = f.get(1).map_or(s.first as f32, num).max(s.first as f32) as u32;
+    } else if let Some(f) = opt("frame") {
+        (s.first, s.last) = (f.max(0.0) as u32, f.max(0.0) as u32);
+    }
+    s.fps = opt("fps").unwrap_or(s.fps).max(0.1);
+    s.scale = opt("scale").unwrap_or(s.scale).max(0.05);
+    s.light = opt("light").unwrap_or(0.0).max(0.0);
+    if let Some(c) = o.get("color").and_then(|c| c.clone().try_cast::<Array>()).filter(|a| a.len() >= 3) {
+        s.glow = [0, 1, 2].map(|i| num(&c[i]).clamp(0.0, 255.0) as u8);
+    }
+    s
+}
+
+/// Light options: `color: [r, g, b]` (0..255), `flicker: true`.
+fn light_opts(o: &Map, default: [u8; 3]) -> ([u8; 3], bool) {
+    let color = o
+        .get("color")
+        .and_then(|c| c.clone().try_cast::<Array>())
+        .filter(|a| a.len() >= 3)
+        .map_or(default, |a| [0, 1, 2].map(|i| num(&a[i]).clamp(0.0, 255.0) as u8));
+    let flicker = o.get("flicker").and_then(|f| f.as_bool().ok()).unwrap_or(false);
+    (color, flicker)
+}
+
+fn player_light(r: &Dynamic, s: &Dynamic, o: &Map) -> Action {
+    let (color, flicker) = light_opts(o, crate::events::spell_light_color());
+    Action::PlayerLight { radius: num(r), seconds: num(s), color, flicker }
+}
+
+fn light_at(x: &Dynamic, y: &Dynamic, r: &Dynamic, s: &Dynamic, o: &Map) -> Action {
+    let (color, flicker) = light_opts(o, [255, 200, 140]);
+    Action::LightAt { x: num(x), y: num(y), radius: num(r), seconds: num(s), color, flicker }
+}
+
+fn fly(sheet: &str, x: &Dynamic, y: &Dynamic, function: &str, o: &Map) -> Action {
+    let speed = o.get("speed").map_or(8.0, num).max(0.5);
+    Action::Fly { sprite: fx_sprite(sheet, o), x: num(x), y: num(y), speed, function: function.into() }
 }
 
 #[cfg(test)]
@@ -321,6 +470,98 @@ mod tests {
                 Action::SetLocked { target: "door".into(), locked: false }
             ]
         );
+    }
+
+    #[test]
+    fn spell_effect_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(
+            r#"
+            fn cast() { aim("hit"); }
+            fn hit(x, y) {
+                fly("fireball", x, y, "boom", #{ speed: 10, frames: [0, 3], light: 2.5 });
+                effect("explosion", 4, 5.5);
+                damage_area(x, y, 2, 4);
+            }
+            "#,
+        )
+        .unwrap();
+        let mut w = WorldState::default();
+        assert_eq!(host.call(&mut w, "cast", None), vec![Action::Aim { function: "hit".into() }]);
+        // Lights, healing and the player's position; ints and floats mix freely.
+        host.load_source(
+            r#"fn glow() { player_light(5, 30.5); player_light(4, 10, #{ color: [255, 0, 0], flicker: true });
+                light_at(player_x(), player_y() - 1, 3, 2.5); heal_area(1.5, 2, 2, 3); player_max_hp() + 0 }"#,
+        )
+        .unwrap();
+        host.load_source("fn pause() { wait(1); wait(0.5); }").unwrap();
+        // Cut-scenes: the function to play, scripted walks (tiles; decimals rounded down).
+        host.load_source(r#"fn scene() { cutscene("intro"); place("player", 1, 18); walk_to("player", 5.7, 18); approach("guard", "player"); hide_ui(); show_ui(); }"#).unwrap();
+        assert_eq!(
+            host.call(&mut w, "scene", None),
+            vec![
+                Action::Cutscene { function: "intro".into() },
+                Action::Place { target: "player".into(), x: 1, y: 18 },
+                Action::WalkTo { target: "player".into(), x: 5, y: 18 },
+                Action::Approach { target: "guard".into(), to: "player".into() },
+                Action::SetUiVisible { visible: false },
+                Action::SetUiVisible { visible: true },
+            ]
+        );
+        host.load_source(r#"fn calm() { dim(0.8, 1.5); dim(2, -1); disable_spawners("forest"); enable_spawners("", "den"); defeat_enemies(); }"#).unwrap();
+        assert_eq!(
+            host.call(&mut w, "calm", None),
+            vec![
+                Action::Dim { amount: 0.8, seconds: 1.5 },
+                Action::Dim { amount: 1.0, seconds: 0.0 },
+                Action::SetSpawners { map: "forest".into(), zone: String::new(), active: false },
+                Action::SetSpawners { map: String::new(), zone: "den".into(), active: true },
+                Action::DefeatEnemies,
+            ]
+        );
+        assert_eq!(host.call(&mut w, "pause", None), vec![Action::Wait { seconds: 1.0 }, Action::Wait { seconds: 0.5 }]);
+        host.set_player(PlayerInfo { x: 4.5, y: 6.0, max_hp: 12, facing: Facing::Up });
+        assert_eq!(
+            host.call(&mut w, "glow", None),
+            vec![
+                Action::PlayerLight { radius: 5.0, seconds: 30.5, color: crate::events::spell_light_color(), flicker: false },
+                Action::PlayerLight { radius: 4.0, seconds: 10.0, color: [255, 0, 0], flicker: true },
+                Action::LightAt { x: 4.5, y: 5.0, radius: 3.0, seconds: 2.5, color: [255, 200, 140], flicker: false },
+                Action::HealArea { x: 1.5, y: 2.0, radius: 2.0, amount: 3 },
+            ]
+        );
+        let a = host.call_args(&mut w, "hit", vec![Dynamic::from(3.5_f64), Dynamic::from(7_i64)], None);
+        let fs = |sheet: &str, first, last, light| FxSprite { sheet: sheet.into(), first, last, light, ..Default::default() };
+        assert_eq!(
+            a,
+            vec![
+                Action::Fly { sprite: fs("fireball", 0, 3, 2.5), x: 3.5, y: 7.0, speed: 10.0, function: "boom".into() },
+                Action::Effect { sprite: fs("explosion", 0, 0, 0.0), x: 4.0, y: 5.5 },
+                Action::DamageArea { x: 3.5, y: 7.0, radius: 2.0, damage: 4 },
+            ]
+        );
+    }
+
+    /// The examples in Documentation/scripting.md compile, and the Rhai primer does what it says.
+    #[test]
+    fn documentation_examples() {
+        let doc = include_str!("../../../Documentation/scripting.md");
+        let blocks: Vec<&str> = doc.split("```rust").skip(1).filter_map(|b| b.split("```").next()).collect();
+        assert!(blocks.len() >= 10, "{}", blocks.len());
+        for b in &blocks {
+            // Snippets of calls only (no function around them) are compiled inside one.
+            let src = if b.contains("fn ") { b.to_string() } else { format!("fn snippet(x, y) {{ {b} }}") };
+            let mut host = ScriptHost::new();
+            host.load_source(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
+        }
+        let mut host = ScriptHost::new();
+        host.load_source(blocks.iter().find(|b| b.contains("fn count_to_five")).unwrap()).unwrap();
+        let mut w = WorldState::default();
+        let mut run = |f: &str, args: Vec<Dynamic>| host.call_inner(&mut w, f, args, None).map(|v| v.to_string());
+        assert_eq!(run("count_to_five", vec![]).as_deref(), Some("9"));
+        assert_eq!(run("greet", vec![Dynamic::from("Mira")]).as_deref(), Some("Hello, Mira!"));
+        assert!(run("lists_and_maps", vec![]).is_some());
+        assert!(host.errors.is_empty(), "{:?}", host.errors);
     }
 
     #[test]

@@ -8,10 +8,12 @@ use crate::entity::Facing;
 use crate::defs::EquipSlot;
 use crate::inventory::{Inventory, ItemStack};
 
-/// Items worn / held by the player (not part of the inventory grid).
+/// Items worn / held by a character (the player's are not part of the inventory grid).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Equipment {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clothing: Option<ItemStack>,
     pub head: Option<ItemStack>,
     pub body: Option<ItemStack>,
     pub weapon: Option<ItemStack>,
@@ -22,6 +24,7 @@ pub struct Equipment {
 impl Equipment {
     pub fn get(&self, slot: EquipSlot) -> Option<&ItemStack> {
         match slot {
+            EquipSlot::Clothing => self.clothing.as_ref(),
             EquipSlot::Head => self.head.as_ref(),
             EquipSlot::Body => self.body.as_ref(),
             EquipSlot::Weapon => self.weapon.as_ref(),
@@ -30,6 +33,7 @@ impl Equipment {
     }
     pub fn slot_mut(&mut self, slot: EquipSlot) -> &mut Option<ItemStack> {
         match slot {
+            EquipSlot::Clothing => &mut self.clothing,
             EquipSlot::Head => &mut self.head,
             EquipSlot::Body => &mut self.body,
             EquipSlot::Weapon => &mut self.weapon,
@@ -38,6 +42,16 @@ impl Equipment {
     }
     pub fn item(&self, slot: EquipSlot) -> Option<&str> {
         self.get(slot).map(|s| s.item.as_str())
+    }
+    pub fn is_empty(&self) -> bool {
+        EquipSlot::ALL.iter().all(|s| self.get(*s).is_none())
+    }
+    /// Every equipped stack.
+    pub fn stacks_mut(&mut self) -> impl Iterator<Item = &mut ItemStack> {
+        [&mut self.clothing, &mut self.head, &mut self.body, &mut self.weapon, &mut self.offhand].into_iter().filter_map(|s| s.as_mut())
+    }
+    pub fn stacks(&self) -> impl Iterator<Item = &ItemStack> {
+        EquipSlot::ALL.into_iter().filter_map(|s| self.get(s))
     }
     pub fn count(&self, item: &str) -> u32 {
         EquipSlot::ALL.iter().filter_map(|s| self.get(*s)).filter(|s| s.item == item).map(|s| s.count).sum()
@@ -117,6 +131,9 @@ pub struct WorldState {
     /// map -> spawner zone uid -> characters defeated for good (`Respawn::Never`).
     #[serde(default)]
     pub spawner_kills: BTreeMap<String, BTreeMap<u32, u32>>,
+    /// map -> spawner zones switched off by name ("" = all of the map's spawners).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub spawners_off: BTreeMap<String, std::collections::BTreeSet<String>>,
     /// map -> entity uid -> contents of containers that have been opened.
     #[serde(default)]
     pub containers: BTreeMap<String, BTreeMap<u32, Inventory>>,
@@ -126,14 +143,11 @@ pub struct WorldState {
     /// quest id -> progress (started quests only).
     #[serde(default)]
     pub quests: BTreeMap<String, crate::quest::QuestProgress>,
-    /// The player character's name, sex and look (sprite sheet; "" = the player
-    /// character definition's), chosen in the character creator.
+    /// The player character's name and sex, chosen in the character creator.
     #[serde(default)]
     pub player_name: String,
     #[serde(default)]
     pub player_sex: Sex,
-    #[serde(default)]
-    pub player_look: String,
     /// map -> items the player dropped there (they stay until picked up again).
     #[serde(default)]
     pub dropped: BTreeMap<String, Vec<DroppedItem>>,
@@ -154,6 +168,23 @@ pub struct WorldState {
     /// Fog of war: explored tiles per map (only maps with fog of war).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub explored: BTreeMap<String, crate::fog::Explored>,
+    /// The look chosen in the character creator (layered models).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_appearance: Option<crate::defs::Appearance>,
+    /// NPCs whose equipment or carried items changed (scripts, actions): map -> uid -> items.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub npc_items: BTreeMap<String, BTreeMap<u32, NpcItems>>,
+    /// The player definition's clothing was put on (saves from before clothing get it once).
+    #[serde(default)]
+    pub dressed: bool,
+}
+
+/// Worn and carried items of an NPC (saved once they differ from the map / definition).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NpcItems {
+    pub equipment: Equipment,
+    pub inventory: Vec<ItemStack>,
 }
 
 /// Uids of dropped items start here, far above the uids of map entities and of spawned
