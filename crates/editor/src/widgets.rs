@@ -14,6 +14,10 @@ use rust2d_engine::render::Assets;
 pub struct Textures {
     pub tilesets: HashMap<String, TextureHandle>,
     pub sheets: HashMap<String, TextureHandle>,
+    /// Idle front layers of layered character definitions (painted for `@char:` sprites).
+    pub characters: HashMap<String, Vec<rust2d_engine::render::character::Layer>>,
+    /// Recolored body / hair sheets of layered characters, made on first use.
+    colored: std::cell::RefCell<HashMap<rust2d_engine::render::ColorKey, TextureHandle>>,
 }
 
 impl Textures {
@@ -25,8 +29,65 @@ impl Textures {
         Textures {
             tilesets: assets.tilesets.iter().map(|(id, t)| (id.clone(), load(&format!("ts:{id}"), &t.image))).collect(),
             sheets: assets.sheets.iter().map(|(id, s)| (id.clone(), load(&format!("sh:{id}"), &s.image))).collect(),
+            colored: Default::default(),
+            characters: HashMap::new(),
         }
     }
+
+    /// Refreshes the layers of the character definitions (cheap; every frame, so previews
+    /// follow edits at once).
+    pub fn set_characters(&mut self, db: &rust2d_engine::defs::Database) {
+        use rust2d_engine::render::character;
+        self.characters.clear();
+        for d in &db.characters {
+            self.characters.insert(d.id.clone(), character::layers(db, &d.appearance, &d.equipment, Facing::Down, 0, false));
+        }
+    }
+
+    /// A sheet's texture with skin / hair recolored (layered characters).
+    pub fn colored(&self, ctx: &egui::Context, assets: &Assets, sheet: &str, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> Option<egui::TextureId> {
+        if skin.is_none() && hair.is_none() {
+            return self.sheets.get(sheet).map(|t| t.id());
+        }
+        let img = &assets.sheets.get(sheet)?.image;
+        let mut cache = self.colored.borrow_mut();
+        let t = cache.entry((sheet.to_string(), skin, hair)).or_insert_with(|| {
+            let mut px = img.bytes.clone();
+            rust2d_engine::render::recolor::recolor(&mut px, skin, hair);
+            let ci = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &px);
+            ctx.load_texture(format!("shc:{sheet}:{skin:?}:{hair:?}"), ci, egui::TextureOptions::NEAREST)
+        });
+        Some(t.id())
+    }
+}
+
+/// Paints a character's layers (see `render::character::layers`) into `rect`, keeping the
+/// aspect ratio, bottom-centered. False if none of its sheets exist.
+pub fn paint_character(ui: &Ui, tex: &Textures, assets: &Assets, layers: &[rust2d_engine::render::character::Layer], rect: Rect) -> bool {
+    let Some(base) = layers.iter().find_map(|l| assets.sheets.get(&l.sheet)) else { return false };
+    let (fw, fh) = (base.frame_w, base.frame_h);
+    let scale = (rect.width() / fw).min(rect.height() / fh);
+    let size = vec2(fw * scale, fh * scale);
+    let dest = Rect::from_min_size(pos2(rect.center().x - size.x / 2.0, rect.max.y - size.y), size);
+    let mut any = false;
+    for l in layers {
+        let (Some(s), Some(id)) = (assets.sheets.get(&l.sheet), tex.colored(ui.ctx(), assets, &l.sheet, l.skin, l.hair)) else { continue };
+        let src = s.src_rect(l.frame);
+        let (w, h) = (s.image.width as f32, s.image.height as f32);
+        let uv = Rect::from_min_max(pos2(src.x / w, src.y / h), pos2((src.x + src.w) / w, (src.y + src.h) / h));
+        ui.painter().image(id, dest, uv, Color32::WHITE);
+        any = true;
+    }
+    any
+}
+
+/// Sheet name prefix of a layered character's thumbnail sprite (see [`character_sprite`]).
+pub const CHAR_PREFIX: &str = "@char:";
+
+/// The thumbnail sprite of a character definition: a `@char:` marker that [`paint_sprite`]
+/// paints from its layers.
+pub fn character_sprite(d: &rust2d_engine::defs::CharacterDef) -> SpriteRef {
+    SpriteRef::new(&format!("{CHAR_PREFIX}{}", d.id), 0)
 }
 
 /// Paints one frame of a sheet into `rect`.
@@ -36,6 +97,9 @@ pub fn paint_frame(ui: &Ui, tex: &Textures, assets: &Assets, sheet: &str, frame:
 
 /// Paints a (possibly multi-cell) sprite into `rect`, keeping its aspect ratio, bottom-centered.
 pub fn paint_sprite(ui: &Ui, tex: &Textures, assets: &Assets, sprite: &SpriteRef, rect: Rect) -> bool {
+    if let Some(id) = sprite.sheet.strip_prefix(CHAR_PREFIX) {
+        return tex.characters.get(id).is_some_and(|l| paint_character(ui, tex, assets, l, rect));
+    }
     let (Some(t), Some(s)) = (tex.sheets.get(&sprite.sheet), assets.sheets.get(&sprite.sheet)) else { return false };
     let (cw, ch) = sprite.cells();
     let src = s.region(sprite.frame, cw, ch);
@@ -941,6 +1005,29 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 suggest(ui, id, item, &refs.items, 110.0);
             });
         }
+        Action::Equip { target, item } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "item", |ui| suggest(ui, &format!("{id}/eq"), item, &refs.items, 120.0));
+            ui.weak("Goes into its slot; what was worn there is carried instead. The player takes it from the inventory (or gets one).");
+        }
+        Action::Unequip { target, slot } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "slot", |ui| {
+                egui::ComboBox::from_id_salt(format!("{id}/slot")).selected_text(slot.label()).show_ui(ui, |ui| {
+                    for s in rust2d_engine::defs::EquipSlot::ALL {
+                        ui.selectable_value(slot, s, s.label());
+                    }
+                });
+            });
+        }
+        Action::GiveItemTo { target, item, count } | Action::TakeItemFrom { target, item, count } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(count).range(1..=9999));
+                ui.label("x");
+                suggest(ui, &format!("{id}/it"), item, &refs.items, 110.0);
+            });
+        }
         Action::SetFlag { name, value } => {
             ui.horizontal(|ui| {
                 suggest(ui, id, name, &refs.flags, 120.0);
@@ -1489,4 +1576,58 @@ pub fn light_ui(ui: &mut Ui, id: &str, l: &mut Option<rust2d_engine::defs::Light
         let _ = id;
     }
     *l != before
+}
+
+// ------------------------------------------------------------------ layered characters
+
+/// Skin tones offered as one-click presets.
+pub const SKIN_PRESETS: [[u8; 3]; 8] = [[0xf6, 0xd0, 0xb0], [0xf2, 0xc4, 0x9b], [0xe8, 0xb8, 0x8a], [0xd0, 0x90, 0x68], [0xb5, 0x79, 0x4c], [0x8d, 0x5a, 0x3b], [0x5a, 0x3a, 0x24], [0x7c, 0xb3, 0x42]];
+/// Hair colors offered as presets.
+pub const HAIR_PRESETS: [[u8; 3]; 10] = [
+    [0x1e, 0x16, 0x12],
+    [0x3a, 0x24, 0x18],
+    [0x5d, 0x3a, 0x1a],
+    [0x8a, 0x5a, 0x2e],
+    [0xe0, 0xc0, 0x60],
+    [0xd3, 0x54, 0x00],
+    [0xc0, 0x39, 0x2b],
+    [0xde, 0xde, 0xde],
+    [0x3b, 0x3b, 0x9e],
+    [0x2e, 0x8b, 0x57],
+];
+
+/// List editor of carried items (count + item).
+pub fn carried_ui(ui: &mut Ui, id: &str, inv: &mut Vec<ItemStack>, items: &[String]) {
+    let mut remove = None;
+    for (k, s) in inv.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut s.count).range(1..=9999));
+            ui.label("x");
+            suggest(ui, &format!("{id}/inv{k}"), &mut s.item, items, 130.0);
+            if ui.small_button("\u{E4F6}").on_hover_text("Remove").clicked() {
+                remove = Some(k);
+            }
+        });
+    }
+    if let Some(k) = remove {
+        inv.remove(k);
+    }
+    if ui.small_button("+ Item").clicked() {
+        inv.push(ItemStack::new(items.first().map_or("", |s| s.as_str()), 1));
+    }
+}
+
+/// The four directions of a character, side by side (idle frames).
+pub fn character_preview(ui: &mut Ui, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database, a: &rust2d_engine::defs::Appearance, eq: &rust2d_engine::state::Equipment) {
+    use rust2d_engine::render::character;
+    ui.horizontal(|ui| {
+        for f in [Facing::Down, Facing::Left, Facing::Up, Facing::Right] {
+            let (rect, _) = ui.allocate_exact_size(vec2(64.0, 96.0), Sense::hover());
+            ui.painter().rect_filled(rect, 3.0, Color32::from_gray(36));
+            let layers = character::layers(db, a, eq, f, 0, false);
+            if !paint_character(ui, tex, assets, &layers, rect.shrink(2.0)) {
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "?", egui::FontId::default(), Color32::RED);
+            }
+        }
+    });
 }

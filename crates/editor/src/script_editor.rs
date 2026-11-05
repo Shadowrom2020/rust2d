@@ -87,6 +87,10 @@ pub const API: &[ApiFn] = api! {
     "light_at"(x: Num, y: Num, radius: Num, seconds: Num) "A light at tile x, y for a while, fading out at the end (queued)";
     "light_at"(x: Num, y: Num, radius: Num, seconds: Num, options: Opts) "Like light_at(); options #{ color: [r, g, b], flicker: true } (queued)";
     "heal_area"(x: Num, y: Num, radius: Num, amount: Num) "Heals the player and friendly characters within radius tiles of tile x, y (queued)";
+    "equip"(target: Target, item: Item) "Puts an item into its slot on a character (clothing, armor, weapon, left hand); what it wore there is carried instead. The player takes it from the inventory (queued)";
+    "unequip"(target: Target, slot: Text) "Takes off what a character wears in \"clothing\", \"head\", \"body\", \"weapon\" or \"offhand\" (into its carried items) (queued)";
+    "give_item_to"(target: Target, item: Item, count: Num) "Adds items to what a character carries (dropped when it is defeated) (queued)";
+    "take_item_from"(target: Target, item: Item, count: Num) "Takes items from what a character carries (queued)";
     "player_x"() "The player's x position in tiles (fractional; the feet)";
     "player_y"() "The player's y position in tiles (fractional; the feet)";
     "player_max_hp"() "The player's maximum hit points";

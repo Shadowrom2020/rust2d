@@ -69,6 +69,9 @@ pub struct LibState {
     pub lib: Option<Project>,
     pub error: Option<String>,
     tex: HashMap<String, Tex>,
+    /// Sheet images (for recolored layered characters) and their recolored textures.
+    raw: HashMap<String, Rgba>,
+    colored: std::cell::RefCell<HashMap<rust2d_engine::render::ColorKey, Tex>>,
     pub tex_dirty: bool,
     pub filter: Option<RefKind>,
     pub search: String,
@@ -118,18 +121,62 @@ impl LibState {
         }
         self.tex_dirty = false;
         self.tex.clear();
+        self.raw.clear();
+        self.colored.borrow_mut().clear();
         let images = store.db.tilesets.iter().map(|t| (format!("ts:{}", t.id), &t.image)).chain(store.db.sheets.iter().map(|s| (format!("sh:{}", s.id), &s.image)));
         for (key, rel) in images {
             let Ok(img) = std::fs::read(store.root.join(rel)).map_err(anyhow::Error::from).and_then(|b| Rgba::decode(&b)) else { continue };
             let ci = egui::ColorImage::from_rgba_unmultiplied([img.w as usize, img.h as usize], &img.px);
             let handle = ctx.load_texture(format!("lib:{key}"), ci, egui::TextureOptions::NEAREST);
-            self.tex.insert(key, Tex { handle, w: img.w as f32, h: img.h as f32 });
+            self.tex.insert(key.clone(), Tex { handle, w: img.w as f32, h: img.h as f32 });
+            if key.starts_with("sh:") {
+                self.raw.insert(key, img);
+            }
         }
     }
 
-    /// Paints a sprite of a library sheet into `rect` (aspect kept, bottom-centered).
-    pub(crate) fn paint_sprite(&self, ui: &egui::Ui, sprite: &SpriteRef, rect: Rect) -> bool {
-        self.lib.as_ref().is_some_and(|lib| self.paint_sprite_in(ui, &lib.db, sprite, rect))
+    /// Paints a library character facing `facing` into `rect` (idle frame).
+    pub(crate) fn paint_character(&self, ui: &egui::Ui, id: &str, facing: rust2d_engine::entity::Facing, rect: Rect) -> bool {
+        self.lib.as_ref().is_some_and(|lib| self.paint_character_in(ui, &lib.db, id, facing, rect))
+    }
+
+    /// Paints a character of `db` (its layers) into `rect`, idle frame facing `facing`.
+    fn paint_character_in(&self, ui: &egui::Ui, db: &Database, id: &str, facing: rust2d_engine::entity::Facing, rect: Rect) -> bool {
+        use rust2d_engine::render::character;
+        let Some(d) = db.character(id) else { return false };
+        let layers = character::layers(db, &d.appearance, &d.equipment, facing, 0, false);
+        let Some(base) = layers.iter().find_map(|l| db.sheet(&l.sheet)) else { return false };
+        let (fw, fh) = (base.frame_w.max(1) as f32, base.frame_h.max(1) as f32);
+        let scale = (rect.width() / fw).min(rect.height() / fh);
+        let size = vec2(fw * scale, fh * scale);
+        let dest = Rect::from_min_size(pos2(rect.center().x - size.x / 2.0, rect.max.y - size.y), size);
+        let mut any = false;
+        for l in &layers {
+            let Some(s) = db.sheet(&l.sheet) else { continue };
+            let key = format!("sh:{}", l.sheet);
+            let colored = l.skin.is_some() || l.hair.is_some();
+            let mut cache = self.colored.borrow_mut();
+            let t = if colored {
+                let Some(img) = self.raw.get(&key) else { continue };
+                cache.entry((l.sheet.clone(), l.skin, l.hair)).or_insert_with(|| {
+                    let mut px = img.px.clone();
+                    rust2d_engine::render::recolor::recolor(&mut px, l.skin, l.hair);
+                    let ci = egui::ColorImage::from_rgba_unmultiplied([img.w as usize, img.h as usize], &px);
+                    let handle = ui.ctx().load_texture(format!("libc:{key}:{:?}:{:?}", l.skin, l.hair), ci, egui::TextureOptions::NEAREST);
+                    Tex { handle, w: img.w as f32, h: img.h as f32 }
+                })
+            } else {
+                let Some(t) = self.tex.get(&key) else { continue };
+                t
+            };
+            let (sw, sh) = (s.frame_w.max(1) as f32, s.frame_h.max(1) as f32);
+            let cols = (t.w / sw).floor().max(1.0) as u32;
+            let (x, y) = ((l.frame % cols) as f32 * sw, (l.frame / cols) as f32 * sh);
+            let uv = Rect::from_min_max(pos2(x / t.w, y / t.h), pos2((x + sw) / t.w, (y + sh) / t.h));
+            ui.painter().image(t.handle.id(), dest, uv, Color32::WHITE);
+            any = true;
+        }
+        any
     }
 
     fn paint_sprite_in(&self, ui: &egui::Ui, db: &Database, sprite: &SpriteRef, rect: Rect) -> bool {
@@ -159,7 +206,7 @@ impl LibState {
         let sprite = match a.0 {
             RefKind::Item => db.item(&a.1).map(|d| d.icon.clone()),
             RefKind::Prop => db.prop(&a.1).map(|d| d.sprite.clone()),
-            RefKind::Character => db.character(&a.1).map(|d| SpriteRef::new(&d.sheet, 0)),
+            RefKind::Character => None,
             RefKind::Sheet => Some(SpriteRef::new(&a.1, 0)),
             RefKind::Skill => db.skill(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
             RefKind::Spell => db.spell(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
@@ -172,6 +219,7 @@ impl LibState {
                 ui.painter().image(t.handle.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 true
             }),
+            (RefKind::Character, _) => self.paint_character_in(ui, db, &a.1, rust2d_engine::entity::Facing::Down, rect),
             (_, Some(s)) => self.paint_sprite_in(ui, db, &s, rect),
             _ => false,
         };

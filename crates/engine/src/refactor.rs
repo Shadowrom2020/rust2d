@@ -41,13 +41,40 @@ impl Renamer<'_> {
             EntityKind::Item => RefKind::Item,
         };
         self.fix(k, &mut e.def);
-        self.fix(RefKind::Sheet, &mut e.sheet);
         self.triggers(&mut e.triggers);
         self.container(&mut e.container);
         self.lock(&mut e.lock);
         self.shop(&mut e.shop);
         if let Some(l) = &mut e.loot {
             self.loot(l);
+        }
+        if let Some(a) = &mut e.appearance {
+            self.look(a);
+        }
+        if let Some(eq) = &mut e.equipment {
+            self.gear(eq, &mut []);
+        }
+        if let Some(inv) = &mut e.inventory {
+            self.gear(&mut Default::default(), inv);
+        }
+    }
+
+    /// Sheets of a layered model.
+    fn look(&mut self, a: &mut crate::defs::Appearance) {
+        for s in [&mut a.body, &mut a.hair, &mut a.beard] {
+            self.fix(RefKind::Sheet, s);
+        }
+    }
+
+    /// Items worn and carried.
+    fn gear(&mut self, eq: &mut crate::state::Equipment, carried: &mut [crate::inventory::ItemStack]) {
+        for slot in crate::defs::EquipSlot::ALL {
+            if let Some(s) = eq.slot_mut(slot) {
+                self.fix(RefKind::Item, &mut s.item);
+            }
+        }
+        for s in carried {
+            self.fix(RefKind::Item, &mut s.item);
         }
     }
 
@@ -144,6 +171,7 @@ impl Renamer<'_> {
         for a in acts {
             match a {
                 Action::GiveItem { item, .. } | Action::TakeItem { item, .. } => self.fix(RefKind::Item, item),
+                Action::Equip { item, .. } | Action::GiveItemTo { item, .. } | Action::TakeItemFrom { item, .. } => self.fix(RefKind::Item, item),
                 Action::Teleport { map, .. } => self.fix(RefKind::Map, map),
                 Action::PlaySound { sound } | Action::PlayMusic { sound } => self.fix(RefKind::Sound, sound),
                 Action::Fly { sprite, .. } | Action::Effect { sprite, .. } => self.fix(RefKind::Sheet, &mut sprite.sheet),
@@ -164,9 +192,11 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
     let mut r = Renamer { kind, old, new, count: 0, found: None };
     for d in &mut db.items {
         r.fix(RefKind::Sheet, &mut d.icon.sheet);
+        r.fix(RefKind::Sheet, &mut d.held);
         r.fix(RefKind::Spell, &mut d.teaches);
         if let Some(a) = &mut d.armor {
             r.fix(RefKind::Sheet, &mut a.overlay);
+            r.fix(RefKind::Sheet, &mut a.overlay_f);
         }
         r.triggers(&mut d.on_use);
         r.weapon(&mut d.weapon);
@@ -181,11 +211,12 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.lock(&mut d.lock);
     }
     for d in &mut db.characters {
-        r.fix(RefKind::Sheet, &mut d.sheet);
         r.triggers(&mut d.triggers);
         r.weapon(&mut d.weapon);
         r.shop(&mut d.shop);
         r.loot(&mut d.loot);
+        r.look(&mut d.appearance);
+        r.gear(&mut d.equipment, &mut d.inventory);
     }
     for d in &mut db.structures {
         r.structure(d);
@@ -197,8 +228,9 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.spell(d);
     }
     r.fix(RefKind::Character, &mut config.player);
-    for l in &mut config.creation.looks {
-        r.fix(RefKind::Sheet, &mut l.sheet);
+    let cc = &mut config.creation;
+    for s in [&mut cc.body_male, &mut cc.body_female].into_iter().chain(&mut cc.hair_styles).chain(&mut cc.beards) {
+        r.fix(RefKind::Sheet, s);
     }
     r.fix(RefKind::Map, &mut config.start_map);
     for (_, s) in config.sfx.fields_mut() {
@@ -249,8 +281,10 @@ pub fn refs_of_item(d: &crate::defs::ItemDef) -> Vec<(RefKind, String)> {
     let mut d = d.clone();
     let mut r = collector();
     r.fix(RefKind::Sheet, &mut d.icon.sheet);
+    r.fix(RefKind::Sheet, &mut d.held);
     if let Some(a) = &mut d.armor {
         r.fix(RefKind::Sheet, &mut a.overlay);
+        r.fix(RefKind::Sheet, &mut a.overlay_f);
     }
     r.triggers(&mut d.on_use);
     r.weapon(&mut d.weapon);
@@ -297,11 +331,12 @@ pub fn refs_of_structure(d: &crate::defs::StructureDef) -> Vec<(RefKind, String)
 pub fn refs_of_character(d: &crate::defs::CharacterDef) -> Vec<(RefKind, String)> {
     let mut d = d.clone();
     let mut r = collector();
-    r.fix(RefKind::Sheet, &mut d.sheet);
     r.triggers(&mut d.triggers);
     r.weapon(&mut d.weapon);
     r.shop(&mut d.shop);
     r.loot(&mut d.loot);
+    r.look(&mut d.appearance);
+    r.gear(&mut d.equipment, &mut d.inventory);
     r.found.unwrap_or_default()
 }
 
@@ -396,6 +431,7 @@ mod tests {
             value: 0,
         light: None,
         teaches: String::new(),
+        held: String::new(),
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),
@@ -417,5 +453,36 @@ mod tests {
         assert_eq!(cfg.start_map, "town");
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sound, "blip", "ding"), 1);
         assert_eq!(cfg.sfx.pickup, "ding");
+    }
+
+    #[test]
+    fn layered_characters_refer_to_their_sheets_and_items() {
+        use crate::defs::{Appearance, CharacterDef, EquipSlot};
+        use crate::inventory::ItemStack;
+        let mut c: CharacterDef = ron::from_str(r#"(id: "npc", name: "Npc")"#).unwrap();
+        c.appearance = Appearance { body: "body_m".into(), hair: "hair_short".into(), beard: "beard".into(), ..Default::default() };
+        *c.equipment.slot_mut(EquipSlot::Clothing) = Some(ItemStack::new("tunic", 1));
+        *c.equipment.slot_mut(EquipSlot::Weapon) = Some(ItemStack::new("sword", 1));
+        c.inventory = vec![ItemStack::new("apple", 2)];
+        let refs = refs_of_character(&c);
+        for want in [(RefKind::Sheet, "body_m"), (RefKind::Sheet, "hair_short"), (RefKind::Sheet, "beard"), (RefKind::Item, "tunic"), (RefKind::Item, "sword"), (RefKind::Item, "apple")] {
+            assert!(refs.contains(&(want.0, want.1.to_string())), "{want:?} in {refs:?}");
+        }
+        let mut sword: ItemDef = ron::from_str(r#"(id: "sword", name: "Sword", icon: (sheet: "items", frame: 0), held: "held_sword")"#).unwrap();
+        assert!(refs_of_item(&sword).contains(&(RefKind::Sheet, "held_sword".into())));
+        // Renames follow into appearance, equipment, carried items and held sprites.
+        let mut db = crate::defs::Database { characters: vec![c], ..Default::default() };
+        sword.held = "held_sword".into();
+        db.items.push(sword);
+        let mut cfg = crate::project::ProjectConfig::new("x");
+        rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "body_m", "body_man");
+        rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "held_sword", "held_blade");
+        rename_in_db(&mut db, &mut cfg, RefKind::Item, "apple", "pear");
+        rename_in_db(&mut db, &mut cfg, RefKind::Item, "tunic", "shirt");
+        let c = &db.characters[0];
+        assert_eq!(c.appearance.body, "body_man");
+        assert_eq!(c.equipment.item(EquipSlot::Clothing), Some("shirt"));
+        assert_eq!(c.inventory[0].item, "pear");
+        assert_eq!(db.items[0].held, "held_blade");
     }
 }

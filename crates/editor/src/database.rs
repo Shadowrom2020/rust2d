@@ -9,6 +9,7 @@ use rust2d_engine::events::TriggerOn;
 use rust2d_engine::imageio::Rgba;
 use rust2d_engine::refactor::RefKind;
 use rust2d_engine::render::Assets;
+use rust2d_engine::state::Equipment;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -251,7 +252,10 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 ed.open_file_dialog(Purpose::ExportPackage { from_library: false, assets: vec![a] });
             }
         }
-        if ui.button(ui::t(ph::SPARKLE, "New asset…")).on_hover_text("A prop, item, character, tileset, sprite sheet or structure (a wizard asks the details)").clicked() {
+        if ui.button(ui::t(ph::USER, "New character…")).on_hover_text("Assemble a character from a body, hair, colors and clothes (the character builder)").clicked() {
+            ed.open_builder(crate::builder::Target::New);
+        }
+        if ui.button(ui::t(ph::SPARKLE, "New asset…")).on_hover_text("A prop, item, tileset, sprite sheet or structure (a wizard asks the details)").clicked() {
             ed.wizard = Some(crate::wizard::Wizard::new(&ed.project));
         }
     });
@@ -272,6 +276,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             _ => scripts_ui(ed, ui),
         });
     } else {
+        let fresh = crate::builder::default_character(&ed.project.db, "", "New character");
         let db = &mut ed.project.db;
         let sel = &mut ed.db.sel;
         egui::SidePanel::left("db_left").resizable(true).default_width(220.0).show_inside(ui, |ui| {
@@ -294,6 +299,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         value: 0,
         light: None,
         teaches: String::new(),
+        held: String::new(),
                     },
                     |d| &mut d.id,
                 ),
@@ -322,24 +328,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.characters,
                     sel,
                     |d| format!("{}  ({})", d.name, d.id),
-                    |ids| CharacterDef {
-                        id: unique("character", ids),
-                        name: "New character".into(),
-                        sheet: String::new(),
-                        walk_frames: 4,
-                        speed: 100.0,
-                        hitbox: [20.0, 12.0],
-                        behavior: Behavior::Static,
-                        max_hp: 0,
-                        damage: 0,
-                        hostile: false,
-                        weapon: None,
-                        defense: 0,
-                        triggers: vec![],
-                        shop: None,
-                        loot: vec![],
-        light: None,
-                    },
+                    |ids| CharacterDef { id: unique("character", ids), ..fresh.clone() },
                     |d| &mut d.id,
                 ),
                 Tab::Tilesets => list_ui(
@@ -355,7 +344,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.sheets,
                     sel,
                     |d| d.id.clone(),
-                    |ids| SheetDef { id: unique("sheet", ids), image: "sprites/new.png".into(), frame_w: 32, frame_h: 32 },
+                    |ids| SheetDef::new(&unique("sheet", ids), "sprites/new.png", 32, 32),
                     |d| &mut d.id,
                 ),
                 Tab::Sounds => list_ui(
@@ -409,7 +398,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         let mut embed: Option<(String, (u32, u32), bool)> = None;
         egui::CentralPanel::default().show_inside(ui, |ui| {
             // Sprite sheets: a compact form on top, the pixel editor below it.
-            let art_tab = matches!(tab, Tab::Items | Tab::Props | Tab::Characters) && ed.db.art_open;
+            let art_tab = matches!(tab, Tab::Items | Tab::Props) && ed.db.art_open;
             let form_height = if tab == Tab::Sheets {
                 210.0
             } else if art_tab {
@@ -455,7 +444,6 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Characters => {
                         if let Some(d) = db.characters.get_mut(i) {
                             character_form(ui, d, &mut cx);
-                            art_target = art_of(&db_snapshot, &SpriteRef::new(&d.sheet, 0), true);
                         }
                     }
                     Tab::Tilesets => {
@@ -693,6 +681,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         (Some(_), _) => 1,
         (None, Some(a)) if a.slot == EquipSlot::Head => 2,
         (None, Some(a)) if a.slot == EquipSlot::Offhand => 4,
+        (None, Some(a)) if a.slot == EquipSlot::Clothing => 5,
         (None, Some(_)) => 3,
         _ => 0,
     };
@@ -703,17 +692,20 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         ui.radio_value(&mut kind, 2, "Helmet");
         ui.radio_value(&mut kind, 3, "Body armor");
         ui.radio_value(&mut kind, 4, "Left hand").on_hover_text("A shield (defense) or a light (lantern, torch: set its light below). Not usable together with a two-handed weapon.");
+        ui.radio_value(&mut kind, 5, "Clothing").on_hover_text("An outfit: changes how layered characters look (its overlay sheet); armor is worn over it.");
     });
     if kind != old {
         d.weapon = (kind == 1).then(|| Weapon::melee(1, 0.4));
         d.armor = match kind {
-            2..=4 => {
+            2..=5 => {
                 let slot = match kind {
                     2 => EquipSlot::Head,
                     3 => EquipSlot::Body,
+                    5 => EquipSlot::Clothing,
                     _ => EquipSlot::Offhand,
                 };
-                Some(d.armor.take().map(|a| Armor { slot, ..a }).unwrap_or(Armor { slot, defense: 1, speed: 0.0, overlay: String::new() }))
+                let defense = if slot == EquipSlot::Clothing { 0 } else { 1 };
+                Some(d.armor.take().map(|a| Armor { slot, ..a }).unwrap_or(Armor { slot, defense, speed: 0.0, overlay: String::new(), overlay_f: String::new() }))
             }
             _ => None,
         };
@@ -743,13 +735,39 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
             };
             widgets::suggest(ui, "armor_overlay", &mut a.overlay, &sheets, 130.0);
             ui.end_row();
+            ui.label("Female cut");
+            ui.horizontal(|ui| {
+                widgets::suggest(ui, "armor_overlay_f", &mut a.overlay_f, &sheets, 130.0);
+                ui.weak("worn on female bodies (empty = the overlay sheet)");
+            });
+            ui.end_row();
         });
-        ui.weak("The overlay sheet uses the same layout as the player's sheet and is drawn on top of it (leave empty for none).");
-        if !a.overlay.is_empty() {
+        ui.weak(if a.slot == EquipSlot::Clothing {
+            "The overlay sheet is the outfit (character layout: 4 walk frames per row, rows Down / Left / Right / Up), drawn over a layered character's body; armor goes on top."
+        } else {
+            "The overlay sheet uses the character layout and is drawn on top of the character (leave empty for none)."
+        });
+        let t = (macroquad::time::get_time() * 6.0) as u32 % 4;
+        for sheet in [&a.overlay, &a.overlay_f].into_iter().filter(|s| !s.is_empty()) {
+            ui.horizontal(|ui| {
+                for row in 0..4 {
+                    widgets::frame_thumb(ui, cx.tex, cx.assets, sheet, row * 4 + t, 48.0, false);
+                }
+            });
+        }
+    }
+    if matches!(d.equip_slot(), Some(EquipSlot::Weapon | EquipSlot::Offhand)) {
+        ui.horizontal(|ui| {
+            ui.label("Held sprite");
+            let held: Vec<String> = cx.db.sheets.iter().filter(|s| s.kind == rust2d_engine::defs::SheetKind::Held).map(|s| s.id.clone()).collect();
+            widgets::suggest(ui, "item_held", &mut d.held, &held, 140.0);
+            ui.weak("(sheet in the character layout: how it looks in a character's hand; empty = not visible)");
+        });
+        if !d.held.is_empty() {
             let t = (macroquad::time::get_time() * 6.0) as u32 % 4;
             ui.horizontal(|ui| {
                 for row in 0..4 {
-                    widgets::frame_thumb(ui, cx.tex, cx.assets, &a.overlay, row * 4 + t, 48.0, false);
+                    widgets::frame_thumb(ui, cx.tex, cx.assets, &d.held, row * 4 + t, 48.0, false);
                 }
             });
         }
@@ -1016,44 +1034,22 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     ui.heading("Character");
     rename_row(ui, RefKind::Character, &d.id, cx.rename);
     name_row(ui, &mut d.name);
-    let mut sheets: Vec<&String> = cx.assets.sheets.keys().collect();
-    sheets.sort();
+    // The look: assembled in the character builder (body, colors, hair, clothes, gear).
+    ui.separator();
+    ui.heading("Look & equipment");
+    ui.allocate_ui(egui::vec2(ui.available_width().min(1100.0), 0.0), |ui| {
+        ui.add(egui::Label::new(egui::RichText::new("A body with skin and hair colors, dressed by what it wears: clothing shapes the look, armor is worn over it, weapons and shields show in its hands. An equipped weapon replaces the one under Combat. (The player character: what a new game starts with.)").weak()).wrap());
+    });
+    {
+        let bcx = crate::builder::Cx { db: cx.db, tex: cx.tex, assets: cx.assets };
+        let parts = crate::builder::Parts { appearance: &mut d.appearance, equipment: &mut d.equipment, inventory: &mut d.inventory };
+        let out = crate::builder::builder_ui(ui, "chr", parts, &bcx);
+        if out.template {
+            crate::models::request_model(crate::models::ModelTarget::Def(d.id.clone()));
+        }
+    }
+    ui.separator();
     egui::Grid::new("chr").num_columns(2).show(ui, |ui| {
-        ui.label("Sprite sheet");
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("chr_sheet").selected_text(d.sheet.as_str()).show_ui(ui, |ui| {
-                for s in &sheets {
-                    ui.selectable_value(&mut d.sheet, s.to_string(), s.as_str());
-                }
-            });
-            if ui.button("\u{E4C2} Choose model…").on_hover_text("Pick a look from this project or the asset library (library models are copied into the project)").clicked() {
-                crate::models::request_model(crate::models::ModelTarget::Def(d.id.clone()));
-            }
-            let mut on = *cx.art_open;
-            if ui.toggle_value(&mut on, "\u{E6C8} Edit art").on_hover_text("Show the pixel editor for this character's sheet").changed() {
-                *cx.art_open = on;
-            }
-            ui.menu_button("+ New sheet", |ui| {
-                ui.label("A sheet for this character: 4 walk frames per row, rows Down / Left / Right / Up.");
-                if ui.button("Blank (32×48 frames)").clicked() {
-                    *cx.art = Some(ArtAction::CharacterSheet { template: None });
-                    ui.close_menu();
-                }
-                ui.separator();
-                ui.label("Start from a copy of:");
-                for s in &sheets {
-                    let used = cx.db.characters.iter().any(|c| &c.sheet == *s);
-                    if used && ui.button(s.as_str()).clicked() {
-                        *cx.art = Some(ArtAction::CharacterSheet { template: Some(s.to_string()) });
-                        ui.close_menu();
-                    }
-                }
-            });
-        });
-        ui.end_row();
-        ui.label("Walk frames");
-        ui.add(egui::DragValue::new(&mut d.walk_frames).range(1..=16));
-        ui.end_row();
         ui.label("Speed (px/s)");
         ui.add(egui::DragValue::new(&mut d.speed).range(1.0..=500.0));
         ui.end_row();
@@ -1131,17 +1127,6 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
         ui.weak("Default stock for every placed instance; instances can have their own stock and prices in the map inspector.");
         widgets::shop_ui(ui, "chr_shop", spec, cx.refs, cx.tex, cx.assets, cx.db);
     }
-    ui.separator();
-    ui.weak("Sheet layout: 4 rows (down, left, right, up) × walk frames; frame 0 of a row is the idle pose.");
-    // Animated preview of all directions.
-    let frames = d.walk_frames.max(1);
-    let t = (macroquad::time::get_time() * 8.0) as u32 % frames;
-    ui.horizontal(|ui| {
-        for row in 0..4 {
-            widgets::frame_thumb(ui, cx.tex, cx.assets, &d.sheet, row * frames + t, 64.0, false);
-        }
-    });
-    ui.ctx().request_repaint();
     ui.separator();
     ui.heading("Default triggers");
     widgets::triggers_ui(ui, &format!("chr/{}", d.id), &mut d.triggers, cx.refs, rust2d_engine::events::TriggerOwner::Character);
@@ -1365,11 +1350,27 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
     ui.heading("Sprite sheet");
     rename_row(ui, RefKind::Sheet, &d.id, cx.rename);
     egui::Grid::new("sheet").num_columns(2).show(ui, |ui| {
+        ui.label("Kind");
+        egui::ComboBox::from_id_salt("sheet_kind")
+            .selected_text(d.kind.label())
+            .show_ui(ui, |ui| {
+                for k in rust2d_engine::defs::SheetKind::ALL {
+                    ui.selectable_value(&mut d.kind, k, k.label());
+                }
+            })
+            .response
+            .on_hover_text("Characters are built from sheets of these kinds: bodies, hair styles, beards, outfits, armor and held items (all in the character layout: 4 walk frames per row, rows Down / Left / Right / Up). Body / hair sheets draw skin / hair in the reference ramps (magenta / cyan) that get recolored.");
+        ui.end_row();
+        if d.kind == SheetKind::Body {
+            ui.label("Female body");
+            ui.checkbox(&mut d.female, "wears the female cut of outfits").on_hover_text("Clothing items can have a second overlay sheet for female bodies");
+            ui.end_row();
+        }
         ui.label("Image");
         ui.horizontal(|ui| {
             ui.text_edit_singleline(&mut d.image);
             if ui.button("\u{E3B4} Edit pixels").on_hover_text("Open the image in the pixel editor").clicked() {
-                let character = cx.db.characters.iter().any(|c| c.sheet == d.id);
+                let character = d.kind != SheetKind::Sprite || cx.db.characters.iter().any(|c| c.appearance.body == d.id);
                 *cx.paint = Some((d.image.clone(), (d.frame_w, d.frame_h), character, 0));
             }
             if ui.button("Browse…").clicked() {
@@ -1558,7 +1559,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     ui.heading("Character creator");
     let cc = &mut c.creation;
     ui.checkbox(&mut cc.enabled, "Show the character creator when a new game starts")
-        .on_hover_text("The player types a name, chooses male / female and one of the looks below. Play-tests from the editor skip it and use the default name.");
+        .on_hover_text("The player types a name, chooses male / female, skin, hair and (men) a beard from the choices below. Play-tests from the editor skip it and use the default name.");
     ui.horizontal(|ui| {
         ui.label("Player character's sex");
         egui::ComboBox::from_id_salt("creation_sex").selected_text(cc.sex.label()).show_ui(ui, |ui| {
@@ -1568,65 +1569,77 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         });
         ui.weak(match cc.sex {
             rust2d_engine::project::SexChoice::Both => "chosen in the character creator (male when it is off)",
-            _ => "fixed by the game; the creator only offers looks of this sex",
+            _ => "fixed by the game; the creator uses this sex's body",
         });
     });
     ui.horizontal(|ui| {
         ui.label("Default name");
         ui.add(egui::TextEdit::singleline(&mut cc.default_name).hint_text("(player character's name)").desired_width(160.0));
     });
-    ui.label("Looks (sprite sheets in the player character's layout; the player picks among those of the chosen sex):");
-    let mut remove = None;
-    let mut swap = None;
-    let n = cc.looks.len();
-    for (k, l) in cc.looks.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
-            if widgets::frame_thumb(ui, &ed.tex, &ed.assets, &l.sheet, 0, 44.0, false).on_hover_text("Choose another look").clicked() {
-                crate::models::request_model(crate::models::ModelTarget::Look(k));
-            }
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt(format!("look_sex{k}")).width(80.0).selected_text(l.sex.label()).show_ui(ui, |ui| {
-                        for s in rust2d_engine::state::Sex::ALL {
-                            ui.selectable_value(&mut l.sex, s, s.label());
-                        }
-                    });
-                    ui.add(egui::TextEdit::singleline(&mut l.label).hint_text(l.sheet.as_str()).desired_width(160.0));
-                    if ui.add_enabled(k > 0, egui::Button::new("^").small()).clicked() {
-                        swap = Some(k - 1);
-                    }
-                    if ui.add_enabled(k + 1 < n, egui::Button::new("v").small()).clicked() {
-                        swap = Some(k);
-                    }
-                    if ui.small_button("\u{E4F6}").clicked() {
+    // The player's bodies and the choices of skin, hair style, hair color and beard.
+    {
+        let bcx = crate::builder::Cx { db: &ed.project.db, tex: &ed.tex, assets: &ed.assets };
+        let player = ed.project.db.character(&c.player).map(|d| (d.appearance.clone(), d.equipment.clone())).unwrap_or_default();
+        ui.label("Player bodies (the player character's own body when empty):");
+        let base = Appearance { hair: String::new(), beard: String::new(), ..player.0.clone() };
+        for (label, v) in [("Male", &mut cc.body_male), ("Female", &mut cc.body_female)] {
+            ui.horizontal_top(|ui| {
+                ui.label(label);
+                let pick = crate::builder::sheet_cards(ui, &bcx, SheetKind::Body, Some("Own body"), (&base, &Equipment::default()), v, &|a, id| a.body = id.to_string());
+                if let Some(p) = pick {
+                    *v = p;
+                }
+            });
+        }
+        ui.label("Skin colors (empty = no choice):");
+        let colors = |ui: &mut egui::Ui, list: &mut Vec<[u8; 3]>, presets: &[[u8; 3]]| {
+            ui.horizontal_wrapped(|ui| {
+                let mut remove = None;
+                for (k, c) in list.iter_mut().enumerate() {
+                    ui.color_edit_button_srgb(c);
+                    if ui.small_button("\u{E4F6}").on_hover_text("Remove").clicked() {
                         remove = Some(k);
                     }
-                });
-                ui.horizontal(|ui| {
-                    ui.weak(format!("sheet: {}", l.sheet));
-                    if !ed.assets.sheets.contains_key(&l.sheet) {
-                        ui.colored_label(Color32::LIGHT_RED, "missing sheet");
-                    }
-                });
+                }
+                if let Some(k) = remove {
+                    list.remove(k);
+                }
+                if ui.small_button("+").on_hover_text("Add a color").clicked() {
+                    list.push(presets[list.len() % presets.len()]);
+                }
             });
-        });
-    }
-    if let Some(k) = swap {
-        cc.looks.swap(k, k + 1);
-    }
-    if let Some(k) = remove {
-        cc.looks.remove(k);
-    }
-    if ui.button("\u{E4C2} + Add a look…").on_hover_text("From this project or the asset library").clicked() {
-        crate::models::request_model(crate::models::ModelTarget::Look(n));
-    }
-    let needed: Vec<rust2d_engine::state::Sex> = match cc.sex.fixed() {
-        Some(x) => vec![x],
-        None => rust2d_engine::state::Sex::ALL.to_vec(),
-    };
-    let missing: Vec<&str> = needed.iter().filter(|x| !cc.looks.iter().any(|l| l.sex == **x)).map(|x| x.label()).collect();
-    if cc.enabled && !missing.is_empty() {
-        ui.colored_label(Color32::YELLOW, format!("No {} look yet: the player character's own look is used.", missing.join(" / ").to_lowercase()));
+        };
+        colors(ui, &mut cc.skin_colors, &widgets::SKIN_PRESETS);
+        // Styles offered: click a card to add / remove it from the list ("None" = no hair / beard).
+        let styles = |ui: &mut egui::Ui, kind: SheetKind, none: &str, list: &mut Vec<String>, base: &Appearance, apply: &dyn Fn(&mut Appearance, &str)| {
+            let on: std::collections::BTreeSet<String> = list.iter().cloned().collect();
+            let mut shown = base.clone();
+            apply(&mut shown, "");
+            let entries: Vec<(String, String)> = std::iter::once((String::new(), none.to_string()))
+                .chain(ed.project.db.sheets.iter().filter(|s| s.kind == kind).map(|s| (s.id.clone(), s.label())))
+                .map(|(id, l)| (id.clone(), if on.contains(&id) { format!("{l} *") } else { l }))
+                .collect();
+            let picked = crate::builder::cards(ui, egui::vec2(52.0, 72.0), &entries, None, &|ui, id, r| {
+                let mut a = shown.clone();
+                apply(&mut a, id);
+                widgets::paint_character(ui, &ed.tex, &ed.assets, &rust2d_engine::render::character::layers(&ed.project.db, &a, &player.1, rust2d_engine::entity::Facing::Down, 0, false), r)
+            });
+            if let Some(p) = picked {
+                match list.iter().position(|x| *x == p) {
+                    Some(k) => {
+                        list.remove(k);
+                    }
+                    None => list.push(p),
+                }
+            }
+        };
+        ui.label(format!("Hair styles offered ({}; click to add / remove, * = offered):", cc.hair_styles.len()));
+        styles(ui, SheetKind::Hair, "No hair", &mut cc.hair_styles, &base, &|a, id| a.hair = id.to_string());
+        ui.label("Hair colors:");
+        colors(ui, &mut cc.hair_colors, &widgets::HAIR_PRESETS);
+        ui.label(format!("Beards offered to male players ({}):", cc.beards.len()));
+        styles(ui, SheetKind::Beard, "No beard", &mut cc.beards, &base, &|a, id| a.beard = id.to_string());
+        ui.weak("New games dress the player in the player character's equipment (Database \u{E13A} Characters).");
     }
     ui.weak("Dialogs address the player with {player} (name) and {sir|madam} (male|female); conditions have 'Player sex'; scripts have player_name(), player_sex(), is_female(), is_male(), text(\"...\").");
     ui.separator();
@@ -1880,8 +1893,6 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
 pub enum ArtAction {
     /// Give the current item icon / prop state a blank frame (`cells` big) to draw in.
     NewFrame { cells: (u32, u32) },
-    /// Give the current character its own sheet (blank or a copy of `template`).
-    CharacterSheet { template: Option<String> },
 }
 
 /// The image the embedded editor should show for a sprite: (path, frame size, character
@@ -1936,41 +1947,6 @@ impl Editor {
                 self.db.art_focus = None;
                 Ok(format!("Blank frame {frame} of sheet '{sheet}' is ready: draw it below, Ctrl+S saves the image"))
             }
-            ArtAction::CharacterSheet { template } => {
-                let Some(d) = self.project.db.characters.get(i).cloned() else { anyhow::bail!("nothing selected") };
-                let mut id = d.id.clone();
-                let mut n = 2;
-                while self.project.db.sheet(&id).is_some() {
-                    id = format!("{}_{n}", d.id);
-                    n += 1;
-                }
-                let mut rel = format!("sprites/{id}.png");
-                let mut n = 2;
-                while self.project.root.join(&rel).exists() {
-                    rel = format!("sprites/{id}_{n}.png");
-                    n += 1;
-                }
-                let (bytes, fw, fh) = match &template {
-                    Some(t) => {
-                        let s = self.project.db.sheet(t).cloned().ok_or_else(|| anyhow::anyhow!("unknown sheet {t}"))?;
-                        (std::fs::read(self.project.root.join(&s.image))?, s.frame_w, s.frame_h)
-                    }
-                    None => {
-                        let ts = rust2d_engine::project::TILE_SIZE;
-                        (Rgba::new(ts * 4, ts * 3 / 2 * 4).encode()?, ts, ts * 3 / 2)
-                    }
-                };
-                let path = self.project.root.join(&rel);
-                std::fs::create_dir_all(path.parent().unwrap())?;
-                std::fs::write(&path, bytes)?;
-                self.project.db.sheets.push(SheetDef { id: id.clone(), image: rel.clone(), frame_w: fw, frame_h: fh });
-                self.project.db.characters[i].sheet = id.clone();
-                self.defs_dirty = true;
-                self.reload_assets();
-                self.db.art_open = true;
-                self.db.art_focus = None;
-                Ok(format!("New sheet '{id}' ({rel}) for {}: draw it below, Ctrl+S saves the image", d.name))
-            }
         })();
         match res {
             Ok(m) => self.set_status(m),
@@ -1994,7 +1970,7 @@ impl Editor {
             if !path.exists() {
                 std::fs::write(&path, Rgba::new(ts * 8, ts).encode()?)?;
             }
-            self.project.db.sheets.push(SheetDef { id: id.into(), image: rel, frame_w: ts, frame_h: ts });
+            self.project.db.sheets.push(SheetDef::new(id, &rel, ts, ts));
             self.defs_dirty = true;
             self.reload_assets();
         }

@@ -102,15 +102,21 @@ pub struct EntityInstance {
     /// Characters: a route the NPC walks along (instead of its definition's behaviour).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patrol: Option<PatrolRoute>,
-    /// Characters: sprite sheet ("model") used instead of the definition's ("" = definition's).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub sheet: String,
     /// Overrides the character definition's merchant spec (stock, prices).
     #[serde(default)]
     pub shop: Option<crate::defs::ShopSpec>,
     /// Light of this placed entity, instead of its definition's (props: of its current state).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<crate::defs::LightSpec>,
+    /// Characters: layered look instead of the definition's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<crate::defs::Appearance>,
+    /// Characters: equipment instead of the definition's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment: Option<crate::state::Equipment>,
+    /// Characters: carried items instead of the definition's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<Vec<crate::inventory::ItemStack>>,
 }
 
 fn yes() -> bool {
@@ -201,7 +207,9 @@ impl EntityInstance {
             lock: None,
             shop: None,
             light: None,
-            sheet: String::new(),
+            appearance: None,
+            equipment: None,
+            inventory: None,
             patrol: None,
             loot: None,
         }

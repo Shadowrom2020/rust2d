@@ -5,6 +5,47 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 
 ## Unreleased
 
+### Characters and equipment
+- **Layered characters**: every character is a body (people: in underwear, with recolorable
+  skin and hair, a hair style and a beard; monsters: the whole creature) dressed by what it
+  wears. A new **Clothing** equipment slot dresses them (outfit overlays, with a **female cut**
+  worn by female bodies), armor is drawn over the clothing, and **weapons, shields and lights
+  are visible in the hands** for every facing and walk frame (melee swings sweep the weapon).
+  The pre-drawn sheet option is gone: a character of an old project keeps its sheet as its body.
+- **NPCs have equipment and carried items** (per definition and per placed NPC): visible, used in
+  combat (weapon, armor defense), dropped when defeated; actions *Equip item*, *Unequip slot*,
+  *Give item to character*, *Take item from character* and script functions `equip`, `unequip`,
+  `give_item_to`, `take_item_from` change them (saved).
+- The **character creator** offers skin color, hair style, hair color and, for men, a **beard**
+  (lists set in the editor); the pre-drawn looks are gone.
+- The player character's equipment and carried items are what a new game starts with; saves from
+  before clothing get the player's clothing once.
+
+### Editor
+- **Character builder**: characters are assembled visually — a walking preview (facing buttons
+  or turning, the four idle directions) beside rows of clickable cards for the body, skin
+  swatches, hair style, hair color, beard, clothing (shown worn), head / body armor, weapon,
+  left hand, plus the carried items; *Randomize* and *Start from…* (copy the look and equipment
+  of a character of the project or the asset library — library sheets and items are brought
+  along). It is the *Look & equipment* part of the Characters form (project and library),
+  opens as a window for **New character…** (id, name, *Create*) and for a placed NPC's own
+  look (*Customize this one…* in the map inspector, *Use the definition's* clears it). Items get
+  a *Held sprite* and outfits a *Female cut* sheet, sheets a *Kind* and bodies a *Female body*
+  flag, the armor slot *Clothing*; the Project tab sets the creator's bodies and its skin, hair
+  style, hair color and beard choices with the same cards. The New-asset wizard no longer makes
+  characters. Editor-script commands `charnew`, `charset`, `charrandom`, `chartemplate`,
+  `charcreate` / `charapply`, `charcancel`, `charcustom`, `charreset`, `entequip`, `entskin`.
+
+### Example project and starter library
+- Every character is a layered model: shared bodies (male, female, goblin, **female goblin**),
+  short / long / **ponytail** hair, **full beard and goatee**; outfits as clothing items in both
+  cuts; held sprites for sword, spear, axe, bow, crossbow, shield, lantern and torch; slimes,
+  skeletons, bats and ghosts are bodies. **Female bodies are more feminine** (narrow waist, bust,
+  slim limbs, rounder chin, fitted outfits). The guard holds a spear and wears a helmet, goblin
+  archers and the new **goblin scouts** (female, in the wilds) carry a crude bow (and drop it
+  with their rags), the villager carries apples, Tilda sells green and red tunics, the creator
+  offers 5 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
+
 ### Gameplay
 - **Scripted spell effects**: new script functions (also trigger actions) `aim(fn)` (magic
   targeting; the click calls `fn(x, y)`, a spell's cost is paid only then), `fly(sheet, x, y, fn,

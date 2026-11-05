@@ -421,6 +421,15 @@ pub enum Action {
     LightAt { x: f32, y: f32, radius: f32, seconds: f32, color: [u8; 3], flicker: bool },
     /// Heals the player and friendly characters within `radius` tiles of tile point (`x`, `y`).
     HealArea { x: f32, y: f32, radius: f32, amount: i32 },
+    /// Puts an item into its slot (clothing, armor, weapon, left hand) on a character; what it
+    /// wore there goes to its carried items. The player takes it from the inventory (or gets it).
+    Equip { target: TargetName, item: String },
+    /// Takes off what a character wears / holds in a slot (into its carried items).
+    Unequip { target: TargetName, slot: crate::defs::EquipSlot },
+    /// Adds items to what a character carries (the player: the inventory).
+    GiveItemTo { target: TargetName, item: String, count: u32 },
+    /// Takes items from what a character carries.
+    TakeItemFrom { target: TargetName, item: String, count: u32 },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -489,6 +498,10 @@ impl Action {
             Action::DamageArea { .. } => "Damage area",
             Action::LightAt { .. } => "Light at point",
             Action::HealArea { .. } => "Heal area",
+            Action::Equip { .. } => "Equip item",
+            Action::Unequip { .. } => "Unequip slot",
+            Action::GiveItemTo { .. } => "Give item to character",
+            Action::TakeItemFrom { .. } => "Take item from character",
         }
     }
 
@@ -531,6 +544,10 @@ impl Action {
             Action::DamageArea { x: 0.0, y: 0.0, radius: 2.0, damage: 2 },
             Action::LightAt { x: 0.0, y: 0.0, radius: 3.0, seconds: 10.0, color: [255, 190, 120], flicker: true },
             Action::HealArea { x: 0.0, y: 0.0, radius: 2.0, amount: 2 },
+            Action::Equip { target: "self".into(), item: s() },
+            Action::Unequip { target: "self".into(), slot: crate::defs::EquipSlot::Weapon },
+            Action::GiveItemTo { target: "self".into(), item: s(), count: 1 },
+            Action::TakeItemFrom { target: "self".into(), item: s(), count: 1 },
         ]
     }
 }

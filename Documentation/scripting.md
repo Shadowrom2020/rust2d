@@ -290,6 +290,28 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 
+### Equipment and carried items of characters
+
+Every humanoid character has equipment (Clothing, Head, Body, Weapon, Left hand) and carried items.
+What NPCs wear and hold is visible on layered models, counts in combat (an equipped weapon
+replaces the definition's), and everything they wear and carry is dropped when they are defeated.
+Changes are saved with the game.
+
+| Function | Description |
+|---|---|
+| `equip(target, item)` | Puts an item into its slot (clothing, armor, weapon, left hand); what was worn there goes to the character's carried items. For `"player"` the item comes from the inventory (or is given). *(queued)* |
+| `unequip(target, slot)` | Takes off what is worn in `"clothing"`, `"head"`, `"body"`, `"weapon"` or `"offhand"` (into the carried items; the player: the inventory). *(queued)* |
+| `give_item_to(target, item, count)` | Adds items to what a character carries (the player: the inventory). *(queued)* |
+| `take_item_from(target, item, count)` | Takes items from what a character carries. *(queued)* |
+
+```rust
+fn guard_upgrade() {
+    equip("guard", "axe");          // the spear goes to his carried items
+    unequip("guard", "head");       // so does the helmet
+    give_item_to("guard", "coin", 5);
+}
+```
+
 ### Quests
 
 | Function | Description |

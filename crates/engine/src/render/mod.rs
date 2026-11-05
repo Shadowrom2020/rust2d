@@ -4,8 +4,11 @@
 //! quads that share a texture). When zoomed far out, an [`Overview`] texture with one
 //! pixel per tile replaces the per-tile drawing, so even a 1024x1024 map renders fast.
 
+pub mod character;
 pub mod lighting;
+pub mod recolor;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use macroquad::prelude::*;
@@ -85,7 +88,12 @@ pub struct Assets {
     pub tilesets: HashMap<String, TilesetTex>,
     pub sheets: HashMap<String, SheetTex>,
     pub errors: Vec<String>,
+    /// Recolored copies of body / hair sheets (layered characters), made on first use.
+    recolored: RefCell<HashMap<ColorKey, Texture2D>>,
 }
+
+/// A sheet with optional skin / hair recoloring (cache key).
+pub type ColorKey = (String, Option<[u8; 3]>, Option<[u8; 3]>);
 
 /// Magenta/black checkerboard used when an image is missing.
 fn placeholder(w: u16, h: u16) -> Image {
@@ -144,6 +152,11 @@ fn average_color(img: &Image, r: Rect) -> Color {
 }
 
 impl Assets {
+    /// No images (tests).
+    pub fn empty(tile_size: f32) -> Assets {
+        Assets { tile_size, tilesets: HashMap::new(), sheets: HashMap::new(), errors: Vec::new(), recolored: RefCell::default() }
+    }
+
     /// Loads all tileset and sprite sheet images. Needs a macroquad window.
     pub fn load(project: &Project) -> Assets {
         let ts = crate::project::TILE_SIZE as f32;
@@ -197,7 +210,7 @@ impl Assets {
         for e in &errors {
             eprintln!("[assets] {e}");
         }
-        Assets { tile_size: ts, tilesets, sheets, errors }
+        Assets { tile_size: ts, tilesets, sheets, errors, recolored: RefCell::default() }
     }
 
     /// Tileset textures for each slot of a map.
@@ -222,6 +235,36 @@ impl Assets {
             tint,
             DrawTextureParams { source: Some(s.src_rect(frame)), ..Default::default() },
         );
+        true
+    }
+
+    /// A sheet's texture with skin / hair reference colors replaced (see [`recolor`]).
+    fn colored(&self, sheet: &str, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> Option<(Texture2D, &SheetTex)> {
+        let s = self.sheets.get(sheet)?;
+        if skin.is_none() && hair.is_none() {
+            return Some((s.texture.clone(), s));
+        }
+        let mut cache = self.recolored.borrow_mut();
+        let tex = cache.entry((sheet.to_string(), skin, hair)).or_insert_with(|| {
+            let mut img = s.image.clone();
+            recolor::recolor(&mut img.bytes, skin, hair);
+            texture(&img)
+        });
+        Some((tex.clone(), s))
+    }
+
+    /// Draws a frame of a body / hair sheet recolored with `skin` / `hair`, bottom-center at `feet`.
+    pub fn draw_frame_colored(&self, sheet: &str, frame: u32, feet: Vec2, tint: Color, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
+        let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
+        let pos = vec2((feet.x - s.frame_w / 2.0).round(), (feet.y - s.frame_h).round());
+        draw_texture_ex(&tex, pos.x, pos.y, tint, DrawTextureParams { source: Some(s.src_rect(frame)), ..Default::default() });
+        true
+    }
+
+    /// Like [`draw_frame_colored`](Self::draw_frame_colored), scaled into `dest` (portraits).
+    pub fn draw_frame_colored_in(&self, sheet: &str, frame: u32, dest: Rect, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
+        let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
+        draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { source: Some(s.src_rect(frame)), dest_size: Some(dest.size()), ..Default::default() });
         true
     }
 
