@@ -1,5 +1,6 @@
 //! Skills and magic at runtime: skill bonuses, skill points, mana, learning and casting
-//! spells, the Skills (K) and Spells (L) tabs of the character window and the mana bar.
+//! spells and the Skills (K) and Spells (L) tabs of the character window (the mana bar is
+//! part of the HUD's status frame, `combat.rs`).
 
 use std::collections::HashMap;
 
@@ -736,19 +737,6 @@ impl Game {
             let mana = format!("Mana {:.0} / {}", self.world.mana, self.max_mana());
             draw_text(&mana, b.x + b.w + 16.0, b.y + 21.0, 18.0, Color::new(0.6, 0.7, 1.0, 1.0));
         }
-    }
-
-    /// Mana bar under the hearts (HUD).
-    pub(super) fn draw_mana_bar(&self) {
-        if !self.magic_on() || !self.combat.enabled() {
-            return;
-        }
-        let max = self.max_mana().max(1) as f32;
-        let (x, y, w, h) = (14.0, 44.0, 120.0, 10.0); // right under the hearts
-        draw_rectangle(x - 1.0, y - 1.0, w + 2.0, h + 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
-        draw_rectangle(x, y, w * (self.world.mana / max).clamp(0.0, 1.0), h, Color::new(0.35, 0.5, 1.0, 1.0));
-        draw_rectangle_lines(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 1.0, Color::new(0.6, 0.7, 1.0, 0.8));
-        draw_text(format!("{:.0}", self.world.mana), x + w + 6.0, y + 10.0, 15.0, Color::new(0.75, 0.82, 1.0, 1.0));
     }
 
     /// For automated play-throughs.

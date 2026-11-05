@@ -1467,7 +1467,6 @@ impl Game {
         if !self.on_title() {
             self.draw_hud();
             self.draw_clock();
-            self.draw_mana_bar();
             if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
