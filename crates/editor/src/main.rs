@@ -294,7 +294,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} msg={}",
+            ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
             ed.pending.is_some(),
@@ -358,6 +359,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         // Library / packages: libsel KIND ID · libadd · tolib KIND ID · libexport PATH ·
         // libimport PATH (into the library) · projimport PATH (into the project)
+        // libfilter KIND|all: the Browse view's kind filter
+        "libfilter" => ed.lib.filter = library_ui::parse_kind(arg(1)),
         "libsel" => {
             ed.lib.ensure_loaded();
             if let Some(k) = library_ui::parse_kind(arg(1)) {
@@ -465,14 +468,35 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         "tolib" => {
             if let Some(k) = library_ui::parse_kind(arg(1)) {
-                let r = ed.project_to_library(&[(k, arg(2).to_string())]);
-                ed.show_result(r);
+                // Assets using scripts open the "Script functions" dialog (scriptpick…).
+                ed.send_project_assets(vec![(k, arg(2).to_string())], library_ui::SendTo::Library);
                 println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
             }
         }
+        // projexport KIND ID PATH: a project asset to a package (via the script dialog if needed)
+        "projexport" => {
+            if let Some(k) = library_ui::parse_kind(arg(1)) {
+                ed.send_project_assets(vec![(k, arg(2).to_string())], library_ui::SendTo::Package(arg(3).into()));
+                println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+            }
+        }
+        // The "Script functions" dialog: scriptpick FN on|off · scriptpickok · scriptpickcancel
+        "scriptpick" => {
+            if let Some(p) = &mut ed.lib.script_pick {
+                if arg(2) == "off" {
+                    p.picked.remove(arg(1));
+                } else {
+                    p.picked.insert(arg(1).to_string());
+                }
+            }
+        }
+        "scriptpickok" | "scriptpickcancel" => {
+            ed.close_script_pick(arg(0) == "scriptpickok");
+            println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
+        }
         "libexport" => {
             let sel: Vec<_> = ed.lib.selected.iter().cloned().collect();
-            let r = ed.export_package(true, &sel, std::path::Path::new(arg(1)));
+            let r = ed.export_package(&sel, std::path::Path::new(arg(1)));
             ed.show_result(r);
             println!("[script] {}", ed.lib.report.clone().unwrap_or_default());
         }

@@ -245,8 +245,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     ed.lib.confirm_remove = Some(vec![a.clone()]);
                 }
             } else if ui.button(ui::t(ph::UPLOAD_SIMPLE, "Add to library")).on_hover_text(format!("Copies '{}' and everything it needs into the shared asset library", a.1)).clicked() {
-                let r = ed.project_to_library(std::slice::from_ref(&a));
-                ed.show_result(r);
+                ed.send_project_assets(vec![a.clone()], crate::library_ui::SendTo::Library);
             }
             if ui.button(ui::t(ph::PACKAGE, "Export…")).on_hover_text(format!("Saves '{}' and everything it needs as a .r2dpack file", a.1)).clicked() {
                 ed.open_file_dialog(Purpose::ExportPackage { from_library: false, assets: vec![a] });

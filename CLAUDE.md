@@ -150,7 +150,7 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
 - **Editor:** `RUST2D_EDITOR_SCRIPT="wait 1; open village; select named tilda; mode db; tab quests 1; shot /path/b.png; quit" target/debug/rust2d-editor <project>`.
   Many commands exist (`grep '=> {' crates/editor/src/main.rs`): tools, placing, zones,
   transitions (`linkarea`, `trdraw`…), library (`libadd`, `tolib`, `libdialog KIND`, `libpick`,
-  `libdialogadd`, `libwindow`, `libedit`…), structures (`structure ID`, `stplace X Y`,
+  `libdialogadd`, `libwindow`, `libedit`…; scripted assets: `tolib` / `projexport KIND ID PATH` open the *Script functions* dialog → `scriptpick FN on|off`, `scriptpickok`, `scriptpickcancel`; `libimport` / `projimport PATH` import packages, `libfilter KIND`), structures (`structure ID`, `stplace X Y`,
   `stcapture X Y W H ID`, `stinfo`; structure editor: `stnew`, `stsize W H`, `stlayer N`,
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
   `stpaint X Y`), `hover X Y` (tool previews), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), `addaction LABEL` (append an action template to the selected entity's trigger), pixel editor (`px…`),
@@ -178,7 +178,10 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
 - `example_project/saves/` may contain the user's saves — never delete, regenerate over or
   commit it (it is git-ignored).
 - The starter pack merges library-only extras by id; the example project's version wins.
-  Existing user libraries only gain *new* ids (`Bundle::add_missing`).
+  Existing user libraries only gain *new* ids (`Bundle::add_missing`), except that an existing
+  image the new pack only extends (more frames, old pixels unchanged) is replaced. The starter
+  is applied when `starter.stamp` (rules version + pack hash) changes: bump `STARTER_RULES` in
+  `library.rs` when the way starter sets are applied changes, so existing libraries rerun it.
 - macroquad `Image::export_png` flips vertically (the generator pre-flips).
 - Interaction: E checks the tile in front of the player (also across a counter / solid
   tile for NPCs); right-click walks there first. Place test players accordingly.

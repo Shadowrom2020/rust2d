@@ -5,7 +5,7 @@
 //! comments and other strings. Renames use it to update scripts; the editor's script check
 //! uses it to report ids that don't exist.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::defs::Database;
 use crate::refactor::RefKind;
@@ -48,6 +48,8 @@ impl IdKind {
             IdKind::Map => Some(RefKind::Map),
             IdKind::Sound => Some(RefKind::Sound),
             IdKind::Sheet => Some(RefKind::Sheet),
+            IdKind::Skill => Some(RefKind::Skill),
+            IdKind::Spell => Some(RefKind::Spell),
             _ => None,
         }
     }
@@ -264,6 +266,118 @@ pub fn rename_in_script(src: &str, kind: RefKind, old: &str, new: &str) -> (Stri
     let mut lines: Vec<usize> = hits.iter().map(|h| h.2).collect();
     lines.dedup();
     (out, lines)
+}
+
+/// A top-level function of a script file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptFn {
+    pub name: String,
+    pub params: Vec<String>,
+    /// The whole definition, with the `//` comment lines right above it.
+    pub text: String,
+}
+
+/// The top-level functions of a script source, in order.
+pub fn functions(src: &str) -> Vec<ScriptFn> {
+    let toks = tokenize(src);
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut k = 0;
+    while k < toks.len() {
+        match &toks[k].0 {
+            Tok::Punct('{') => depth += 1,
+            Tok::Punct('}') => depth -= 1,
+            Tok::Ident(kw) if kw == "fn" && depth == 0 => {
+                let Some((Tok::Ident(name), _)) = toks.get(k + 1) else {
+                    k += 1;
+                    continue;
+                };
+                // Parameters up to ")", then the body from "{" to its matching "}".
+                let mut j = k + 2;
+                let mut params = Vec::new();
+                while j < toks.len() && toks[j].0 != Tok::Punct(')') {
+                    if let Tok::Ident(p) = &toks[j].0 {
+                        params.push(p.clone());
+                    }
+                    j += 1;
+                }
+                while j < toks.len() && toks[j].0 != Tok::Punct('{') {
+                    j += 1;
+                }
+                let mut d = 0;
+                let mut end = src.len();
+                while j < toks.len() {
+                    match toks[j].0 {
+                        Tok::Punct('{') => d += 1,
+                        Tok::Punct('}') => {
+                            d -= 1;
+                            if d == 0 {
+                                end = toks[j].1 + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                // Comment lines directly above belong to the function.
+                let mut start = src[..toks[k].1].rfind('\n').map_or(0, |i| i + 1);
+                while start > 0 {
+                    let prev_start = src[..start - 1].rfind('\n').map_or(0, |i| i + 1);
+                    if !src[prev_start..start - 1].trim_start().starts_with("//") {
+                        break;
+                    }
+                    start = prev_start;
+                }
+                out.push(ScriptFn { name: name.clone(), params, text: src[start..end].to_string() });
+                k = j + 1;
+                continue;
+            }
+            _ => {}
+        }
+        k += 1;
+    }
+    out
+}
+
+/// Script functions (of `names`) a function uses: calls, and names passed as strings
+/// (`then_call("f")`, `aim("f")`, `fly(..., "f")`).
+pub fn used_functions(f: &ScriptFn, names: &BTreeSet<String>) -> BTreeSet<String> {
+    let toks = tokenize(&f.text);
+    let mut out = BTreeSet::new();
+    for k in 0..toks.len() {
+        match &toks[k].0 {
+            Tok::Ident(n) if names.contains(n) => {
+                let call = toks.get(k + 1).is_some_and(|t| t.0 == Tok::Punct('('));
+                let def = k > 0 && toks[k - 1].0 == Tok::Ident("fn".into());
+                if call && !def {
+                    out.insert(n.clone());
+                }
+            }
+            Tok::Str(v, _, _) if names.contains(v) => {
+                out.insert(v.clone());
+            }
+            _ => {}
+        }
+    }
+    out.remove(&f.name);
+    out
+}
+
+/// `roots` and every function they use, directly or through others.
+pub fn needed_functions(fns: &[ScriptFn], roots: &[String]) -> BTreeSet<String> {
+    let names: BTreeSet<String> = fns.iter().map(|f| f.name.clone()).collect();
+    let mut seen = BTreeSet::new();
+    let mut stack: Vec<String> = roots.iter().filter(|r| names.contains(*r)).cloned().collect();
+    while let Some(n) = stack.pop() {
+        if !seen.insert(n.clone()) {
+            continue;
+        }
+        if let Some(f) = fns.iter().find(|f| f.name == n) {
+            stack.extend(used_functions(f, &names).into_iter().filter(|u| !seen.contains(u)));
+        }
+    }
+    seen
 }
 
 /// A problem found by [`check_script`].

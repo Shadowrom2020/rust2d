@@ -2,8 +2,8 @@
 //! see `library_window.rs`: import / export packages, remove, jump to editing) and the main
 //! editor's "Add from library" dialog. Both use the same thumbnail grid.
 
-use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle};
@@ -12,6 +12,7 @@ use rust2d_engine::imageio::Rgba;
 use rust2d_engine::library::{self, kind_label, AssetRef, Bundle, KINDS};
 use rust2d_engine::project::Project;
 use rust2d_engine::refactor::RefKind;
+use rust2d_engine::script_refs::ScriptFn;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -37,6 +38,30 @@ pub struct AddDialog {
     pub search: String,
 }
 
+/// Where project assets go once their script functions are picked.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SendTo {
+    Library,
+    /// A `.r2dpack` file.
+    Package(PathBuf),
+}
+
+/// The "Script functions" dialog: project assets that use scripts are about to be copied into
+/// the library or a package, and the user picks which functions go along.
+pub struct ScriptPick {
+    pub assets: Vec<AssetRef>,
+    pub to: SendTo,
+    /// Every function of the project's scripts.
+    pub fns: Vec<ScriptFn>,
+    pub picked: BTreeSet<String>,
+    /// Functions the assets need, with what needs them ("Spell 'Fireball'", "cast_fireball()").
+    pub needed: BTreeMap<String, String>,
+    /// Functions the assets call that no script defines: (function, who calls it).
+    pub missing: Vec<(String, String)>,
+    /// Functions the library has already: name -> identical?
+    pub in_library: BTreeMap<String, bool>,
+}
+
 #[derive(Default)]
 pub struct LibState {
     /// The library as a project-like store (main editor: loaded for the add dialog and the
@@ -52,6 +77,7 @@ pub struct LibState {
     /// Assets waiting for the user to confirm their removal (the confirmation dialog is open).
     pub confirm_remove: Option<Vec<AssetRef>>,
     pub add: Option<AddDialog>,
+    pub script_pick: Option<ScriptPick>,
 }
 
 impl LibState {
@@ -265,35 +291,194 @@ impl Editor {
     pub fn library_to_project(&mut self, assets: &[AssetRef]) -> Result<String> {
         self.lib.ensure_loaded();
         let lib = self.lib.lib.as_ref().context("library not available")?;
-        let mut b = Bundle::collect(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "library", assets)?;
+        let mut b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "library", assets)?;
         b.rescale(rust2d_engine::project::TILE_SIZE)?;
         let root = self.project.root.clone();
         let report = b.merge_into(&mut self.project.db, &root)?;
         self.defs_dirty = true;
+        self.after_scripts_merged();
         self.reload_assets();
         Ok(format!("Added to the project: {}. Save the definitions to keep them.", report.summary()))
     }
 
-    /// Copies project assets (with their dependencies) into the library.
-    pub fn project_to_library(&mut self, assets: &[AssetRef]) -> Result<String> {
-        self.lib.ensure_loaded();
-        let b = Bundle::collect(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, &self.project.config.name, assets)?;
-        let lib = self.lib.lib.as_mut().context("library not available")?;
-        let report = library::add_to_library(lib, b)?;
-        self.lib.tex_dirty = true;
-        Ok(format!("Library: {}", report.summary()))
+    /// Copies project assets (with their dependencies) into the library or a package. When
+    /// they use scripts, the "Script functions" dialog asks which functions go along first.
+    pub fn send_project_assets(&mut self, assets: Vec<AssetRef>, to: SendTo) {
+        match self.script_pick_for(&assets, &to) {
+            Ok(Some(pick)) => self.lib.script_pick = Some(pick),
+            Ok(None) => {
+                let r = self.finish_send(&assets, &to, &[]);
+                self.show_result(r);
+            }
+            Err(e) => self.show_result(Err(e)),
+        }
     }
 
-    pub fn export_package(&mut self, from_library: bool, assets: &[AssetRef], path: &Path) -> Result<String> {
-        let b = if from_library {
-            let lib = self.lib_store().context("library not available")?;
-            Bundle::collect(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "rust2d assets", assets)?
-        } else {
-            Bundle::collect(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, &self.project.config.name, assets)?
-        };
+    /// The dialog's contents, or `None` if the assets (and what they bring) use no scripts.
+    fn script_pick_for(&mut self, assets: &[AssetRef], to: &SendTo) -> Result<Option<ScriptPick>> {
+        let b = Bundle::collect(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, "", assets)?;
+        let fns = library::read_scripts(&self.project.root);
+        let names: BTreeSet<String> = fns.iter().map(|f| f.name.clone()).collect();
+        let mut needed: BTreeMap<String, String> = BTreeMap::new();
+        let mut missing = Vec::new();
+        let mut stack = Vec::new();
+        for a in library::all_assets(&b.db) {
+            for root in library::script_roots(&b.db, &a) {
+                let who = format!("{} '{}'", kind_label(a.0), name_of(&b.db, &a));
+                if !names.contains(&root) {
+                    missing.push((root, who));
+                } else if !needed.contains_key(&root) {
+                    needed.insert(root.clone(), who);
+                    stack.push(root);
+                }
+            }
+        }
+        // What those functions call or pass on (aim, fly, then_call), transitively.
+        while let Some(n) = stack.pop() {
+            let Some(f) = fns.iter().find(|f| f.name == n) else { continue };
+            for u in rust2d_engine::script_refs::used_functions(f, &names) {
+                if !needed.contains_key(&u) {
+                    needed.insert(u.clone(), format!("{n}()"));
+                    stack.push(u);
+                }
+            }
+        }
+        if needed.is_empty() && missing.is_empty() {
+            return Ok(None);
+        }
+        let mut in_library = BTreeMap::new();
+        if *to == SendTo::Library {
+            self.lib.ensure_loaded();
+            if let Some(lib) = &self.lib.lib {
+                for f in library::read_scripts(&lib.root) {
+                    if let Some(mine) = fns.iter().find(|m| m.name == f.name) {
+                        in_library.insert(f.name.clone(), mine.text.trim() == f.text.trim());
+                    }
+                }
+            }
+        }
+        let picked = needed.keys().cloned().collect();
+        Ok(Some(ScriptPick { assets: assets.to_vec(), to: to.clone(), fns, picked, needed, missing, in_library }))
+    }
+
+    /// Copies the assets plus the picked script functions (and the assets those refer to).
+    fn finish_send(&mut self, assets: &[AssetRef], to: &SendTo, fns: &[ScriptFn]) -> Result<String> {
+        let b = Bundle::collect_with_scripts(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, &self.project.config.name, assets, fns)?;
+        let n_fns = b.scripts.len();
+        match to {
+            SendTo::Library => {
+                self.lib.ensure_loaded();
+                let lib = self.lib.lib.as_mut().context("library not available")?;
+                let report = library::add_to_library(lib, b)?;
+                self.lib.tex_dirty = true;
+                Ok(format!("Library: {}", report.summary()))
+            }
+            SendTo::Package(path) => {
+                let path = with_ext(path);
+                std::fs::write(&path, b.to_pack()?).with_context(|| format!("writing {}", path.display()))?;
+                Ok(format!("Exported {} asset(s) and {n_fns} script function(s) to {}", library::all_assets(&b.db).len(), path.display()))
+            }
+        }
+    }
+
+    /// Ends the "Script functions" dialog: `ok` copies with the picked functions.
+    pub fn close_script_pick(&mut self, ok: bool) {
+        let Some(p) = self.lib.script_pick.take() else { return };
+        if ok {
+            let chosen: Vec<ScriptFn> = p.fns.iter().filter(|f| p.picked.contains(&f.name)).cloned().collect();
+            let r = self.finish_send(&p.assets, &p.to, &chosen);
+            self.show_result(r);
+        }
+    }
+
+    /// Exports library assets (with the script functions they need) to a package.
+    pub fn export_package(&mut self, assets: &[AssetRef], path: &Path) -> Result<String> {
+        let lib = self.lib_store().context("library not available")?;
+        let b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "rust2d assets", assets)?;
         let path = with_ext(path);
         std::fs::write(&path, b.to_pack()?).with_context(|| format!("writing {}", path.display()))?;
-        Ok(format!("Exported {} asset(s) to {}", library::all_assets(&b.db).len(), path.display()))
+        Ok(format!("Exported {} asset(s) and {} script function(s) to {}", library::all_assets(&b.db).len(), b.scripts.len(), path.display()))
+    }
+
+    /// The "Script functions" dialog (see [`ScriptPick`]).
+    pub(crate) fn script_pick_dialog(&mut self, ctx: &egui::Context) {
+        let Some(p) = &mut self.lib.script_pick else { return };
+        let mut choice: Option<bool> = None;
+        let to_lib = p.to == SendTo::Library;
+        let modal = egui::Modal::new(egui::Id::new("lib_script_pick")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.heading(ui::t(ph::CODE, if to_lib { "Script functions for the library" } else { "Script functions for the package" }));
+            ui.label("These assets use scripts. Only the functions ticked here are copied with them; the rest of your scripts stay in the project.");
+            ui.add_space(6.0);
+            let row = |ui: &mut egui::Ui, f: &ScriptFn, picked: &mut BTreeSet<String>, why: Option<&String>, lib: Option<&bool>| {
+                ui.horizontal(|ui| {
+                    let mut on = picked.contains(&f.name);
+                    let label = egui::RichText::new(format!("{}({})", f.name, f.params.join(", "))).monospace();
+                    let resp = ui.checkbox(&mut on, label);
+                    resp.on_hover_ui(|ui| {
+                        ui.label(egui::RichText::new(f.text.trim()).monospace().size(11.0));
+                    });
+                    if on {
+                        picked.insert(f.name.clone());
+                    } else {
+                        picked.remove(&f.name);
+                    }
+                    if let Some(w) = why {
+                        ui.weak(format!("used by {w}"));
+                    }
+                    match lib {
+                        Some(true) => {
+                            ui.weak("· already in the library");
+                        }
+                        Some(false) => {
+                            ui.colored_label(Color32::YELLOW, "· the library has a different version (kept)");
+                        }
+                        None => {}
+                    }
+                });
+            };
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                ui.strong("Needed by these assets");
+                for f in p.fns.iter().filter(|f| p.needed.contains_key(&f.name)) {
+                    row(ui, f, &mut p.picked, p.needed.get(&f.name), p.in_library.get(&f.name));
+                }
+                for (m, who) in &p.missing {
+                    ui.colored_label(Color32::LIGHT_RED, format!("{who} calls {m}(), which no script of the project defines."));
+                }
+                let others: Vec<&ScriptFn> = p.fns.iter().filter(|f| !p.needed.contains_key(&f.name)).collect();
+                if !others.is_empty() {
+                    ui.add_space(4.0);
+                    egui::CollapsingHeader::new(format!("Other functions of the project ({})", others.len())).id_salt("lib_pick_others").show(ui, |ui| {
+                        ui.weak("Not used by these assets. Tick one only if you want to share it too.");
+                        for f in others {
+                            row(ui, f, &mut p.picked, None, p.in_library.get(&f.name));
+                        }
+                    });
+                }
+            });
+            let left_out: Vec<&String> = p.needed.keys().filter(|n| !p.picked.contains(*n)).collect();
+            if !left_out.is_empty() {
+                let list: Vec<String> = left_out.iter().map(|n| format!("{n}()")).collect();
+                ui.colored_label(Color32::YELLOW, format!("Not copied although needed: {}. The assets only work where those functions exist.", list.join(", ")));
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let n = p.picked.len();
+                let go = if to_lib { format!("Add to library ({n} function{})", if n == 1 { "" } else { "s" }) } else { format!("Export ({n} function{})", if n == 1 { "" } else { "s" }) };
+                if ui.button(ui::t(if to_lib { ph::UPLOAD_SIMPLE } else { ph::PACKAGE }, &go)).clicked() {
+                    choice = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && choice.is_none() {
+            choice = Some(false);
+        }
+        if let Some(ok) = choice {
+            self.close_script_pick(ok);
+        }
     }
 
     pub fn import_package(&mut self, into_library: bool, path: &Path) -> Result<String> {
@@ -309,8 +494,19 @@ impl Editor {
             let root = self.project.root.clone();
             let report = b.merge_into(&mut self.project.db, &root)?;
             self.defs_dirty = true;
+            self.after_scripts_merged();
             self.reload_assets();
             Ok(format!("Imported into the project: {}. Save the definitions to keep them.", report.summary()))
+        }
+    }
+
+    /// A merge may have appended functions to the project's scripts/library.rhai: an unchanged
+    /// open copy of it in the script editor is reloaded.
+    fn after_scripts_merged(&mut self) {
+        let path = self.project.scripts_dir().join(library::LIBRARY_SCRIPT);
+        if self.db.script_file.as_deref() == Some(path.as_path()) && !self.db.script_dirty {
+            self.db.script_text = std::fs::read_to_string(&path).unwrap_or_default();
+            self.db.script_saved = self.db.script_text.clone();
         }
     }
 

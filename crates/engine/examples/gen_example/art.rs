@@ -1357,7 +1357,9 @@ fn big_props(c: &mut Canvas) {
         c.at(x, y);
         for px in [0, 53] {
             c.shade_box(px, 6, 11, 58, STONE);
-            c.shade_box(px - 1, 2, 13, 6, STONE);
+            // The cap overhangs the post by a pixel on the inner side only: on the outer side
+            // it would spill into the neighbouring cells of the sheet (the boulder's).
+            c.shade_box(if px == 0 { 0 } else { px - 1 }, 2, 12, 6, STONE);
             for yy in (14..60).step_by(10) {
                 c.hline(px + 1, yy, 9, hex(STONE[1]));
             }
