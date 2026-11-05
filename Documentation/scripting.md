@@ -58,8 +58,12 @@ function.
 - Put only **functions** (and comments) at the top level of a file. Statements outside functions
   don't keep values between calls; keep lasting state in [flags and variables](#game-state-flags-and-variables).
 - Scripts are part of an exported game (*File › Export game*).
-- Scripts are **not** part of the asset library or `.r2dpack` packages: assets whose triggers or
-  spells call script functions need those functions in the project that uses them.
+- **Asset library and packages**: a spell, skill or other asset that uses scripts can go into
+  the asset library or a `.r2dpack` package together with its functions. The editor asks which
+  functions to copy, with the ones the asset needs (and everything they call or pass on as a
+  callback) ticked. A project that takes the asset gets the functions appended to
+  `scripts/library.rhai`; functions it already has are kept. Keep a spell's functions
+  self-contained (helpers they call, no project-specific flags) so they work in other games.
 
 ## How scripts are run
 

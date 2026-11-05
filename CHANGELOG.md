@@ -18,6 +18,24 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   `player_facing()`, `player_max_hp()`. `player_light` and `damage_around` accept integers and
   decimals in any mix (before, `player_light(5, 30.5)` failed).
 
+### Asset library
+- **Scripted skills and spells in the library and packages**: *Add to library* / *Export…* of
+  assets that use scripts open a *Script functions* dialog; the functions the assets need
+  (and what those call or pass as callbacks) are ticked, other functions only go along when
+  ticked. Functions travel in packages and the library (`scripts/library.rhai`), are appended to
+  a project's `scripts/library.rhai` when it takes the asset (existing functions are kept), follow
+  id renames, and are pruned when the library no longer needs them. Assets the functions use by
+  id (sprite sheets, sounds, items) come along. The starter library now has the Fireball spell
+  and the Scavenging skill with their functions.
+
+- Fix: boulders showed a stray dark mark at their upper left (the open double gate's post cap
+  spilled into the boulder's cells on the props sheet).
+- Fix: spell, skill, scroll and book icons were blank in libraries created before those icons
+  existed (the library kept its older, narrower `items` sheet image). Starter updates now replace
+  an existing sprite sheet or tileset image when the new one only adds frames and leaves the
+  existing part unchanged; images the user edited stay as they are. Existing libraries apply
+  this once on the next start.
+
 ### Documentation
 - `Documentation/scripting.md`: the complete scripting guide and API reference (how scripts
   are run, immediate vs. queued functions, state, targets, units, every function, recipes,
@@ -34,7 +52,7 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   suggestions at once, inserted with quotes.
 
 ### Example project
-- **Fireball** spell (Tome of the Fireball, sold by Tilda; needs Arcana 1): click a target, a
+- **Fireball** spell (Tome of the Fireball, sold by Tilda; needs Arcana 3): click a target, a
   fireball flies there and explodes, damaging everything within 2 tiles; embers glow on briefly. New sprite sheets
   `fireball` and `explosion` (also in the starter library) and sounds `fireball`, `explosion`.
 

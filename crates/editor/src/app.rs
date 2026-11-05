@@ -893,10 +893,11 @@ impl Editor {
                 let r = self.import_package(into_library, &path);
                 self.show_result(r);
             }
-            P::ExportPackage { from_library, assets } => {
-                let r = self.export_package(from_library, &assets, &path);
+            P::ExportPackage { from_library: true, assets } => {
+                let r = self.export_package(&assets, &path);
                 self.show_result(r);
             }
+            P::ExportPackage { from_library: false, assets } => self.send_project_assets(assets, crate::library_ui::SendTo::Package(path)),
             P::ExportGameFolder => {
                 if let Some(d) = &mut self.export {
                     d.out = path.display().to_string();
@@ -1177,6 +1178,7 @@ impl Editor {
         self.export_window(ctx);
         self.capture_window(ctx);
         self.confirm_remove_dialog(ctx);
+        self.script_pick_dialog(ctx);
         self.add_from_library_dialog(ctx);
         self.canvas_rect = ctx.available_rect();
         self.dialogs(ctx);

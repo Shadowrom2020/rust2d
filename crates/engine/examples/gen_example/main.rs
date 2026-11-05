@@ -251,7 +251,7 @@ fn spells() -> Vec<SpellDef> {
         SpellDef::new("spark", "Spark", "Hurls a bolt of lightning in the direction you face.", icon(it::SPELL_SPARK), 5, 0.6, E::Bolt { damage: 3, projectile: icon(it::SPARK_SHOT), speed: 320.0 * R, range: 7.0 }).requires("arcana", 1),
         SpellDef::new("fire_burst", "Fire Burst", "Flames burst out around you, hitting everything nearby.", icon(it::SPELL_BLAST), 15, 4.0, E::Blast { damage: 4, radius: 2.0 }).requires("arcana", 2),
         // A scripted spell: cast_fireball() in main.rhai aims, throws and explodes it.
-        SpellDef::new("fireball", "Fireball", "Click a target: a ball of fire flies there and explodes, burning everything within 2 tiles.", SpriteRef::new("fireball", 0), 12, 1.5, E::Script { function: "cast_fireball".into() }).requires("arcana", 1),
+        SpellDef::new("fireball", "Fireball", "Click a target: a ball of fire flies there and explodes, burning everything within 2 tiles.", SpriteRef::new("fireball", 0), 12, 1.5, E::Script { function: "cast_fireball".into() }).requires("arcana", 3),
     ]
 }
 
@@ -1058,7 +1058,7 @@ fn database() -> Database {
             teach(stack(item("scroll_heal", "Scroll of Healing", "Reading it teaches the Heal spell. The scroll crumbles afterwards.", it::SCROLL, true, vec![]), 5), "heal"),
             teach(stack(item("scroll_light", "Scroll of Light", "Teaches the Light spell: a glow around you in dark places.", it::SCROLL, true, vec![]), 5), "light"),
             teach(stack(item("spellbook_spark", "Book of Sparks", "A worn spell book. Teaches Spark - but it takes some arcane knowledge to understand.", it::BOOK, false, vec![]), 1), "spark"),
-            teach(stack(item("tome_fireball", "Tome of the Fireball", "Teaches Fireball: aim it at a spot and it explodes there. Needs some arcane knowledge.", it::BOOK, false, vec![]), 1), "fireball"),
+            teach(stack(item("tome_fireball", "Tome of the Fireball", "Teaches Fireball: aim it at a spot and it explodes there. Needs Arcana 3.", it::BOOK, false, vec![]), 1), "fireball"),
             teach(stack(item("tome_fire", "Tome of Fire", "Fire Burst: flames around you. Needs a trained arcanist.", it::BOOK, false, vec![]), 1), "fire_burst"),
             stack(item("mana_potion", "Blue Potion", "Restores 20 mana.", it::MANA_POTION, true, use_trig(vec![Action::AddMana { amount: 20 }])), 10),
             stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new() }), 1),
@@ -1490,7 +1490,8 @@ fn main() {
 }
 
 /// The editor's starter asset library: every asset of the example project. Triggers that run
-/// Rhai functions are dropped (scripts are not part of asset packages).
+/// Rhai functions are dropped (they belong to the example's story); skills and spells made of
+/// scripts keep the functions they need.
 fn write_starter_pack(project: &Project) {
     use rust2d_engine::library::{all_assets, Bundle};
     let mut b = Bundle::collect(&project.db, &project.root, TS, "rust2d starter assets", &all_assets(&project.db)).unwrap();
@@ -1518,18 +1519,13 @@ fn write_starter_pack(project: &Project) {
     for d in &mut b.db.characters {
         d.triggers.retain(|t| !scripted(t));
     }
-    // Spells made of scripts (Fireball) can't work without them: leave them, the books that teach
-    // them and those books in merchants' stock out (their effect art stays in the library).
-    use rust2d_engine::skills::SpellEffect;
-    let script_spells: Vec<String> = b.db.spells.iter().filter(|d| matches!(d.effect, SpellEffect::Script { .. })).map(|d| d.id.clone()).collect();
-    b.db.spells.retain(|d| !script_spells.contains(&d.id));
-    let teaching: Vec<String> = b.db.items.iter().filter(|d| script_spells.contains(&d.teaches)).map(|d| d.id.clone()).collect();
-    b.db.items.retain(|d| !teaching.contains(&d.id));
-    for d in &mut b.db.characters {
-        if let Some(shop) = &mut d.shop {
-            shop.items.retain(|e| !teaching.contains(&e.item));
-        }
-    }
+    // Script functions the remaining assets need travel along (Fireball's cast_fireball() and
+    // what it calls, Scavenging's scavenging()); everything else in main.rhai stays behind.
+    let fns = rust2d_engine::library::read_scripts(&project.root);
+    let roots: Vec<String> = all_assets(&b.db).iter().flat_map(|a| rust2d_engine::library::script_roots(&b.db, a)).collect();
+    let needed = rust2d_engine::script_refs::needed_functions(&fns, &roots);
+    b.scripts = fns.into_iter().filter(|f| needed.contains(&f.name)).map(|f| (f.name, f.text)).collect();
+    println!("starter scripts: {:?}", b.scripts.keys().collect::<Vec<_>>());
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../editor/assets/starter.r2dpack");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let bytes = b.to_pack().unwrap();

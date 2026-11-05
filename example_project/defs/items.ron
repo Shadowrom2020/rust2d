@@ -480,7 +480,7 @@
     (
         id: "tome_fireball",
         name: "Tome of the Fireball",
-        description: "Teaches Fireball: aim it at a spot and it explodes there. Needs some arcane knowledge.",
+        description: "Teaches Fireball: aim it at a spot and it explodes there. Needs Arcana 3.",
         icon: (
             sheet: "items",
             frame: 23,

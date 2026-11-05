@@ -10,6 +10,10 @@
 //!
 //! The library itself is an ordinary project folder (without maps) under
 //! `~/.local/share/rust2d/library`, so it is loaded and saved like any project.
+//!
+//! Script functions travel with the assets that need them (a spell or skill with a *Script*
+//! effect, triggers that run scripts): bundles carry whole functions by name, and merging
+//! appends them to `scripts/library.rhai` of the target (functions it already has are kept).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read, Write};
@@ -22,6 +26,7 @@ use crate::defs::*;
 use crate::imageio::Rgba;
 use crate::project::{Project, ProjectConfig, TILE_SIZE};
 use crate::refactor::{self, RefKind};
+use crate::script_refs::ScriptFn;
 
 pub const PACK_EXT: &str = "r2dpack";
 const PACK_VERSION: u32 = 1;
@@ -70,6 +75,9 @@ struct Manifest {
     skills: Vec<crate::skills::SkillDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     spells: Vec<crate::skills::SpellDef>,
+    /// Script functions by name (their whole source text).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    scripts: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -80,6 +88,8 @@ pub struct Bundle {
     pub db: Database,
     /// Files by project-relative path.
     pub files: BTreeMap<String, Vec<u8>>,
+    /// Script functions the assets need, by name (whole source text).
+    pub scripts: BTreeMap<String, String>,
 }
 
 /// What a merge did.
@@ -92,6 +102,13 @@ pub struct MergeReport {
     pub renamed: Vec<(RefKind, String, String)>,
     /// Files written.
     pub files: Vec<String>,
+    /// Script functions appended to `scripts/library.rhai`.
+    pub scripts_added: Vec<String>,
+    /// Script functions the target already had with different code (its version was kept).
+    pub scripts_kept: Vec<String>,
+    /// Existing images replaced by a larger version that only adds frames / tiles (starter
+    /// updates): (kind, id).
+    pub upgraded: Vec<AssetRef>,
 }
 
 impl MergeReport {
@@ -100,6 +117,16 @@ impl MergeReport {
         if !self.renamed.is_empty() {
             let list: Vec<String> = self.renamed.iter().map(|(_, a, b)| format!("{a} → {b}")).collect();
             s += &format!(", renamed (id taken): {}", list.join(", "));
+        }
+        if !self.scripts_added.is_empty() {
+            s += &format!(", script functions added to scripts/{LIBRARY_SCRIPT}: {}", self.scripts_added.join(", "));
+        }
+        if !self.upgraded.is_empty() {
+            let list: Vec<&str> = self.upgraded.iter().map(|a| a.1.as_str()).collect();
+            s += &format!(", images extended: {}", list.join(", "));
+        }
+        if !self.scripts_kept.is_empty() {
+            s += &format!(", kept the existing (different) script functions {}", self.scripts_kept.join(", "));
         }
         s
     }
@@ -147,6 +174,82 @@ pub fn all_assets(db: &Database) -> Vec<AssetRef> {
     out.extend(db.structures.iter().map(|d| (RefKind::Structure, d.id.clone())));
     out.extend(db.skills.iter().map(|d| (RefKind::Skill, d.id.clone())));
     out.extend(db.spells.iter().map(|d| (RefKind::Spell, d.id.clone())));
+    out
+}
+
+/// File (in `scripts/`) that receives script functions merged from bundles.
+pub const LIBRARY_SCRIPT: &str = "library.rhai";
+
+/// Script functions an asset calls itself: a skill's or spell's *Script* effect and the
+/// functions its triggers run (*Run script* actions, *Script* conditions, *Aim* / *Fly*).
+pub fn script_roots(db: &Database, a: &AssetRef) -> Vec<String> {
+    use crate::events::{Action, Cond, Trigger};
+    fn actions(acts: &[Action], out: &mut Vec<String>) {
+        for a in acts {
+            match a {
+                Action::RunScript { function } | Action::Aim { function } | Action::Fly { function, .. } => out.push(function.clone()),
+                Action::If { conditions, then, otherwise } => {
+                    out.extend(conditions.iter().filter_map(|c| match &c.cond {
+                        Cond::Script { function } => Some(function.clone()),
+                        _ => None,
+                    }));
+                    actions(then, out);
+                    actions(otherwise, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let triggers = |ts: &[Trigger], out: &mut Vec<String>| {
+        for t in ts {
+            out.extend(t.conditions.iter().filter_map(|c| match &c.cond {
+                Cond::Script { function } => Some(function.clone()),
+                _ => None,
+            }));
+            actions(&t.actions, out);
+        }
+    };
+    let mut out = Vec::new();
+    let id = a.1.as_str();
+    match a.0 {
+        RefKind::Skill => {
+            if let Some(crate::skills::SkillEffect::Script { function }) = db.skill(id).map(|d| &d.effect) {
+                out.push(function.clone());
+            }
+        }
+        RefKind::Spell => {
+            if let Some(crate::skills::SpellEffect::Script { function }) = db.spell(id).map(|d| &d.effect) {
+                out.push(function.clone());
+            }
+        }
+        RefKind::Item => triggers(db.item(id).map_or(&[][..], |d| &d.on_use), &mut out),
+        RefKind::Prop => triggers(db.prop(id).map_or(&[][..], |d| &d.triggers), &mut out),
+        RefKind::Character => triggers(db.character(id).map_or(&[][..], |d| &d.triggers), &mut out),
+        _ => {}
+    }
+    out.retain(|f| !f.is_empty());
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The functions of every `*.rhai` file in `<root>/scripts` (files in name order).
+pub fn read_scripts(root: &Path) -> Vec<ScriptFn> {
+    let Ok(rd) = std::fs::read_dir(root.join("scripts")) else { return Vec::new() };
+    let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "rhai")).collect();
+    files.sort();
+    files.iter().filter_map(|f| std::fs::read_to_string(f).ok()).flat_map(|src| crate::script_refs::functions(&src)).collect()
+}
+
+/// Assets that script functions refer to by id (sprite sheets, sounds, items, skills, spells).
+pub fn script_asset_refs<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<AssetRef> {
+    let mut out: Vec<AssetRef> = texts
+        .into_iter()
+        .flat_map(crate::script_refs::id_refs)
+        .filter_map(|(a, k)| k.ref_kind().filter(|k| KINDS.contains(k)).map(|k| (k, a.value)))
+        .collect();
+    out.sort();
+    out.dedup();
     out
 }
 
@@ -201,11 +304,40 @@ impl Bundle {
             let bytes = std::fs::read(root.join(rel)).with_context(|| format!("reading {rel}"))?;
             files.insert(rel.clone(), bytes);
         }
-        Ok(Bundle { name: name.to_string(), tile_size, db: out, files })
+        Ok(Bundle { name: name.to_string(), tile_size, db: out, files, scripts: BTreeMap::new() })
+    }
+
+    /// Like [`collect`](Self::collect), plus the script functions `fns` and the assets they
+    /// refer to by id (e.g. the sprite sheets a spell's script flies and explodes).
+    pub fn collect_with_scripts(db: &Database, root: &Path, tile_size: u32, name: &str, wanted: &[AssetRef], fns: &[ScriptFn]) -> Result<Bundle> {
+        let mut all = wanted.to_vec();
+        all.extend(script_asset_refs(fns.iter().map(|f| f.text.as_str())));
+        let mut b = Self::collect(db, root, tile_size, name, &all)?;
+        b.scripts = fns.iter().map(|f| (f.name.clone(), f.text.clone())).collect();
+        Ok(b)
+    }
+
+    /// Collects `wanted` from a store whose scripts are already curated (the library), with
+    /// every script function the collected assets need.
+    pub fn collect_with_needed_scripts(db: &Database, root: &Path, tile_size: u32, name: &str, wanted: &[AssetRef]) -> Result<Bundle> {
+        let fns = read_scripts(root);
+        let mut b = Self::collect(db, root, tile_size, name, wanted)?;
+        // Functions bring assets, whose own scripts may need more functions: repeat until stable.
+        loop {
+            let roots: Vec<String> = all_assets(&b.db).iter().flat_map(|a| script_roots(&b.db, a)).collect();
+            let needed = crate::script_refs::needed_functions(&fns, &roots);
+            let chosen: Vec<ScriptFn> = fns.iter().filter(|f| needed.contains(&f.name)).cloned().collect();
+            let next = Self::collect_with_scripts(db, root, tile_size, name, wanted, &chosen)?;
+            let done = all_assets(&next.db).len() == all_assets(&b.db).len() && next.scripts.len() == b.scripts.len();
+            b = next;
+            if done {
+                return Ok(b);
+            }
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        all_assets(&self.db).is_empty()
+        all_assets(&self.db).is_empty() && self.scripts.is_empty()
     }
 
     /// Writes a `.r2dpack` (zip) package.
@@ -223,6 +355,7 @@ impl Bundle {
             structures: self.db.structures.clone(),
             skills: self.db.skills.clone(),
             spells: self.db.spells.clone(),
+            scripts: self.scripts.clone(),
         };
         let cfg = ron::ser::PrettyConfig::default().struct_names(false);
         let manifest = ron::ser::to_string_pretty(&m, cfg)?;
@@ -262,7 +395,7 @@ impl Bundle {
             files.insert(rel, data);
         }
         let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters, structures: m.structures, skills: m.skills, spells: m.spells };
-        let b = Bundle { name: m.name, tile_size: m.tile_size, db, files };
+        let b = Bundle { name: m.name, tile_size: m.tile_size, db, files, scripts: m.scripts };
         for rel in b.db.tilesets.iter().map(|d| &d.image).chain(b.db.sheets.iter().map(|d| &d.image)).chain(b.db.sounds.iter().map(|d| &d.file)) {
             if !rel.is_empty() && !b.files.contains_key(rel) {
                 bail!("package is missing {rel}");
@@ -336,6 +469,10 @@ impl Bundle {
         }
         let mut cfg = ProjectConfig::new("");
         refactor::rename_in_db(&mut self.db, &mut cfg, kind, old, new);
+        // Ids passed to API calls in the bundle's script functions follow too.
+        for text in self.scripts.values_mut() {
+            *text = crate::script_refs::rename_in_script(text, kind, old, new).0;
+        }
     }
 
     /// Is the bundle's version of `a` identical to the one in `db`?
@@ -358,6 +495,24 @@ impl Bundle {
     /// Adds only the assets whose ids `db` doesn't have yet (existing assets, possibly edited
     /// by the user, are left alone; new assets referring to them use the existing ones).
     pub fn add_missing(mut self, db: &mut Database, root: &Path) -> Result<MergeReport> {
+        // Images the newer set only extends (more frames or tiles, the existing part unchanged)
+        // are upgraded: its new assets may use the added frames (e.g. spell icons on "items").
+        // Images the user changed differ in the existing part and stay as they are.
+        let mut upgraded = Vec::new();
+        let pairs = self.db.sheets.iter().filter_map(|n| {
+            let o = db.sheet(&n.id)?;
+            ((o.frame_w, o.frame_h) == (n.frame_w, n.frame_h)).then(|| ((RefKind::Sheet, n.id.clone()), o.image.clone(), n.image.clone()))
+        });
+        let pairs: Vec<_> = pairs.chain(self.db.tilesets.iter().filter_map(|n| Some(((RefKind::Tileset, n.id.clone()), db.tileset(&n.id)?.image.clone(), n.image.clone())))).collect();
+        for (a, old_rel, new_rel) in pairs {
+            let (Some(new_bytes), true) = (self.files.get(&new_rel), safe_rel(&old_rel)) else { continue };
+            let path = root.join(&old_rel);
+            let Ok(old_bytes) = std::fs::read(&path) else { continue };
+            if extends(&old_bytes, new_bytes) {
+                std::fs::write(&path, new_bytes).with_context(|| format!("writing {old_rel}"))?;
+                upgraded.push(a);
+            }
+        }
         let new = |k: RefKind, id: &str| !exists(db, &(k, id.to_string()));
         self.db.tilesets.retain(|d| new(RefKind::Tileset, &d.id));
         self.db.sheets.retain(|d| new(RefKind::Sheet, &d.id));
@@ -370,7 +525,9 @@ impl Bundle {
         self.db.spells.retain(|d| new(RefKind::Spell, &d.id));
         let used = files_of(&self.db);
         self.files.retain(|rel, _| used.contains(rel));
-        self.merge_into(db, root)
+        let mut report = self.merge_into(db, root)?;
+        report.upgraded = upgraded;
+        Ok(report)
     }
 
     /// Adds the bundle to a project (or the library) at `root`. Files are written right away;
@@ -464,9 +621,35 @@ impl Bundle {
             }
             report.added.push(a);
         }
+
+        // 4. Script functions: append new ones to scripts/library.rhai; a function the target
+        // already has stays as it is (the user may have changed it).
+        if !self.scripts.is_empty() {
+            let have: BTreeMap<String, String> = read_scripts(root).into_iter().map(|f| (f.name, f.text)).collect();
+            let mut add = String::new();
+            for (name, text) in &self.scripts {
+                match have.get(name) {
+                    Some(t) if t.trim() == text.trim() => {}
+                    Some(_) => report.scripts_kept.push(name.clone()),
+                    None => {
+                        add += &format!("\n{}\n", text.trim_end());
+                        report.scripts_added.push(name.clone());
+                    }
+                }
+            }
+            if !add.is_empty() {
+                let path = root.join("scripts").join(LIBRARY_SCRIPT);
+                let mut src = std::fs::read_to_string(&path).unwrap_or_else(|_| LIBRARY_SCRIPT_HEADER.to_string());
+                src += &add;
+                std::fs::create_dir_all(path.parent().unwrap())?;
+                std::fs::write(&path, src).with_context(|| format!("writing {}", path.display()))?;
+            }
+        }
         Ok(report)
     }
 }
+
+const LIBRARY_SCRIPT_HEADER: &str = "// Script functions that came with assets from the asset library or asset packages\n// (spells, skills, triggers). Edit them like any other script.\n";
 
 /// Removes assets from a project-like store and deletes files nothing refers to anymore.
 /// Refuses (with the list of users) if other remaining assets depend on them.
@@ -496,7 +679,37 @@ pub fn remove_assets(project: &mut Project, assets: &[AssetRef]) -> Result<()> {
             let _ = std::fs::remove_file(project.root.join(f));
         }
     }
+    prune_library_script(project)?;
     project.save_defs()
+}
+
+/// Drops the functions of `scripts/library.rhai` that no remaining asset needs anymore.
+fn prune_library_script(project: &Project) -> Result<()> {
+    let path = project.root.join("scripts").join(LIBRARY_SCRIPT);
+    let Ok(src) = std::fs::read_to_string(&path) else { return Ok(()) };
+    let roots: Vec<String> = all_assets(&project.db).iter().flat_map(|a| script_roots(&project.db, a)).collect();
+    let needed = crate::script_refs::needed_functions(&read_scripts(&project.root), &roots);
+    let fns = crate::script_refs::functions(&src);
+    if fns.iter().all(|f| needed.contains(&f.name)) {
+        return Ok(());
+    }
+    let mut out = LIBRARY_SCRIPT_HEADER.to_string();
+    for f in fns.iter().filter(|f| needed.contains(&f.name)) {
+        out += &format!("\n{}\n", f.text.trim_end());
+    }
+    std::fs::write(&path, out).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Is `new` a larger version of image `old` that keeps all of `old`'s pixels in place?
+fn extends(old: &[u8], new: &[u8]) -> bool {
+    let (Ok(o), Ok(n)) = (Rgba::decode(old), Rgba::decode(new)) else { return false };
+    if n.w < o.w || n.h < o.h || (n.w, n.h) == (o.w, o.h) {
+        return false;
+    }
+    (0..o.h as usize).all(|y| {
+        let (a, b) = (y * o.w as usize * 4, y * n.w as usize * 4);
+        o.px[a..a + o.w as usize * 4] == n.px[b..b + o.w as usize * 4]
+    })
 }
 
 fn files_of(db: &Database) -> BTreeSet<String> {
@@ -519,7 +732,8 @@ pub fn library_dir() -> PathBuf {
 /// Opens the library at `dir`, creating it (filled with `starter`, a `.r2dpack`) if needed.
 pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
     let stamp_file = dir.join(STARTER_STAMP);
-    let stamp = starter.map(|b| format!("{:016x}", fnv1a(b)));
+    // The stamp includes how starter sets are applied, so libraries get a changed rule once.
+    let stamp = starter.map(|b| format!("{STARTER_RULES}:{:016x}", fnv1a(b)));
     if !dir.join("project.ron").exists() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         let bundle = starter.map(Bundle::from_pack).transpose().context("reading the starter assets")?;
@@ -554,6 +768,8 @@ pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
 
 /// File in the library recording which starter set was last applied.
 const STARTER_STAMP: &str = "starter.stamp";
+/// Version of the rules for applying starter sets (2: images that only grew are upgraded).
+const STARTER_RULES: u32 = 2;
 
 /// 64-bit FNV-1a hash (a cheap fingerprint of the starter pack).
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -655,6 +871,66 @@ mod tests {
     }
 
     #[test]
+    fn script_functions_travel_with_spells() {
+        use crate::skills::{SpellDef, SpellEffect};
+        let (root, mut db) = source("scripts");
+        std::fs::write(root.join("sprites/boom.png"), png(16, 16, [9, 9, 9, 255])).unwrap();
+        db.sheets.push(SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 16, frame_h: 16 });
+        db.spells.push(SpellDef::new("fireball", "Fireball", "", SpriteRef::new("items", 0), 5, 1.0, SpellEffect::Script { function: "cast_fireball".into() }));
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        let src = "// Fireball: aim first.\n// (two comment lines)\nfn cast_fireball() {\n    aim(\"fireball_at\");\n}\n\nfn fireball_at(x, y) { if x > 0 { helper(); } effect(\"boom\", x, y); }\n\n// unrelated\nfn helper() { say(\"hi\"); }\n\nfn shop_talk() { say(\"{ not a brace }\"); }\n";
+        std::fs::write(root.join("scripts/main.rhai"), src).unwrap();
+        let fns = read_scripts(&root);
+        assert_eq!(fns.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["cast_fireball", "fireball_at", "helper", "shop_talk"]);
+        assert!(fns[0].text.starts_with("// Fireball: aim first.\n// (two comment lines)\nfn cast_fireball()"));
+        assert_eq!(fns[1].params, ["x", "y"]);
+        assert!(fns[2].text.starts_with("// unrelated"));
+        let spell = (RefKind::Spell, "fireball".to_string());
+        assert_eq!(script_roots(&db, &spell), ["cast_fireball"]);
+        // The call graph follows calls and function names passed as strings, nothing else.
+        let needed = crate::script_refs::needed_functions(&fns, &script_roots(&db, &spell));
+        assert_eq!(needed.into_iter().collect::<Vec<_>>(), ["cast_fireball", "fireball_at", "helper"]);
+
+        // Chosen functions travel with the bundle, and bring the sheet they use by id.
+        let chosen: Vec<ScriptFn> = fns.iter().filter(|f| f.name != "shop_talk").cloned().collect();
+        let b = Bundle::collect_with_scripts(&db, &root, 16, "x", std::slice::from_ref(&spell), &chosen).unwrap();
+        assert!(b.db.sheet("boom").is_some());
+        let b = Bundle::from_pack(&b.to_pack().unwrap()).unwrap();
+        assert_eq!(b.scripts.keys().collect::<Vec<_>>(), ["cast_fireball", "fireball_at", "helper"]);
+
+        // Into a library: appended to scripts/library.rhai, and found again from there.
+        let lib_dir = tmp("scripts_lib");
+        let mut lib = Project { root: lib_dir.clone(), config: ProjectConfig::new("lib"), db: Database::default() };
+        lib.save_config().unwrap();
+        let r = add_to_library(&mut lib, b.clone()).unwrap();
+        assert_eq!(r.scripts_added.len(), 3);
+        let again = Bundle::collect_with_needed_scripts(&lib.db, &lib_dir, 32, "lib", std::slice::from_ref(&spell)).unwrap();
+        assert_eq!(again.scripts.len(), 3);
+        // A second time: nothing new; a project with its own different helper() keeps it.
+        assert!(add_to_library(&mut lib, b.clone()).unwrap().scripts_added.is_empty());
+        let proj = tmp("scripts_proj");
+        std::fs::create_dir_all(proj.join("scripts")).unwrap();
+        std::fs::write(proj.join("scripts/main.rhai"), "fn helper() { say(\"mine\"); }\n").unwrap();
+        let mut pdb = Database::default();
+        let r = again.clone().merge_into(&mut pdb, &proj).unwrap();
+        assert_eq!((r.scripts_added.len(), r.scripts_kept.clone()), (2, vec!["helper".to_string()]));
+        // A clashing sheet id is renamed, and the script follows.
+        let other = tmp("scripts_other");
+        std::fs::create_dir_all(other.join("sprites")).unwrap();
+        std::fs::write(other.join("sprites/boom.png"), png(8, 8, [1, 1, 1, 255])).unwrap();
+        let mut odb = Database { sheets: vec![SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 8, frame_h: 8 }], ..Default::default() };
+        again.merge_into(&mut odb, &other).unwrap();
+        let merged = std::fs::read_to_string(other.join("scripts").join(LIBRARY_SCRIPT)).unwrap();
+        assert!(merged.contains("effect(\"boom_2\", x, y)"), "{merged}");
+        // Removing the spell drops the functions nothing needs anymore.
+        remove_assets(&mut lib, &[spell]).unwrap();
+        assert!(read_scripts(&lib_dir).is_empty());
+        for p in [root, lib_dir, proj, other] {
+            let _ = std::fs::remove_dir_all(p);
+        }
+    }
+
+    #[test]
     fn rescale_doubles_art_and_sizes() {
         let (root, mut db) = source("rescale");
         db.props.push(PropDef {
@@ -699,10 +975,33 @@ mod tests {
         db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16 });
         std::fs::write(root.join("sprites/extra.png"), png(16, 16, [1, 2, 3, 255])).unwrap();
         let pack2 = Bundle::collect(&db2, &root, 16, "starter", &all_assets(&db2)).unwrap().to_pack().unwrap();
-        let mut lib = open_library(&dir, Some(&pack2)).unwrap();
+        let lib = open_library(&dir, Some(&pack2)).unwrap();
         assert!(lib.db.sheet("extra").is_some(), "new sheet added");
+        // A newer set whose "items" image only grew (frames added on the right) upgrades it;
+        // one that changed existing pixels doesn't.
+        let old = Rgba::decode(&std::fs::read(dir.join("sprites/items.png")).unwrap()).unwrap();
+        let row = old.w as usize * 4;
+        let mut wider = old.resized(old.w * 2, old.h);
+        for y in 0..old.h as usize {
+            wider.px[y * row * 2..y * row * 2 + row].copy_from_slice(&old.px[y * row..y * row + row]);
+        }
+        let src3 = tmp("src3");
+        std::fs::create_dir_all(src3.join("sprites")).unwrap();
+        std::fs::write(src3.join("sprites/items.png"), wider.encode().unwrap()).unwrap();
+        let mut db3 = Database { sheets: lib.db.sheets.iter().filter(|s| s.id == "items").cloned().collect(), items: lib.db.items.clone(), ..Default::default() };
+        db3.items.push(ItemDef { id: "gem".into(), icon: SpriteRef::new("items", 3), ..db3.items[0].clone() });
+        let pack3 = Bundle::collect(&db3, &src3, 32, "starter", &all_assets(&db3)).unwrap().to_pack().unwrap();
+        let lib3 = open_library(&dir, Some(&pack3)).unwrap();
+        assert_eq!(Rgba::decode(&std::fs::read(dir.join("sprites/items.png")).unwrap()).unwrap().w, old.w * 2, "extended image upgraded");
+        assert!(lib3.db.item("gem").is_some());
+        assert!(extends(&old.encode().unwrap(), &wider.encode().unwrap()));
+        let mut changed = wider.clone();
+        changed.px[0] ^= 0xff;
+        assert!(!extends(&old.encode().unwrap(), &changed.encode().unwrap()), "edited pixels are not an extension");
+        let _ = std::fs::remove_dir_all(src3);
+        let mut lib = Project::load(&dir).unwrap();
         assert_eq!(lib.db.item("arrows").unwrap().name, "arrows", "existing item untouched");
-        assert_eq!(lib.db.items.len(), 2);
+        assert_eq!(lib.db.items.len(), 3, "arrows, bow and the new gem");
         let everything = all_assets(&lib.db);
         remove_assets(&mut lib, &everything).unwrap();
         assert!(!dir.join("sprites/items.png").exists());
