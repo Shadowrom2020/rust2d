@@ -242,6 +242,15 @@ impl Autoplay {
                     click(&mut self.mouse_frames, p, MouseButton::Left);
                     return true;
                 }
+                // wintab character|skills|spells: click a tab of the open character window
+                "wintab" => {
+                    let Some(p) = game.window_tab_pos(arg(1)) else {
+                        println!("[autoplay] wintab: no such tab (or the window is closed)");
+                        continue;
+                    };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
                 // opt ROW prev|next|row: click the "<" / ">" arrows (or the label) of an Options row
                 "opt" => {
                     let Some(p) = game.option_click_pos(secs(1) as usize, arg(2)) else {

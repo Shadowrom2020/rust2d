@@ -458,7 +458,7 @@ fn village() -> Map {
         conditions: vec![],
         actions: vec![dialog(
             "",
-            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Inventory & character: I or C. Quest journal: J. Save/Load: F5/F9. Debug: F3.",
+            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Character & inventory: C or I, skills: K, spells: L. Quest journal: J. Map: M. Save/Load: F5/F9. Debug: F3.",
         )],
         once: true,
     }];
