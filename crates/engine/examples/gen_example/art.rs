@@ -1827,7 +1827,7 @@ pub mod p {
     /// The small gate, destroyed (bent bars, rubble).
     pub const GATE_BROKEN: u32 = 23;
     pub const BARREL: u32 = 4;
-    pub const SHRINE: u32 = 5; // +1 glowing
+    // Cells 5 / 6: the small 1x1 shrine of older projects (dormant / glowing), still drawn.
     pub const WELL: u32 = 7;
     // Multi-cell props (sheet is 8 cells wide).
     pub const DOUBLE_GATE: u32 = 8; // 2x2, open state at +2
@@ -1836,6 +1836,93 @@ pub mod p {
     pub const BIG_OAK: u32 = 24; // 3x4
     pub const BIG_PINE: u32 = 27; // 2x4
     pub const VGATE: u32 = 29; // 1x4 vertical double gate, open state at +1
+    /// The forest shrine (3x2): a monolith with a crystal between two lamp pillars on a
+    /// stepped dais; glowing state at +3.
+    pub const GRAND_SHRINE: u32 = 56;
+}
+
+/// The forest shrine, 96 x 64: a stepped dais, two lamp pillars and a rune-carved monolith with
+/// a crystal on top. Glowing: blue flames in the lamps, lit runes, a bright crystal and a halo.
+fn grand_shrine(c: &mut Canvas, glow: bool) {
+    let dark = [0x2c2c38, 0x45455a, 0x5c5c74, 0x80809a];
+    let rune = if glow { [0x2a8fb0, 0x55d4ff, 0x9ff0ff, 0xe8ffff] } else { [0x1e1e28, 0x2c2c38, 0x38384a, 0x4a4a5e] };
+    if glow {
+        // A soft halo behind everything.
+        c.ellipse(48.0, 32.0, 46.0, 30.0, Color::new(0.45, 0.85, 1.0, 0.10));
+        c.ellipse(48.0, 24.0, 30.0, 22.0, Color::new(0.55, 0.9, 1.0, 0.12));
+    }
+    // Dais: two broad steps.
+    c.shade_box(4, 52, 88, 10, STONE);
+    c.hline(4, 52, 88, hex(STONE[3]));
+    c.shade_box(12, 44, 72, 9, STONE);
+    c.hline(12, 44, 72, hex(STONE[3]));
+    for x in (10..90).step_by(12) {
+        c.vline(x, 54, 7, hex(STONE[1])); // joints
+    }
+    // Lamp pillars with bowls on top.
+    // (Everything stays inside the 96 x 64 block: the sheet cells above belong to the big oak.)
+    for px in [14, 72] {
+        c.shade_box(px, 23, 10, 22, STONE);
+        c.shade_box(px - 2, 19, 14, 5, STONE); // capital
+        c.shade_box(px - 1, 41, 12, 4, STONE); // foot
+        c.shade_box(px - 3, 13, 16, 6, IRON); // bowl
+        c.hline(px - 3, 13, 16, hex(IRON[3]));
+        if glow {
+            // Blue flames.
+            let cx = px as f32 + 5.0;
+            c.ellipse(cx, 8.0, 6.0, 6.0, hex(0x2a8fb0));
+            c.ellipse(cx, 8.5, 4.0, 4.5, hex(0x55d4ff));
+            c.ellipse(cx, 9.5, 2.0, 2.5, hex(0xe8ffff));
+            c.px(px + 5, 2, hex(0x9ff0ff));
+        } else {
+            c.hline(px - 1, 14, 12, hex(0x14141c)); // cold ashes
+        }
+        // A rune on each pillar.
+        c.rect(px + 4, 28, 2, 8, hex(rune[2]));
+        c.hline(px + 2, 31, 6, hex(rune[1]));
+    }
+    // The monolith: tapering towards a pointed top, carved runes down its face.
+    for (k, yy) in (8..45).enumerate() {
+        let half = 8 + (k as i32) / 9;
+        let x0 = 48 - half;
+        c.hline(x0, yy, 2 * half, hex(dark[2]));
+        c.px(x0, yy, hex(dark[3]));
+        c.px(x0 + 1, yy, hex(dark[3]));
+        c.px(x0 + 2 * half - 1, yy, hex(dark[0]));
+        c.px(x0 + 2 * half - 2, yy, hex(dark[1]));
+    }
+    c.rect(41, 6, 14, 3, hex(dark[2]));
+    // Runes: a channel with glyphs branching off.
+    c.rect(47, 12, 2, 30, hex(rune[1]));
+    c.vline(47, 13, 28, hex(rune[2]));
+    for (gy, gx, gw) in [(15, 42, 5), (21, 49, 6), (27, 41, 6), (33, 49, 5), (38, 43, 4)] {
+        c.hline(gx, gy, gw, hex(rune[1]));
+        c.px(gx + if gx < 47 { 0 } else { gw - 1 }, gy - 1, hex(rune[2]));
+    }
+    if glow {
+        c.vline(48, 14, 26, hex(rune[3]));
+    }
+    // The crystal on top: a diamond.
+    let gem = if glow { [0x2a8fb0, 0x55d4ff, 0x9ff0ff, 0xffffff] } else { [0x3a3048, 0x504464, 0x66597e, 0x8478a0] };
+    for k in 0..7i32 {
+        let w = 2 * (k + 1);
+        c.hline(48 - w / 2, k, w, hex(gem[2]));
+        c.hline(48 - w / 2, 12 - k, w, hex(gem[1]));
+    }
+    c.vline(46, 2, 5, hex(gem[3]));
+    c.px(45, 4, hex(gem[3]));
+    c.auto_outline(96, 64, OUTLINE);
+    if glow {
+        // Sparkles around it (after the outline: they float free).
+        for (gx, gy) in [(30, 6), (66, 10), (36, 26), (62, 30), (8, 30), (88, 24), (54, 3), (24, 40), (74, 40)] {
+            c.px(gx, gy, hex(0xe8ffff));
+            c.px(gx - 1, gy, Color::new(0.6, 0.95, 1.0, 0.6));
+            c.px(gx + 1, gy, Color::new(0.6, 0.95, 1.0, 0.6));
+            c.px(gx, gy - 1, Color::new(0.6, 0.95, 1.0, 0.6));
+            c.px(gx, gy + 1, Color::new(0.6, 0.95, 1.0, 0.6));
+        }
+    }
+    c.shadow(48.0, 61.0, 44.0, 2.5);
 }
 
 /// Origin of sheet cell `cell` (8 cells per row).
@@ -1895,6 +1982,12 @@ fn big_props(c: &mut Canvas) {
     }
     c.auto_outline(64, 64, OUTLINE);
     c.shadow(32.0, 61.0, 28.0, 4.0);
+    // The forest shrine (3x2), dormant and glowing.
+    for (k, glow) in [(0u32, false), (3, true)] {
+        let (x, y) = cell(p::GRAND_SHRINE + k);
+        c.at(x, y);
+        grand_shrine(c, glow);
+    }
     // Statue (1x2): a knight on a pedestal.
     let (x, y) = cell(p::STATUE);
     c.at(x, y);
@@ -1977,7 +2070,8 @@ fn big_props(c: &mut Canvas) {
 }
 
 pub fn props(out: &Path) {
-    let mut c = Canvas::new(TS * 8, TS * 7);
+    // 9 rows: rows 7-8 (the grand shrine) were added later, below the older cells.
+    let mut c = Canvas::new(TS * 8, TS * 9);
     let n = TS as i32;
     for i in 0..8u32 {
         let (x, y) = cell(i);
@@ -2496,6 +2590,50 @@ pub fn fireball(out: &Path) {
 
 /// `sprites/explosion.png`: 8 frames (64 x 64): a burst of fire that swells, cools to smoke
 /// and dissolves.
+/// A burst of blue magic (64x64 frames x 8): a bright core, an expanding ring of light and
+/// sparkles flying outwards, fading.
+pub fn magic_burst(out: &Path) {
+    let mut c = Canvas::new(64 * 8, 64);
+    let mut rng = Rng(77);
+    let sparks: Vec<(f32, f32)> = (0..18).map(|_| (rng.range(628) as f32 / 100.0, 0.6 + rng.range(40) as f32 / 100.0)).collect();
+    for f in 0..8i32 {
+        c.at(f as u32 * 64, 0);
+        let t = f as f32 / 7.0;
+        let fade = 1.0 - t * 0.85;
+        // Core.
+        let core = 10.0 * (1.0 - t).max(0.0);
+        if core > 0.5 {
+            c.disc(32.0, 32.0, core + 4.0, Color::new(0.33, 0.83, 1.0, 0.45 * fade));
+            c.disc(32.0, 32.0, core, Color::new(0.62, 0.94, 1.0, 0.9 * fade));
+            c.disc(32.0, 32.0, core * 0.5, Color::new(1.0, 1.0, 1.0, fade));
+        }
+        // The ring.
+        let r = 6.0 + t * 24.0;
+        for y in 0..64 {
+            for x in 0..64 {
+                let d = ((x as f32 + 0.5 - 32.0).powi(2) + (y as f32 + 0.5 - 32.0).powi(2)).sqrt();
+                let band = 1.0 - ((d - r).abs() / (2.5 + t * 2.0));
+                if band > 0.0 {
+                    let a = band * fade;
+                    c.px(x, y, Color::new(0.55 + 0.4 * band, 0.9 + 0.1 * band, 1.0, a.min(1.0)));
+                }
+            }
+        }
+        // Sparkles flying outwards.
+        for (a, sp) in &sparks {
+            let d = 4.0 + t * 28.0 * sp;
+            let (x, y) = ((32.0 + a.cos() * d) as i32, (32.0 + a.sin() * d) as i32);
+            let col = Color::new(0.85, 0.98, 1.0, fade);
+            c.px(x, y, col);
+            if f < 5 {
+                c.px(x + 1, y, Color::new(0.55, 0.9, 1.0, fade * 0.6));
+                c.px(x, y + 1, Color::new(0.55, 0.9, 1.0, fade * 0.6));
+            }
+        }
+    }
+    c.save(&out.join("sprites/magic_burst.png"));
+}
+
 pub fn explosion(out: &Path) {
     let mut c = Canvas::new(64 * 8, 64);
     const RADIUS: [f32; 8] = [8.0, 15.0, 21.0, 25.0, 28.0, 29.5, 30.5, 31.0];

@@ -26,7 +26,7 @@ fn root_arg() -> Option<PathBuf> {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--map" | "--spawn" | "--pos" => {
+            "--map" | "--spawn" | "--pos" | "--cutscene" => {
                 args.next();
             }
             s if s.starts_with('-') => {}
@@ -48,13 +48,14 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
             "--no-title" => no_title = true,
             "--engine-build" => {}
             "--spawn" => start.spawn = Some(value()?),
+            "--cutscene" => start.cutscene = Some(value()?),
             "--pos" => {
                 let v = value()?;
                 let (x, y) = v.split_once(',').context("--pos expects X,Y")?;
                 start.pos = Some(vec2(x.trim().parse()?, y.trim().parse()?));
             }
             "-h" | "--help" => {
-                println!("usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title]");
+                println!("usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--cutscene FUNCTION]");
                 std::process::exit(0);
             }
             s if s.starts_with('-') => bail!("unknown option {s}"),

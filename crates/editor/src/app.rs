@@ -808,6 +808,16 @@ impl Editor {
     }
 
     pub fn play(&mut self, here: bool) {
+        self.play_with(here, None);
+    }
+
+    /// Play-tests script function `function` as a cut-scene on the open map (the start map
+    /// without one), right after arriving - without the map's Map enter triggers.
+    pub fn play_cutscene(&mut self, function: &str) {
+        self.play_with(true, Some(function));
+    }
+
+    fn play_with(&mut self, here: bool, cutscene: Option<&str>) {
         self.save_all();
         let exe = std::env::current_exe().ok().map(|p| p.with_file_name("rust2d-game"));
         let Some(exe) = exe.filter(|p| p.exists()) else {
@@ -816,8 +826,11 @@ impl Editor {
         };
         let mut cmd = std::process::Command::new(exe);
         cmd.arg(&self.project.root);
-        if !here {
+        if !here || cutscene.is_some() {
             cmd.arg("--no-title");
+        }
+        if let Some(f) = cutscene {
+            cmd.args(["--cutscene", f]);
         }
         if here {
             if let Some(doc) = &self.doc {
@@ -844,6 +857,7 @@ impl Editor {
             Ok(_) if stale => self.set_status(
                 "Play-test started, but rust2d-game was built from a different engine version; if it fails, run `cargo build -p rust2d-game` (or `cargo build --workspace`)",
             ),
+            Ok(_) if cutscene.is_some() => self.set_status(format!("Playing cut-scene {}()", cutscene.unwrap_or_default())),
             Ok(_) => self.set_status("Play-test started"),
             Err(e) => self.set_status(format!("Failed to start game: {e}")),
         }
@@ -1191,6 +1205,9 @@ impl Editor {
         self.wizard_window(ctx);
         self.builder_window(ctx);
         self.apply_builder_requests();
+        if let Some(f) = crate::widgets::take_play_cutscene() {
+            self.play_cutscene(&f);
+        }
         self.map_windows(ctx);
         self.model_window(ctx);
         self.new_project_window(ctx);

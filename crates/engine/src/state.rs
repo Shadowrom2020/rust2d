@@ -131,6 +131,9 @@ pub struct WorldState {
     /// map -> spawner zone uid -> characters defeated for good (`Respawn::Never`).
     #[serde(default)]
     pub spawner_kills: BTreeMap<String, BTreeMap<u32, u32>>,
+    /// map -> spawner zones switched off by name ("" = all of the map's spawners).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub spawners_off: BTreeMap<String, std::collections::BTreeSet<String>>,
     /// map -> entity uid -> contents of containers that have been opened.
     #[serde(default)]
     pub containers: BTreeMap<String, BTreeMap<u32, Inventory>>,

@@ -59,6 +59,12 @@
         frame_h: 64,
     ),
     (
+        id: "magic_burst",
+        image: "sprites/magic_burst.png",
+        frame_w: 64,
+        frame_h: 64,
+    ),
+    (
         id: "body_male",
         image: "sprites/body_male.png",
         frame_w: 32,

@@ -66,7 +66,7 @@ impl Patrol {
 
 impl Game {
     /// Feet position a character aims for on a tile.
-    fn tile_spot(&self, t: TilePos) -> Vec2 {
+    pub(super) fn tile_spot(&self, t: TilePos) -> Vec2 {
         let ts = self.ts();
         vec2((t.0 as f32 + 0.5) * ts, (t.1 as f32 + 1.0) * ts - 2.0)
     }

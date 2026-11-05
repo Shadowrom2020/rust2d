@@ -315,6 +315,29 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
     // The HUD (status frame, clock, quick bar, buttons), e.g. for cut-scenes.
     engine.register_fn("hide_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: false })));
+    // Cut-scenes and scripted walking (tile coordinates; fractional ones are rounded down).
+    engine.register_fn("cutscene", with!(ctx, |c, f: &str| c.actions.push(Action::Cutscene { function: f.into() })));
+    engine.register_fn("dim", with!(ctx, |c, amount: Dynamic, seconds: Dynamic| c.actions.push(Action::Dim {
+        amount: num(&amount).clamp(0.0, 1.0),
+        seconds: num(&seconds).max(0.0),
+    })));
+    // Enemy spawners of a map ("" = the current one), all or one zone by name.
+    engine.register_fn("disable_spawners", with!(ctx, |c, map: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: String::new(), active: false })));
+    engine.register_fn("disable_spawners", with!(ctx, |c, map: &str, zone: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: zone.into(), active: false })));
+    engine.register_fn("enable_spawners", with!(ctx, |c, map: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: String::new(), active: true })));
+    engine.register_fn("defeat_enemies", with!(ctx, |c| c.actions.push(Action::DefeatEnemies)));
+    engine.register_fn("enable_spawners", with!(ctx, |c, map: &str, zone: &str| c.actions.push(Action::SetSpawners { map: map.into(), zone: zone.into(), active: true })));
+    engine.register_fn("walk_to", with!(ctx, |c, t: &str, x: Dynamic, y: Dynamic| c.actions.push(Action::WalkTo {
+        target: t.into(),
+        x: num(&x).floor() as i32,
+        y: num(&y).floor() as i32,
+    })));
+    engine.register_fn("approach", with!(ctx, |c, t: &str, to: &str| c.actions.push(Action::Approach { target: t.into(), to: to.into() })));
+    engine.register_fn("place", with!(ctx, |c, t: &str, x: Dynamic, y: Dynamic| c.actions.push(Action::Place {
+        target: t.into(),
+        x: num(&x).floor() as i32,
+        y: num(&y).floor() as i32,
+    })));
     engine.register_fn("show_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: true })));
     engine.register_fn("set_state", with!(ctx, |c, t: &str, s: &str| c.actions.push(Action::SetState { target: t.into(), state: s.into() })));
     engine.register_fn("move_by", with!(ctx, |c, t: &str, dx: i64, dy: i64| c.actions.push(Action::Move {
@@ -358,7 +381,7 @@ fn num(d: &Dynamic) -> f32 {
 }
 
 /// The sprite of `fly` / `effect` from the sheet and the options map: `frames: [first, last]`,
-/// `fps`, `scale`, `light`.
+/// `fps`, `scale`, `light`, `color: [r, g, b]` (of the light).
 fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
     let opt = |k: &str| o.get(k).map(num);
     let mut s = FxSprite { sheet: sheet.into(), ..Default::default() };
@@ -371,6 +394,9 @@ fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
     s.fps = opt("fps").unwrap_or(s.fps).max(0.1);
     s.scale = opt("scale").unwrap_or(s.scale).max(0.05);
     s.light = opt("light").unwrap_or(0.0).max(0.0);
+    if let Some(c) = o.get("color").and_then(|c| c.clone().try_cast::<Array>()).filter(|a| a.len() >= 3) {
+        s.glow = [0, 1, 2].map(|i| num(&c[i]).clamp(0.0, 255.0) as u8);
+    }
     s
 }
 
@@ -469,6 +495,30 @@ mod tests {
         )
         .unwrap();
         host.load_source("fn pause() { wait(1); wait(0.5); }").unwrap();
+        // Cut-scenes: the function to play, scripted walks (tiles; decimals rounded down).
+        host.load_source(r#"fn scene() { cutscene("intro"); place("player", 1, 18); walk_to("player", 5.7, 18); approach("guard", "player"); hide_ui(); show_ui(); }"#).unwrap();
+        assert_eq!(
+            host.call(&mut w, "scene", None),
+            vec![
+                Action::Cutscene { function: "intro".into() },
+                Action::Place { target: "player".into(), x: 1, y: 18 },
+                Action::WalkTo { target: "player".into(), x: 5, y: 18 },
+                Action::Approach { target: "guard".into(), to: "player".into() },
+                Action::SetUiVisible { visible: false },
+                Action::SetUiVisible { visible: true },
+            ]
+        );
+        host.load_source(r#"fn calm() { dim(0.8, 1.5); dim(2, -1); disable_spawners("forest"); enable_spawners("", "den"); defeat_enemies(); }"#).unwrap();
+        assert_eq!(
+            host.call(&mut w, "calm", None),
+            vec![
+                Action::Dim { amount: 0.8, seconds: 1.5 },
+                Action::Dim { amount: 1.0, seconds: 0.0 },
+                Action::SetSpawners { map: "forest".into(), zone: String::new(), active: false },
+                Action::SetSpawners { map: String::new(), zone: "den".into(), active: true },
+                Action::DefeatEnemies,
+            ]
+        );
         assert_eq!(host.call(&mut w, "pause", None), vec![Action::Wait { seconds: 1.0 }, Action::Wait { seconds: 0.5 }]);
         host.set_player(PlayerInfo { x: 4.5, y: 6.0, max_hp: 12, facing: Facing::Up });
         assert_eq!(

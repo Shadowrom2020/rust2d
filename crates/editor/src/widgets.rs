@@ -713,6 +713,9 @@ fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, 
         ui.add(egui::DragValue::new(&mut s.scale).range(0.1..=10.0).speed(0.05).prefix("x "));
         ui.label("light");
         ui.add(egui::DragValue::new(&mut s.light).range(0.0..=16.0).speed(0.1).suffix(" tiles")).on_hover_text("0 = no glow");
+        if s.light > 0.0 {
+            ui.color_edit_button_srgb(&mut s.glow).on_hover_text("Color of the light");
+        }
     });
 }
 
@@ -1204,6 +1207,57 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 ui.add(egui::DragValue::new(frame).range(0..=255));
             });
         }
+        Action::Cutscene { function } => {
+            ui.horizontal(|ui| {
+                labeled(ui, "function", |ui| suggest(ui, id, function, &refs.functions, 130.0));
+                if ui.add_enabled(!function.is_empty(), egui::Button::new("\u{E3D0} Preview")).on_hover_text("Play-test just this cut-scene on the open map (saves first)").clicked() {
+                    request_play_cutscene(function);
+                }
+            });
+            ui.weak("Plays the script function as a cut-scene: the HUD hides, black bars slide in, everyone else waits until its walks, dialogs and waits are done (Scripts tab: + Cutscene template).");
+        }
+        Action::Dim { amount, seconds } => {
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(amount, 0.0..=1.0).text("dark"));
+                ui.label("over");
+                ui.add(egui::DragValue::new(seconds).range(0.0..=30.0).speed(0.1).suffix(" s"));
+            });
+            ui.weak("0 = normal, 1 = deep night: makes lights show by day (e.g. in a cut-scene, which brightens again when it ends). Not saved.");
+        }
+        Action::SetSpawners { map, zone, active } => {
+            labeled(ui, "map", |ui| {
+                suggest(ui, &format!("{id}/map"), map, &refs.maps, 110.0);
+                ui.weak("(empty = this map)");
+            });
+            labeled(ui, "spawner zone", |ui| {
+                ui.add(egui::TextEdit::singleline(zone).hint_text("all").desired_width(110.0));
+            });
+            ui.horizontal(|ui| {
+                ui.radio_value(active, false, "Off");
+                ui.radio_value(active, true, "On");
+            });
+            ui.weak("Off: no more enemies from these spawners (theirs on the current map vanish). Saved.");
+        }
+        Action::DefeatEnemies => {
+            ui.weak("Every hostile character on the current map is defeated at once (loot drops, their 'Defeated' triggers run).");
+        }
+        Action::EndCutscene => {
+            ui.weak("(ends the cut-scene; added automatically after a cut-scene's actions)");
+        }
+        Action::WalkTo { target, x, y } | Action::Place { target, x, y } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.label("tile x");
+                ui.add(egui::DragValue::new(x).range(0..=4096));
+                ui.label("y");
+                ui.add(egui::DragValue::new(y).range(0..=4096));
+            });
+        }
+        Action::Approach { target, to } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "walks up to", |ui| suggest(ui, &format!("{id}/to"), to, &refs.targets, 100.0));
+            ui.weak("(stops a tile before it; then both face each other)");
+        }
         Action::Move { target, dx, dy } => {
             target_field(ui, id, target, refs);
             ui.horizontal(|ui| {
@@ -1267,6 +1321,21 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
 thread_local! {
     /// Debug-script request to open the chooser of the field with this id.
     static OPEN_CHOOSER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// A cut-scene to preview (the *Preview* button of a *Play cutscene* action).
+    static PLAY_CUTSCENE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Asks the editor to play-test script function `function` as a cut-scene.
+pub fn request_play_cutscene(function: &str) {
+    PLAY_CUTSCENE.with(|r| *r.borrow_mut() = Some(function.to_string()));
+}
+
+/// The cut-scene preview requested this frame, if any.
+pub fn take_play_cutscene() -> Option<String> {
+    PLAY_CUTSCENE.with(|r| r.borrow_mut().take())
 }
 
 /// Opens the sprite chooser of field `id` the next time it is shown (editor debug scripts).

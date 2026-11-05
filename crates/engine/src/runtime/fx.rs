@@ -10,9 +10,6 @@ use crate::defs::LightSpec;
 use crate::events::FxSprite;
 use crate::render::lighting::Light;
 
-/// Warm glow of fire effects.
-const GLOW: [u8; 3] = [255, 160, 70];
-
 pub(super) struct Fx {
     sprite: FxSprite,
     /// World pixels (the sprite's center).
@@ -175,7 +172,7 @@ impl Game {
                     FxKind::Fly { .. } => 1.0,
                     FxKind::Once => (1.0 - f.age * f.sprite.fps / self.fx_frames(&f.sprite) as f32).clamp(0.0, 1.0),
                 };
-                let spec = LightSpec { intensity: fade, ..LightSpec::new(f.sprite.light * (0.5 + 0.5 * fade), GLOW, true) };
+                let spec = LightSpec { intensity: fade, ..LightSpec::new(f.sprite.light * (0.5 + 0.5 * fade), f.sprite.glow, true) };
                 Light::new(f.pos, &spec)
             })
             .chain(timed)

@@ -63,6 +63,8 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("item_count", 0, IdKind::Item),
     ("teleport", 0, IdKind::Map),
     ("teleport", 1, IdKind::Spawn),
+    ("disable_spawners", 0, IdKind::Map),
+    ("enable_spawners", 0, IdKind::Map),
     ("play_sound", 0, IdKind::Sound),
     ("play_music", 0, IdKind::Sound),
     ("start_quest", 0, IdKind::Quest),
@@ -344,7 +346,7 @@ pub fn functions(src: &str) -> Vec<ScriptFn> {
 }
 
 /// Script functions (of `names`) a function uses: calls, and names passed as strings
-/// (`then_call("f")`, `aim("f")`, `fly(..., "f")`).
+/// (`then_call("f")`, `aim("f")`, `fly(..., "f")`, `cutscene("f")`).
 pub fn used_functions(f: &ScriptFn, names: &BTreeSet<String>) -> BTreeSet<String> {
     let toks = tokenize(&f.text);
     let mut out = BTreeSet::new();

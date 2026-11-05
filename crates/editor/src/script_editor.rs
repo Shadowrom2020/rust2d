@@ -99,9 +99,9 @@ pub const API: &[ApiFn] = api! {
     "player_facing"() "Where the player looks: \"up\", \"down\", \"left\" or \"right\"";
     "aim"(function: Func) "Magic targeting: the player's next click calls function(x, y) with the target in tiles; in a spell's script the spell is paid then (queued)";
     "fly"(sheet: Sheet, x: Num, y: Num, function: Func) "An animated sprite flies from the player to tile x, y, then calls function(x, y) (queued)";
-    "fly"(sheet: Sheet, x: Num, y: Num, function: Func, options: Opts) "Like fly(); options #{ speed: tiles/s, frames: [first, last], fps, scale, light: radius } (queued)";
+    "fly"(sheet: Sheet, x: Num, y: Num, function: Func, options: Opts) "Like fly(); options #{ speed: tiles/s, frames: [first, last], fps, scale, light: radius, color: [r, g, b] } (queued)";
     "effect"(sheet: Sheet, x: Num, y: Num) "Plays a sprite sheet's frames once, centered on tile x, y (explosions) (queued)";
-    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius } (queued)";
+    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius, color: [r, g, b] } (queued)";
     "damage_area"(x: Num, y: Num, radius: Num, damage: Num) "Damages every character within radius tiles of tile x, y (spell damage skills apply) (queued)";
     "text"(text: Text) "Fills in {player}, {sir|madam} and {variable} placeholders";
     "random"(n: Num) "Random integer from 0 to n-1";
@@ -118,6 +118,16 @@ pub const API: &[ApiFn] = api! {
     "wait"(seconds: Num) "Waits before the next queued action";
     "emit"(event: Event) "Fires a custom event (queued)";
     "then_call"(function: Func) "Calls another script function after the queued actions";
+    "cutscene"(function: Func) "Plays a script function as a cut-scene: HUD hidden, black bars, everyone else waits until its actions are done (queued)";
+    "walk_to"(target: Target, x: Num, y: Num) "Walks a character (or the player) onto tile x, y (queued, blocks until it arrives)";
+    "approach"(target: Target, other: Target) "Walks a character up to another one, a tile before it; then both face each other (queued, blocks)";
+    "place"(target: Target, x: Num, y: Num) "Puts a character (or the player) on tile x, y at once (queued)";
+    "dim"(amount: Num, seconds: Num) "Darkens the scene to amount (0 = normal, 1 = deep night) over seconds, so lights show by day; a cut-scene's end brightens it again (queued)";
+    "disable_spawners"(map: Map) "Switches off every enemy spawner of a map (\"\" = this one); their characters here vanish. Saved (queued)";
+    "disable_spawners"(map: Map, zone: Text) "Switches off one spawner zone of a map by name (queued)";
+    "enable_spawners"(map: Map) "Switches a map's spawners on again (queued)";
+    "defeat_enemies"() "Defeats every hostile character on the current map at once: loot drops, their Defeated triggers run (queued)";
+    "enable_spawners"(map: Map, zone: Text) "Switches one spawner zone switched off by name on again (queued)";
     "heal"(amount: Num) "Heals the player (queued)";
     "play_sound"(sound: Sound) "Plays a sound (queued)";
     "play_music"(sound: Sound) "Plays music (queued)";

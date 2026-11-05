@@ -187,7 +187,7 @@ pub fn script_roots(db: &Database, a: &AssetRef) -> Vec<String> {
     fn actions(acts: &[Action], out: &mut Vec<String>) {
         for a in acts {
             match a {
-                Action::RunScript { function } | Action::Aim { function } | Action::Fly { function, .. } => out.push(function.clone()),
+                Action::RunScript { function } | Action::Aim { function } | Action::Fly { function, .. } | Action::Cutscene { function } => out.push(function.clone()),
                 Action::If { conditions, then, otherwise } => {
                     out.extend(conditions.iter().filter_map(|c| match &c.cond {
                         Cond::Script { function } => Some(function.clone()),

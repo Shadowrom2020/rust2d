@@ -433,6 +433,30 @@ pub enum Action {
     /// Hides or shows the game's HUD (status frame, clock, quick bar, buttons), e.g. for a
     /// cut-scene; dialogs and windows the player opens still show. The player toggles it with H.
     SetUiVisible { visible: bool },
+    /// Plays the Rhai function `function` as a cut-scene: the HUD is hidden, black bars slide
+    /// in, the player and the other characters wait while its actions run (walking, dialogs,
+    /// waits, ...); afterwards everything is as before.
+    Cutscene { function: String },
+    /// Ends a cut-scene (queued after its actions by `Cutscene`).
+    EndCutscene,
+    /// Walks a character (or the player) to the middle of tile (`x`, `y`); blocks until it arrives.
+    WalkTo { target: TargetName, x: i32, y: i32 },
+    /// Walks a character (or the player) up to another one (`to`), stopping a tile before it;
+    /// then both face each other. Blocks until it arrives.
+    Approach { target: TargetName, to: TargetName },
+    /// Puts a character (or the player) on tile (`x`, `y`) at once (no walking).
+    Place { target: TargetName, x: i32, y: i32 },
+    /// Darkens the scene to `amount` (0 = normal, 1 = deep night) over `seconds`, e.g. so that
+    /// lights show in a cut-scene by day. Not saved (loading resets it); a cut-scene's end fades
+    /// back to normal.
+    Dim { amount: f32, seconds: f32 },
+    /// Switches the enemy spawners of a map off (or on again): `zone` = one spawner zone by
+    /// name, "" = all of them; `map` "" = the current map. Their characters on the current map
+    /// vanish. Saved.
+    SetSpawners { map: String, zone: String, active: bool },
+    /// Defeats every hostile character on the current map at once (with their loot, dropped
+    /// items and *Defeated* triggers, like a defeat in combat).
+    DefeatEnemies,
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -452,13 +476,15 @@ pub struct FxSprite {
     pub fps: f32,
     /// Size factor (1 = the sheet's frame size).
     pub scale: f32,
-    /// A warm light around it (radius in tiles, 0 = none); explosions' lights fade out.
+    /// A light around it (radius in tiles, 0 = none); explosions' lights fade out.
     pub light: f32,
+    /// The color of that light (default: a warm fire glow).
+    pub glow: [u8; 3],
 }
 
 impl Default for FxSprite {
     fn default() -> Self {
-        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0 }
+        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70] }
     }
 }
 
@@ -506,6 +532,14 @@ impl Action {
             Action::GiveItemTo { .. } => "Give item to character",
             Action::TakeItemFrom { .. } => "Take item from character",
             Action::SetUiVisible { .. } => "Show / hide UI",
+            Action::Cutscene { .. } => "Play cutscene",
+            Action::EndCutscene => "End cutscene",
+            Action::WalkTo { .. } => "Walk to tile",
+            Action::Approach { .. } => "Walk up to character",
+            Action::Place { .. } => "Place at tile",
+            Action::Dim { .. } => "Dim the scene",
+            Action::SetSpawners { .. } => "Spawners on / off",
+            Action::DefeatEnemies => "Defeat all enemies",
         }
     }
 
@@ -553,6 +587,13 @@ impl Action {
             Action::GiveItemTo { target: "self".into(), item: s(), count: 1 },
             Action::TakeItemFrom { target: "self".into(), item: s(), count: 1 },
             Action::SetUiVisible { visible: false },
+            Action::Cutscene { function: s() },
+            Action::WalkTo { target: "self".into(), x: 0, y: 0 },
+            Action::Approach { target: "self".into(), to: "player".into() },
+            Action::Place { target: "player".into(), x: 0, y: 0 },
+            Action::Dim { amount: 0.7, seconds: 1.0 },
+            Action::SetSpawners { map: s(), zone: s(), active: false },
+            Action::DefeatEnemies,
         ]
     }
 }

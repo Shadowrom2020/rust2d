@@ -1,5 +1,10 @@
 [
     (
+        id: "chime",
+        file: "sounds/chime.wav",
+        volume: 0.6,
+    ),
+    (
         id: "unlock",
         file: "sounds/unlock.wav",
         volume: 0.6,
