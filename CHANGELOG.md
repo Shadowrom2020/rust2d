@@ -32,6 +32,9 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   defeated, with the count, a portrait, the new *Description* of characters, health, damage,
   defense, experience, weapon, touch effect and drops. The *Defeated count* condition and
   `defeated_count(character)` read the counts (saved). The example's monsters have descriptions.
+- **Dialog log**: the journal's third tab, *Dialogs*, shows the last 1000 dialog lines of the game
+  (speaker, text, and the options the player picked), newest at the bottom; scroll with Up / Down,
+  the mouse wheel, PgUp / PgDn and Home / End. The log is saved with the game.
 
 ### Fixes
 - Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage

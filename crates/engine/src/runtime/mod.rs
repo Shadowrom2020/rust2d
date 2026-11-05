@@ -1366,7 +1366,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1380,6 +1380,7 @@ impl Game {
             self.effects_status(),
             self.ai_status(),
             self.bestiary_status(),
+            self.world.dialog_log.len(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),
@@ -1718,6 +1719,7 @@ impl ActionHost for Game {
                 self.audio.play(&self.project.config.sfx.dialog);
                 let speaker = self.entity_names_in(speaker, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
+                self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_dialog(&speaker, &text);
                 Step::Block
             }
@@ -1726,6 +1728,7 @@ impl ActionHost for Game {
                 let speaker = self.entity_names_in(speaker, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
                 let options: Vec<String> = options.iter().map(|o| self.world.expand_text(o)).collect();
+                self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_choice(&speaker, &text, &options, var);
                 Step::Block
             }
