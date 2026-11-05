@@ -91,6 +91,8 @@ pub const API: &[ApiFn] = api! {
     "unequip"(target: Target, slot: Text) "Takes off what a character wears in \"clothing\", \"head\", \"body\", \"weapon\" or \"offhand\" (into its carried items) (queued)";
     "give_item_to"(target: Target, item: Item, count: Num) "Adds items to what a character carries (dropped when it is defeated) (queued)";
     "take_item_from"(target: Target, item: Item, count: Num) "Takes items from what a character carries (queued)";
+    "hide_ui"() "Hides the HUD (status frame, clock, quick bar, buttons), e.g. for a cut-scene; dialogs still show. The player shows it again with H (queued)";
+    "show_ui"() "Shows the HUD again after hide_ui() or H (queued)";
     "player_x"() "The player's x position in tiles (fractional; the feet)";
     "player_y"() "The player's y position in tiles (fractional; the feet)";
     "player_max_hp"() "The player's maximum hit points";

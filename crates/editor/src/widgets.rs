@@ -1028,6 +1028,13 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 suggest(ui, &format!("{id}/it"), item, &refs.items, 110.0);
             });
         }
+        Action::SetUiVisible { visible } => {
+            ui.horizontal(|ui| {
+                ui.radio_value(visible, false, "Hide");
+                ui.radio_value(visible, true, "Show");
+                ui.weak("the HUD (status, clock, quick bar, buttons); dialogs still show");
+            });
+        }
         Action::SetFlag { name, value } => {
             ui.horizontal(|ui| {
                 suggest(ui, id, name, &refs.flags, 120.0);

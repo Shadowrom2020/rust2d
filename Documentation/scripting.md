@@ -312,6 +312,17 @@ fn guard_upgrade() {
 }
 ```
 
+### Interface
+
+The player hides and shows the HUD (status frame, clock, quick bar and the buttons) with **H**.
+Scripts can do the same, e.g. for a cut-scene. Dialogs, choices and windows the player opens
+are still shown. Not saved: a loaded game always starts with the HUD visible.
+
+| Function | Description |
+|---|---|
+| `hide_ui()` | Hides the HUD. *(queued)* |
+| `show_ui()` | Shows it again. *(queued)* |
+
 ### Quests
 
 | Function | Description |
@@ -529,6 +540,7 @@ fn trap() {
 
 ```rust
 fn guard_steps_aside() {
+    hide_ui();                      // a clean screen while it plays
     say(SELF, "Halt! ... Oh, it's you. Go ahead.");
     move_by("self", 1, 0);
     face("self", "left");
@@ -538,6 +550,7 @@ fn guard_steps_aside() {
 fn gate_open() {
     set_state("gate", "open");
     play_sound("creak");
+    show_ui();
 }
 ```
 

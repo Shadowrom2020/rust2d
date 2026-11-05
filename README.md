@@ -48,6 +48,7 @@ The example project contains a short quest: talk to the elder, get the key from 
 | M / map button (bottom right) | Map of the current map: the area as seen from above (on maps with fog of war only what the player has explored) (tiles, buildings, props) with the player (a red marker with an arrow showing where they face; an arrow at the edge points to them when scrolled away) and the exits labelled with the map they lead to. The game is paused while the map is open. Large maps scroll: arrow keys / WASD, dragging the map or the scrollbars, mouse wheel (Shift+wheel sideways); + / - or the buttons zoom, Space or *Center* returns to the player, M / Esc / the close button continue the game. |
 | J | Quest journal: active quests (newest first) and finished ones; the selected quest shows its description and the objectives reached so far (Up/Down or click select, J / Esc close) |
 | Q | Switch weapon (bare hands → owned weapons) |
+| H | Hide / show the interface (status frame, clock, quick bar, buttons; dialogs and windows still show). Scripts: `hide_ui()` / `show_ui()`, triggers: action *Show / hide UI* |
 | 1–8 / click a quick bar slot | Use that item (inventory open: 1–8 puts the selected item on the bar; drag shortcuts to rearrange, drag off or right-click to remove) |
 | C | Character sheet + inventory (same window as I) |
 | Left click | Walk to the tile / attack the enemy under the cursor / advance dialog |

@@ -212,6 +212,8 @@ pub struct Game {
     pending_events: Vec<(GameEvent, Source)>,
     /// Save slot the current game was last saved to / loaded from ("Save and quit" uses it).
     slot: Option<String>,
+    /// The HUD is hidden (H, or a script / action); not saved.
+    ui_hidden: bool,
 }
 
 impl Game {
@@ -282,6 +284,7 @@ impl Game {
             debug: false,
             pending_events: Vec::new(),
             slot: None,
+            ui_hidden: false,
         };
         let arrival = match (start.pos, start.spawn) {
             (Some(p), _) => Arrival::Pos(p),
@@ -862,6 +865,15 @@ impl Game {
         let (win_key, win_mouse) = self.update_window_tabs(allow_windows && !input.consumed, input.consumed || shop_key);
         let (shop_key, shop_mouse) = (shop_key || win_key, shop_mouse || win_mouse);
         let allow_windows = allow_windows && !win_mouse;
+        // H hides / shows the HUD.
+        let hide_key = allow_windows && !input.consumed && !shop_key && input::pressed(KeyCode::H);
+        if hide_key {
+            self.ui_hidden = !self.ui_hidden;
+            if self.ui_hidden {
+                self.ui.toast("Interface hidden - press H to show it".into());
+            }
+        }
+        let (shop_key, shop_mouse) = (shop_key || hide_key, shop_mouse);
         let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.skills_open(), input.consumed || shop_key);
         let (k_key, k_mouse) = self.update_skills_ui(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.journal_open(), input.consumed || shop_key || j_key);
         let (j_key, j_mouse) = (j_key || k_key, j_mouse || k_mouse);
@@ -1275,7 +1287,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.ui_hidden,
             self.window_status(),
             self.npc_items_status(),
             self.fx_status(),
@@ -1336,6 +1349,7 @@ impl Game {
         let s = std::fs::read_to_string(self.project.saves_dir().join(format!("{slot}.ron")))?;
         let world = WorldState::from_ron(&s)?;
         self.slot = Some(slot.to_string());
+        self.ui_hidden = false;
         let map = world.current_map.clone();
         let pos = vec2(world.player_pos.0, world.player_pos.1);
         self.player.facing = world.player_facing;
@@ -1465,8 +1479,10 @@ impl Game {
             draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0., 0., 0., alpha));
         }
         if !self.on_title() {
-            self.draw_hud();
-            self.draw_clock();
+            if !self.ui_hidden {
+                self.draw_hud();
+                self.draw_clock();
+            }
             if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
@@ -1737,6 +1753,10 @@ impl ActionHost for Game {
                 } else {
                     eprintln!("[events] {}: no character '{target}' on this map", action.label());
                 }
+                Step::Continue
+            }
+            Action::SetUiVisible { visible } => {
+                self.ui_hidden = !*visible;
                 Step::Continue
             }
             Action::OpenShop { target } => {
