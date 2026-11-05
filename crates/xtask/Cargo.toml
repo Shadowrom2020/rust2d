@@ -5,7 +5,11 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# `dist` (packaging the toolkit) needs the engine; the checks CI runs on every pull request don't.
+dist = ["dep:rust2d-engine", "dep:rust2d-packaging"]
+
 [dependencies]
-rust2d-engine.workspace = true
-rust2d-packaging.workspace = true
 anyhow.workspace = true
+rust2d-engine = { workspace = true, optional = true }
+rust2d-packaging = { workspace = true, optional = true }

@@ -101,22 +101,29 @@ gh pr create --base master --fill            # then merge it and the back-merge 
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request into `develop` / `master` and every push to
-them (Ubuntu 22.04, so the binaries need only glibc ≤ 2.35). Its jobs are the required checks:
+`.github/workflows/ci.yml` runs on every pull request into `develop` / `master` and on pushes to
+`master` (Ubuntu 22.04, so the binaries need only glibc ≤ 2.35). Pushes to `develop` don't run it
+again: the pull request already tested the merge. Its jobs are the required checks:
 
-| Check | What it does | Required for |
+| Check | What it does | Runs for |
 |---|---|---|
-| *Branch policy* | `cargo xtask check-branch HEAD BASE` | develop, master |
-| *Build, lint, test* | `cargo build`, `cargo clippy -D warnings`, `cargo test` (workspace, `--locked`) | develop, master |
-| *Version* | `cargo xtask check-version BRANCH` on pull requests into master | master |
-| *Packages* | release build, `cargo xtask dist` (AppImage + Flatpak), smoke test of game and editor under Xvfb, packages as artifacts; for pull requests into master and changes to packaging | master |
+| *Branch policy* | `cargo xtask check-branch HEAD BASE` (seconds: xtask without the engine) | every PR (required: develop, master) |
+| *Build, lint, test* | `cargo clippy --all-targets --all-features -D warnings`, `cargo test` (workspace, `--locked`, unoptimized: fast to compile) | every PR (required: develop, master) |
+| *Version* | `cargo xtask check-version BRANCH` | PRs into master (required there) |
+| *Packages* | release build, `cargo xtask-dist` (AppImage + Flatpak), smoke test of game and editor under Xvfb, packages as artifact | PRs into master (required there) |
 
-Dependabot opens weekly grouped updates (cargo, GitHub Actions) against `develop`; macroquad and
-egui-macroquad are pinned and updated by hand.
+A pull request into `develop` therefore costs one compile-and-test job; the package build happens
+when a release or hotfix branch asks to enter `master`. To try packaging changes earlier, run
+*Actions › Release › Run workflow* on the branch: run by hand it only builds the packages (an
+artifact), it never tags or publishes.
 
-`cargo xtask` (crates/xtask) runs the same tasks locally: `dist [--out DIR]` (needs
-`cargo build --release` first; refuses binaries that need glibc > 2.35), `check-version BRANCH`,
-`check-branch HEAD BASE`, `release-notes X.Y.Z`.
+Dependabot opens monthly grouped updates (cargo, GitHub Actions) against `develop`; macroquad,
+egui-macroquad, egui and egui-phosphor are pinned and updated by hand.
+
+`cargo xtask` (crates/xtask) runs the same tasks locally: `check-version BRANCH`,
+`check-branch HEAD BASE`, `release-notes X.Y.Z` (no engine: builds in seconds), and
+`cargo xtask-dist [--out DIR]` (xtask with the `dist` feature; needs `cargo build --release`
+first; refuses binaries that need glibc > 2.35).
 
 ## Checks before merging
 
@@ -124,7 +131,7 @@ CI runs them on every pull request; run them locally before pushing:
 
 ```sh
 cargo build --workspace                      # also rebuilds rust2d-game for editor play-tests
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
 
@@ -132,7 +139,7 @@ cargo test --workspace
   editor's starter asset pack with `cargo run --example gen_example` and commit the results.
   Never delete or commit `example_project/saves/` (it is ignored; it may hold the user's saves).
 - Build the game in release mode (`cargo build --release --workspace`) before testing
-  *File → Export game* or `cargo xtask dist`.
+  *File → Export game* or `cargo xtask-dist`.
 
 ## Commit messages
 

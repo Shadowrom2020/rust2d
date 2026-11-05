@@ -6,6 +6,12 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 ## Unreleased
 
 ### Maintenance
+- **Faster, cheaper CI**: pull requests into develop run only the branch policy (now seconds:
+  xtask builds without the engine unless `--features dist`, `cargo xtask-dist`) and one
+  unoptimized clippy + test job (no separate build); the version check and the AppImage / Flatpak
+  build run for pull requests into master (release / hotfix branches) only, or by hand with
+  *Actions › Release › Run workflow* (build only). Merges into develop no longer rerun CI;
+  Dependabot checks monthly.
 - **png 0.18** for reading and writing images in the engine (pixel editor, asset library,
   package icons); an image too large to decode is reported instead of panicking. New tests decode
   every example image and check lossless round trips.
