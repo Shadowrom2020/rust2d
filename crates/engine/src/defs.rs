@@ -701,6 +701,9 @@ pub struct CharacterDef {
     /// Subtracted from incoming damage (player: base defense before armor).
     #[serde(default)]
     pub defense: i32,
+    /// Experience the player gains for defeating the character (with experience and levels on).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub xp: u32,
     #[serde(default)]
     pub triggers: Vec<Trigger>,
     /// Makes the character a merchant (placed instances can override it).
@@ -1036,6 +1039,10 @@ impl Database {
         }
         .unwrap_or(&[])
     }
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 #[cfg(test)]

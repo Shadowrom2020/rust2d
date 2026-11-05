@@ -40,6 +40,9 @@ pub struct ProjectConfig {
     /// Skills and magic (both off by default).
     #[serde(default)]
     pub skills: crate::skills::SkillSettings,
+    /// Experience and levels (off by default).
+    #[serde(default)]
+    pub progression: crate::progression::Progression,
 }
 
 fn default_day_minutes() -> f32 {
@@ -140,6 +143,7 @@ impl ProjectConfig {
             day_minutes: default_day_minutes(),
             start_hour: default_start_hour(),
             skills: Default::default(),
+            progression: Default::default(),
         }
     }
 }

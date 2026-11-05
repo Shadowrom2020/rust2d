@@ -81,6 +81,9 @@ pub const API: &[ApiFn] = api! {
     "learn_spell"(spell: Spell) "Teaches a spell (queued)";
     "mana"() "The player's current mana";
     "add_mana"(amount: Num) "Adds mana (negative drains) (queued)";
+    "xp"() "All the experience points the player has gained (experience and levels)";
+    "level"() "The player's level (1 = the first)";
+    "give_xp"(amount: Num) "Gives experience; enough of it raises the level (negative takes it away, the level never drops) (queued)";
     "damage_around"(damage: Num, radius: Num) "Damages every character within radius tiles of the player (queued)";
     "player_light"(radius: Num, seconds: Num) "Lights the player's surroundings for a while (queued)";
     "player_light"(radius: Num, seconds: Num, options: Opts) "Like player_light(); options #{ color: [r, g, b], flicker: true } (queued)";

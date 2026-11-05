@@ -177,6 +177,12 @@ pub struct WorldState {
     /// The player definition's clothing was put on (saves from before clothing get it once).
     #[serde(default)]
     pub dressed: bool,
+    /// Experience points gained in total (experience and levels).
+    #[serde(default)]
+    pub xp: u64,
+    /// The player's level; 0 in old saves and fresh worlds means 1 (see [`WorldState::player_level`]).
+    #[serde(default)]
+    pub level: u32,
 }
 
 /// Worn and carried items of an NPC (saved once they differ from the map / definition).
@@ -228,6 +234,11 @@ impl Sex {
 }
 
 impl WorldState {
+    /// The player's level (at least 1).
+    pub fn player_level(&self) -> u32 {
+        self.level.max(1)
+    }
+
     pub fn skill_level(&self, id: &str) -> u32 {
         self.skills.get(id).copied().unwrap_or(0)
     }
@@ -411,6 +422,11 @@ mod tests {
         let old: WorldState = ron::from_str(r#"(flags: [], vars: {}, inventory: {"bow": 1}, entities: {}, fired: [], current_map: "m", player_pos: (0.0, 0.0), player_facing: Down, equipped: "bow")"#).unwrap();
         assert_eq!((old.equipped.as_str(), old.equipment.weapon.is_none()), ("bow", true));
         assert!(old.quickbar.is_empty());
+        // Saves from before experience and levels start at level 1 without XP.
+        assert_eq!((old.xp, old.player_level()), (0, 1));
+        let w = WorldState { xp: 250, level: 3, ..Default::default() };
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!((back.xp, back.player_level()), (250, 3));
         let w = WorldState { quickbar: vec!["potion".into(), String::new()], ..Default::default() };
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert_eq!(back.quickbar, w.quickbar);

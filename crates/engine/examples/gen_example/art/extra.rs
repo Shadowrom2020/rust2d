@@ -1417,6 +1417,7 @@ fn characters(x: &mut Extras) {
         hostile: false,
         weapon: None,
         defense: 0,
+        xp: 0,
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -1425,19 +1426,20 @@ fn characters(x: &mut Extras) {
         equipment: Default::default(),
         inventory: Vec::new(),
     };
-    let foe = |mut d: CharacterDef, hp: i32, damage: i32| {
+    let foe = |mut d: CharacterDef, hp: i32, damage: i32, xp: u32| {
         d.max_hp = hp;
         d.damage = damage;
         d.hostile = true;
+        d.xp = xp;
         d
     };
     for (id, name, _) in &people {
         let d = match *id {
-            "bandit" | "bandit_f" => foe(ch(id, name, 90.0, Behavior::Chase { sight: 6.0 }), 4, 2),
-            "skeleton" | "skeleton_f" => foe(ch(id, name, 70.0, Behavior::Chase { sight: 5.0 }), 3, 2),
+            "bandit" | "bandit_f" => foe(ch(id, name, 90.0, Behavior::Chase { sight: 6.0 }), 4, 2, 20),
+            "skeleton" | "skeleton_f" => foe(ch(id, name, 70.0, Behavior::Chase { sight: 5.0 }), 3, 2, 20),
             "goblin_f" => {
                 // Like the example's goblin archer.
-                let mut d = foe(ch(id, name, 76.0, Behavior::Chase { sight: 7.0 }), 2, 1);
+                let mut d = foe(ch(id, name, 76.0, Behavior::Chase { sight: 7.0 }), 2, 1, 12);
                 d.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: SpriteRef::new("items", it::ARROW_SHOT), speed: 300.0, range: 6.0, ammo: String::new() }));
                 d
             }
@@ -1460,8 +1462,8 @@ fn characters(x: &mut Extras) {
         }
         x.db.characters.push(d);
     }
-    let mut bat = foe(ch("bat", "Bat", 130.0, Behavior::Chase { sight: 7.0 }), 1, 1);
+    let mut bat = foe(ch("bat", "Bat", 130.0, Behavior::Chase { sight: 7.0 }), 1, 1, 6);
     bat.hitbox = [14.0, 8.0];
     x.db.characters.push(bat);
-    x.db.characters.push(foe(ch("ghost", "Ghost", 60.0, Behavior::Chase { sight: 6.0 }), 3, 2));
+    x.db.characters.push(foe(ch("ghost", "Ghost", 60.0, Behavior::Chase { sight: 6.0 }), 3, 2, 15));
 }

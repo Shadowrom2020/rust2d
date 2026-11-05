@@ -413,6 +413,30 @@ These only matter in projects with skills (and magic) enabled in *Database › P
 | `mana()` | Current mana. |
 | `add_mana(amount)` | Adds mana (negative drains it). *(queued)* |
 
+### Experience and levels
+
+These only matter in projects with *Experience and levels* enabled in *Database › Project*. Defeated
+characters give the experience set in their definition (*Combat › Experience*), completed quests their
+*Experience reward*; enough experience raises the level, which adds max HP, mana and skill points as set
+in the project. *Defeat all enemies* / `defeat_enemies()` gives no experience.
+
+| Function | Description |
+|---|---|
+| `xp()` | All the experience points the player has gained. |
+| `level()` | The player's level (`1` = the first). |
+| `give_xp(amount)` | Gives experience; enough of it raises the level, possibly several at once. Negative takes experience away, but the level never drops. *(queued)* |
+
+```rust
+fn trainer_talk() {
+    if level() < 3 {
+        say(SELF, "Come back when you have seen a few more fights.");
+        return;
+    }
+    say(SELF, "You have grown strong. Take this lesson.");
+    give_xp(50);
+}
+```
+
 ### Spell effects: targeting, flying sprites, animations, damage
 
 Use these to build spells (and traps, cut-scenes, …) in scripts.

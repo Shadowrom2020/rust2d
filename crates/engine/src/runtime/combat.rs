@@ -89,8 +89,8 @@ fn decay(knock: &mut Vec2, dt: f32, u: f32) -> Vec2 {
 }
 
 impl Game {
-    fn hp(&self) -> i32 {
-        self.world.player_hp.unwrap_or(self.combat.max_hp)
+    pub(super) fn hp(&self) -> i32 {
+        self.world.player_hp.unwrap_or(self.player_max_hp())
     }
 
     /// Advances the game-over screen; returns true while it is showing. Once the red fade is
@@ -405,14 +405,24 @@ impl Game {
                 e.active && e.hostile && e.max_hp > 0 && e.kind == crate::entity::EntityKind::Character
             })
             .collect();
+        // A scripted defeat gives no experience: the player didn't fight.
         for &i in &hostile {
             self.loaded.entities[i].hp = 0;
-            self.defeat(i);
+            self.defeat_with(i, false);
         }
         hostile.len()
     }
 
     fn defeat(&mut self, i: usize) {
+        self.defeat_with(i, true);
+    }
+
+    /// Defeats character `i`; `xp`: the player gains its experience.
+    fn defeat_with(&mut self, i: usize, xp: bool) {
+        if xp {
+            let n = self.xp_of(&self.loaded.entities[i].def);
+            self.give_xp(n as i64);
+        }
         let e = &mut self.loaded.entities[i];
         e.active = false;
         e.knock = Vec2::ZERO;
@@ -472,7 +482,7 @@ impl Game {
             self.combat.knock = Vec2::ZERO;
             return;
         }
-        let hp = (self.hp() + amount).min(self.combat.max_hp);
+        let hp = (self.hp() + amount).min(self.player_max_hp());
         self.world.player_hp = Some(hp);
         self.ui.toast(format!("+{amount} HP"));
     }
@@ -607,10 +617,12 @@ impl Game {
         const PAD: f32 = 8.0;
         let (x0, y0) = (10.0, 10.0);
         let hp = self.hp();
-        let hearts = (self.combat.max_hp + 1) / 2;
+        let hearts = (self.player_max_hp() + 1) / 2;
         let name = self.world.player_name.trim().to_string();
         let def = self.player_defense();
         let magic = self.magic_on();
+        let levels = self.progression_on();
+        let level_text = format!("Lv {}", self.world.player_level());
         let ammo = self.hud_ammo();
         // Sizes: the text column is as wide as its widest line.
         let portrait = Rect::new(x0 + PAD, y0 + PAD, 44.0, 60.0);
@@ -620,10 +632,18 @@ impl Game {
         let def_w = def_text.as_ref().map_or(0.0, |t| measure_text(t, None, 16, 1.0).width + 14.0);
         let hearts_w = hearts as f32 * STEP;
         let bar_w = hearts_w.max(120.0);
-        let col_w = (name_w + def_w).max(hearts_w).max(if magic { bar_w + 34.0 } else { 0.0 }).max(if ammo.is_some() { 80.0 } else { 0.0 });
+        let level_w = measure_text(&level_text, None, 15, 1.0).width + 6.0;
+        let col_w = (name_w + def_w)
+            .max(hearts_w)
+            .max(if magic { bar_w + 34.0 } else { 0.0 })
+            .max(if levels { bar_w + level_w } else { 0.0 })
+            .max(if ammo.is_some() { 80.0 } else { 0.0 });
         let mut h = 24.0 + HEART + 6.0;
         if magic {
             h += 16.0;
+        }
+        if levels {
+            h += 14.0;
         }
         if ammo.is_some() {
             h += 22.0;
@@ -685,6 +705,19 @@ impl Game {
             draw_rectangle_lines(bx - 1.0, y - 1.0, bar_w + 2.0, bh + 2.0, 1.0, Color::new(0.6, 0.7, 1.0, 0.8));
             draw_text(format!("{:.0}", self.world.mana), bx + bar_w + 6.0, y + 9.0, 15.0, Color::new(0.75, 0.82, 1.0, 1.0));
             y += 16.0;
+        }
+
+        // Level and the experience bar (progress towards the next level).
+        if levels {
+            let (have, need) = self.xp_progress();
+            let (bx, bh) = (tx, 6.0);
+            draw_rectangle(bx - 1.0, y - 1.0, bar_w + 2.0, bh + 2.0, Color::new(0.0, 0.0, 0.0, 0.7));
+            let fill = bar_w * (have as f32 / need.max(1) as f32).clamp(0.0, 1.0);
+            draw_rectangle(bx, y, fill, bh, Color::new(0.85, 0.68, 0.2, 1.0));
+            draw_rectangle(bx, y, fill, 2.0, Color::new(1.0, 0.88, 0.5, 1.0));
+            draw_rectangle_lines(bx - 1.0, y - 1.0, bar_w + 2.0, bh + 2.0, 1.0, Color::new(0.85, 0.72, 0.38, 0.8));
+            draw_text(&level_text, bx + bar_w + 6.0, y + 7.0, 15.0, Color::new(1.0, 0.86, 0.45, 1.0));
+            y += 14.0;
         }
 
         // Ammo of an equipped bow / crossbow.

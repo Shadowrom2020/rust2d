@@ -150,6 +150,7 @@
         hostile: true,
         weapon: None,
         defense: 0,
+        xp: 5,
         triggers: [
             (
                 on: Defeat,
@@ -214,6 +215,7 @@
             two_handed: false,
         )),
         defense: 0,
+        xp: 12,
         triggers: [],
         shop: None,
         loot: [
@@ -280,6 +282,7 @@
             two_handed: false,
         )),
         defense: 0,
+        xp: 12,
         triggers: [],
         shop: None,
         loot: [

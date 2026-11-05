@@ -53,6 +53,10 @@ impl Game {
         self.ui.toast(msg);
         self.audio.play(&self.project.config.sfx.pickup);
         self.journal.focus = Some(quest.to_string());
+        if change == QuestChange::Completed {
+            let xp = self.project.db.quest(quest).map_or(0, |d| d.xp);
+            self.give_xp(xp as i64);
+        }
     }
 
     /// Journal rows: headers and quests (active newest first, then finished ones).

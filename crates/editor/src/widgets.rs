@@ -880,6 +880,15 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                     });
                     ui.add(egui::DragValue::new(level).range(0..=99));
                 }
+                Cond::Level { op, value } => {
+                    ui.label("player level");
+                    egui::ComboBox::from_id_salt(format!("{id}/lvop")).width(40.0).selected_text(op.symbol()).show_ui(ui, |ui| {
+                        for o in CmpOp::ALL {
+                            ui.selectable_value(op, o, o.symbol());
+                        }
+                    });
+                    ui.add(egui::DragValue::new(value).range(1..=999));
+                }
                 Cond::KnowsSpell { spell } => {
                     ui.label("knows");
                     suggest(ui, &format!("{id}/sp"), spell, &refs.spells, 120.0);
@@ -1240,6 +1249,12 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
         }
         Action::DefeatEnemies => {
             ui.weak("Every hostile character on the current map is defeated at once (loot drops, their 'Defeated' triggers run).");
+        }
+        Action::GiveXp { amount } => {
+            labeled(ui, "experience", |ui| {
+                ui.add(egui::DragValue::new(amount).range(-1_000_000..=1_000_000))
+                    .on_hover_text("Experience points for the player (Project › Experience and levels). Negative takes them away; the level never drops.");
+            });
         }
         Action::Autosave => {
             ui.weak("Saves the game to the 'Autosave' slot once this event (dialogs, cut-scene) has finished. Map changes autosave by themselves.");

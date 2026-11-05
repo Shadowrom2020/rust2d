@@ -383,7 +383,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.quests,
                     sel,
                     |d| format!("{}  ({})", d.title, d.id),
-                    |ids| rust2d_engine::quest::QuestDef { id: unique("quest", ids), title: "New quest".into(), description: String::new(), stages: vec!["First objective".into()] },
+                    |ids| rust2d_engine::quest::QuestDef { id: unique("quest", ids), title: "New quest".into(), description: String::new(), stages: vec!["First objective".into()], xp: 0 },
                     |d| &mut d.id,
                 ),
                 _ => false,
@@ -1100,6 +1100,10 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
         ui.label("Hostile");
         ui.checkbox(&mut d.hostile, "hurts the player on contact");
         ui.end_row();
+        ui.label("Experience");
+        ui.add(egui::DragValue::new(&mut d.xp).range(0..=1_000_000).suffix(" XP"))
+            .on_hover_text("What the player gains for defeating this character (Project › Experience and levels must be on). 'Defeat all enemies' gives none.");
+        ui.end_row();
     });
     ui.weak("1 heart = 2 HP. For the player character, Damage is the bare-handed attack strength. Defeated characters fire 'Defeated' triggers.");
     ui.label("Ranged attack (hostile characters shoot at the player when in range and in sight):");
@@ -1140,6 +1144,10 @@ fn quest_form(ui: &mut egui::Ui, d: &mut rust2d_engine::quest::QuestDef, _cx: &m
         ui.end_row();
         ui.label("Title");
         ui.add(egui::TextEdit::singleline(&mut d.title).desired_width(320.0));
+        ui.end_row();
+        ui.label("Experience reward");
+        ui.add(egui::DragValue::new(&mut d.xp).range(0..=1_000_000).suffix(" XP"))
+            .on_hover_text("Given when the quest is completed (Project › Experience and levels must be on).");
         ui.end_row();
     });
     ui.label("Description (shown in the journal)");
@@ -1552,6 +1560,40 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
                     ui.end_row();
                 }
             });
+        });
+    }
+    ui.separator();
+    ui.heading("Experience and levels");
+    {
+        let p = &mut c.progression;
+        ui.checkbox(&mut p.enabled, "Experience and levels (defeated characters and completed quests give XP)")
+            .on_hover_text("Set the XP per character (Characters › Combat) and per quest (Quests › Experience reward). The HUD shows the level and an XP bar.");
+        ui.add_enabled_ui(p.enabled, |ui| {
+            egui::Grid::new("progression_cfg").num_columns(2).show(ui, |ui| {
+                ui.label("XP for level 2");
+                ui.add(egui::DragValue::new(&mut p.base_xp).range(1..=1_000_000));
+                ui.end_row();
+                ui.label("Growth per level");
+                ui.add(egui::DragValue::new(&mut p.growth).range(1.0..=10.0).speed(0.01).prefix("x "))
+                    .on_hover_text("Each level needs this many times the XP of the one before");
+                ui.end_row();
+                ui.label("Highest level");
+                ui.add(egui::DragValue::new(&mut p.max_level).range(1..=999));
+                ui.end_row();
+                ui.label("Max HP per level");
+                ui.add(egui::DragValue::new(&mut p.hp_per_level).range(0..=99)).on_hover_text("1 heart = 2 HP");
+                ui.end_row();
+                ui.label("Mana per level");
+                ui.add(egui::DragValue::new(&mut p.mana_per_level).range(0..=999)).on_hover_text("With magic");
+                ui.end_row();
+                ui.label("Skill points per level");
+                ui.add(egui::DragValue::new(&mut p.skill_points_per_level).range(0..=99)).on_hover_text("With skills");
+                ui.end_row();
+            });
+            let steps: Vec<String> = (2..=p.max_level.clamp(1, 6)).map(|l| format!("level {l}: {} XP", p.xp_for_level(l))).collect();
+            if !steps.is_empty() {
+                ui.weak(format!("Total experience needed: {}", steps.join(", ")));
+            }
         });
     }
     ui.separator();

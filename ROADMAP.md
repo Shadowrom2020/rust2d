@@ -47,7 +47,7 @@ Instructions for every session (people and coding agents) that implements roadma
 Theme: the player grows, enemies get interesting. All three systems are optional per project
 (disabled or absent → nothing changes for existing games).
 
-### [ ] Experience and levels — `feature/progression`
+### [x] Experience and levels — `feature/progression`
 
 **Goal.** Defeated enemies and completed quests give XP; levels raise max HP, mana and skill
 points; the HUD shows the level and an XP bar.
@@ -69,9 +69,14 @@ points; the HUD shows the level and an XP bar.
   Character window stats (`equipment.rs` `Stats`): `Level N, XP a / b`. `status()`: `xp=`, `level=`.
 - Events: `Action::GiveXp { amount }`, `Cond::Level { op, value }` (shape of `PlayerHp`).
   Scripts: queued `give_xp(n)`, immediate `xp()`, `level()`.
-- Editor: character form *Combat* grid gets *XP*; `quest_form` gets *XP reward*;
-  `project_form` gets a *Progression* section next to *Skills & magic*; `widgets.rs` fields
-  for the action and the condition.
+- Editor: character form *Combat* grid gets *Experience*; `quest_form` gets *Experience reward*;
+  `project_form` gets an *Experience and levels* section next to *Skills & magic* (with the
+  total XP of the first levels as a preview); `widgets.rs` fields for the action (*Give
+  experience*) and the condition (*Player level*).
+- Decided while building: with progression off, `give_xp` does nothing (XP isn't counted);
+  *Defeat all enemies* gives no XP (the player didn't fight); negative XP never lowers the level;
+  `WorldState.level` 0 (old saves, fresh worlds) reads as 1 via `WorldState::player_level()`;
+  the engine-side settings and math live in `crates/engine/src/progression.rs`.
 
 **Touch points.** `project.rs`, `defs.rs` (`CharacterDef` literals: gen_example `main.rs`,
 `art/extra.rs`, editor `builder.rs`), `quest.rs`, `state.rs`, `runtime/{combat,journal,skills,
