@@ -769,7 +769,7 @@ pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
 /// File in the library recording which starter set was last applied.
 const STARTER_STAMP: &str = "starter.stamp";
 /// Version of the rules for applying starter sets (2: images that only grew are upgraded).
-const STARTER_RULES: u32 = 2;
+const STARTER_RULES: u32 = 3;
 
 /// 64-bit FNV-1a hash (a cheap fingerprint of the starter pack).
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -820,11 +820,12 @@ mod tests {
             value: 0,
         light: None,
         teaches: String::new(),
+        held: String::new(),
         };
         let mut bow = item("bow");
         bow.weapon = Some(Weapon::ranged(1, 0.5, Ranged { projectile: SpriteRef::new("items", 1), speed: 100.0, range: 6.0, ammo: "arrows".into() }));
         let db = Database {
-            sheets: vec![SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 16, frame_h: 16 }],
+            sheets: vec![SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false }],
             items: vec![item("arrows"), bow],
             ..Default::default()
         };
@@ -875,7 +876,7 @@ mod tests {
         use crate::skills::{SpellDef, SpellEffect};
         let (root, mut db) = source("scripts");
         std::fs::write(root.join("sprites/boom.png"), png(16, 16, [9, 9, 9, 255])).unwrap();
-        db.sheets.push(SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 16, frame_h: 16 });
+        db.sheets.push(SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false });
         db.spells.push(SpellDef::new("fireball", "Fireball", "", SpriteRef::new("items", 0), 5, 1.0, SpellEffect::Script { function: "cast_fireball".into() }));
         std::fs::create_dir_all(root.join("scripts")).unwrap();
         let src = "// Fireball: aim first.\n// (two comment lines)\nfn cast_fireball() {\n    aim(\"fireball_at\");\n}\n\nfn fireball_at(x, y) { if x > 0 { helper(); } effect(\"boom\", x, y); }\n\n// unrelated\nfn helper() { say(\"hi\"); }\n\nfn shop_talk() { say(\"{ not a brace }\"); }\n";
@@ -918,7 +919,7 @@ mod tests {
         let other = tmp("scripts_other");
         std::fs::create_dir_all(other.join("sprites")).unwrap();
         std::fs::write(other.join("sprites/boom.png"), png(8, 8, [1, 1, 1, 255])).unwrap();
-        let mut odb = Database { sheets: vec![SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 8, frame_h: 8 }], ..Default::default() };
+        let mut odb = Database { sheets: vec![SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 8, frame_h: 8, kind: Default::default(), female: false }], ..Default::default() };
         again.merge_into(&mut odb, &other).unwrap();
         let merged = std::fs::read_to_string(other.join("scripts").join(LIBRARY_SCRIPT)).unwrap();
         assert!(merged.contains("effect(\"boom_2\", x, y)"), "{merged}");
@@ -972,7 +973,7 @@ mod tests {
         // A newer starter set: only assets with new ids are added, existing ones stay as they are.
         let mut db2 = db.clone();
         db2.items[0].name = "Changed arrows".into();
-        db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16 });
+        db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false });
         std::fs::write(root.join("sprites/extra.png"), png(16, 16, [1, 2, 3, 255])).unwrap();
         let pack2 = Bundle::collect(&db2, &root, 16, "starter", &all_assets(&db2)).unwrap().to_pack().unwrap();
         let lib = open_library(&dir, Some(&pack2)).unwrap();

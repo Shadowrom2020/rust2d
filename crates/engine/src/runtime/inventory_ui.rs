@@ -43,7 +43,7 @@ fn quick_rects() -> Vec<Rect> {
     (0..QUICK_SLOTS).map(|k| Rect::new(x0 + k as f32 * (QUICK_SLOT + GAP), sh - QUICK_SLOT - 12.0, QUICK_SLOT, QUICK_SLOT)).collect()
 }
 
-const EQUIP_SLOTS: [EquipSlot; 4] = [EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
+const EQUIP_SLOTS: [EquipSlot; 5] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
 const SHEET_W: f32 = 270.0;
 
 #[derive(Default)]
@@ -201,8 +201,11 @@ fn grid_size(n: usize, cols: usize) -> Vec2 {
     vec2(cols as f32 * (SLOT + GAP) - GAP + 2.0 * PAD, rows as f32 * (SLOT + GAP) - GAP + 2.0 * PAD + TITLE_H)
 }
 
+/// Vertical distance of the equipment slots.
+const EQUIP_STEP: f32 = 56.0;
+
 /// Height of the character sheet panel.
-const SHEET_H: f32 = 470.0;
+const SHEET_H: f32 = 500.0;
 
 /// Container panels are at least this wide (title + "Take all" button).
 const MIN_CONTAINER_W: f32 = 300.0;
@@ -286,7 +289,7 @@ impl Game {
                 let total = SHEET_W + 24.0 + size.x;
                 let top = ((sh - h - DETAIL_H) / 2.0).max(10.0).round();
                 let x0 = ((sw - total) / 2.0).round();
-                let slots = (0..EQUIP_SLOTS.len()).map(|k| Rect::new(x0 + 134.0, top + 50.0 + k as f32 * 60.0, SLOT, SLOT)).collect();
+                let slots = (0..EQUIP_SLOTS.len()).map(|k| Rect::new(x0 + 134.0, top + 50.0 + k as f32 * EQUIP_STEP, SLOT, SLOT)).collect();
                 grids.push(Grid { side: Side::Equip, title: "Character".into(), panel: Rect::new(x0, top, SHEET_W, h), slots, cols: 1 });
                 let mut g = make_grid(Side::Player, player_title, vec2(x0 + SHEET_W + 24.0, top), cap, cols);
                 g.panel.h = h;
@@ -914,7 +917,7 @@ impl Game {
             format!("Attack time {:.2}s", st.cooldown),
             reach,
         ];
-        let y0 = p.y + 50.0 + EQUIP_SLOTS.len() as f32 * 60.0 + 20.0;
+        let y0 = p.y + 50.0 + EQUIP_SLOTS.len() as f32 * EQUIP_STEP + 20.0;
         draw_line(p.x + PAD, y0 - 12.0, p.x + p.w - PAD, y0 - 12.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
         for (n, l) in lines.iter().enumerate() {
             draw_text(l, p.x + PAD, y0 + 8.0 + n as f32 * 22.0, 19.0, WHITE);

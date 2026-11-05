@@ -7,9 +7,8 @@ use anyhow::{bail, Context, Result};
 use egui_macroquad::egui::{self, Color32};
 use rust2d_engine::library::{AssetRef, Bundle};
 use rust2d_engine::map::{Map, Tile, Zone, ZoneKind};
-use rust2d_engine::project::{CharacterCreation, PlayerLook, Project, SexChoice, TILE_SIZE};
+use rust2d_engine::project::{CharacterCreation, Project, SexChoice, TILE_SIZE};
 use rust2d_engine::refactor::RefKind;
-use rust2d_engine::state::Sex;
 
 use crate::app::Editor;
 
@@ -101,15 +100,10 @@ const STARTER: [(RefKind, &str); 12] = [
     (RefKind::Prop, "boulder"),
 ];
 
-/// Character creator looks offered with the starter assets: (sheet, sex, label).
-const LOOKS: [(&str, Sex, &str); 6] = [
-    ("hero", Sex::Male, "Blue tunic"),
-    ("hero_2", Sex::Male, "Green tunic"),
-    ("hero_3", Sex::Male, "Red tunic"),
-    ("hero_f", Sex::Female, "Blue tunic"),
-    ("hero_f2", Sex::Female, "Purple tunic"),
-    ("hero_f3", Sex::Female, "Teal tunic"),
-];
+/// What the character creator offers with the starter assets: bodies, hair styles, beards
+/// (sheets) and a few outfits (clothing items) for the player to start with.
+const CREATOR_SHEETS: [&str; 9] = ["body_male", "body_female", "hair_short", "hair_long", "hair_ponytail", "beard_full", "beard_goatee", "held_sword", "held_lantern"];
+const CREATOR_ITEMS: [&str; 3] = ["tunic_blue", "tunic_green", "tunic_red"];
 
 impl Editor {
     /// Opens the wizard (after the current project's unsaved work was settled).
@@ -138,7 +132,8 @@ impl Editor {
             match &self.lib.lib {
                 Some(lib) => {
                     let mut want: Vec<AssetRef> = STARTER.iter().map(|(k, id)| (*k, id.to_string())).collect();
-                    want.extend(LOOKS.iter().map(|(s, _, _)| (RefKind::Sheet, s.to_string())));
+                    want.extend(CREATOR_SHEETS.iter().map(|s| (RefKind::Sheet, s.to_string())));
+                    want.extend(CREATOR_ITEMS.iter().map(|s| (RefKind::Item, s.to_string())));
                     want.retain(|a| rust2d_engine::library::exists(&lib.db, a));
                     let mut b = Bundle::collect(&lib.db, &lib.root, TILE_SIZE, "starter", &want)?;
                     b.rescale(TILE_SIZE)?;
@@ -156,17 +151,27 @@ impl Editor {
         if project.db.character("hero").is_some() {
             c.player = "hero".into();
         }
-        // Player character, looks and the (possibly fixed) sex.
-        let looks: Vec<PlayerLook> = LOOKS
-            .iter()
-            .filter(|(s, sex, _)| project.db.sheet(s).is_some() && w.sex.fixed().is_none_or(|f| f == *sex))
-            .map(|(s, sex, label)| PlayerLook { sheet: s.to_string(), sex: *sex, label: label.to_string() })
-            .collect();
-        c.creation = CharacterCreation { enabled: w.creator, sex: w.sex, default_name: w.default_name.trim().to_string(), looks };
+        // Player character, the creator's choices and the (possibly fixed) sex.
+        let have: Vec<String> = project.db.sheets.iter().map(|s| s.id.clone()).collect();
+        let has = |id: &str| have.iter().any(|s| s == id);
+        let sheets = |ids: &[&str]| ids.iter().filter(|s| has(s)).map(|s| s.to_string()).collect::<Vec<_>>();
+        c.creation = CharacterCreation {
+            enabled: w.creator,
+            sex: w.sex,
+            default_name: w.default_name.trim().to_string(),
+            body_male: if has("body_male") { "body_male".into() } else { String::new() },
+            body_female: if has("body_female") { "body_female".into() } else { String::new() },
+            skin_colors: crate::widgets::SKIN_PRESETS[..7].to_vec(),
+            hair_styles: { let mut v = sheets(&["hair_short", "hair_long", "hair_ponytail"]); v.push(String::new()); v },
+            hair_colors: crate::widgets::HAIR_PRESETS[..8].to_vec(),
+            beards: { let mut v = vec![String::new()]; v.extend(sheets(&["beard_full", "beard_goatee"])); v },
+        };
         if w.sex == SexChoice::Female {
             if let Some(h) = project.db.characters.iter_mut().find(|d| d.id == "hero") {
-                if project.db.sheets.iter().any(|s| s.id == "hero_f") {
-                    h.sheet = "hero_f".into();
+                if has("body_female") {
+                    h.appearance.body = "body_female".into();
+                    h.appearance.hair = if has("hair_long") { "hair_long".into() } else { String::new() };
+                    h.appearance.beard.clear();
                 }
                 h.name = "Heroine".into();
             }

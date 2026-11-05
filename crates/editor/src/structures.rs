@@ -15,10 +15,7 @@ pub fn entity_sprite(db: &Database, e: &EntityInstance) -> Option<SpriteRef> {
     match e.kind {
         EntityKind::Prop => db.prop(&e.def).map(|d| d.sprite.clone()),
         EntityKind::Item => db.item(&e.def).map(|d| d.icon.clone()),
-        EntityKind::Character => {
-            let sheet = if e.sheet.is_empty() { db.character(&e.def)?.sheet.clone() } else { e.sheet.clone() };
-            Some(SpriteRef::new(&sheet, 0))
-        }
+        EntityKind::Character => db.character(&e.def).map(crate::widgets::character_sprite),
     }
 }
 

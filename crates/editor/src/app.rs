@@ -190,6 +190,8 @@ pub struct Editor {
     pub quick: crate::maps::QuickSwitch,
     /// Open character model chooser.
     pub model: Option<crate::models::ModelChooser>,
+    /// The character builder window (new characters, a placed NPC's own look).
+    pub builder: Option<crate::builder::Builder>,
     /// Open new project wizard.
     pub new_project: Option<crate::new_project::NewProjectWizard>,
     /// Character whose patrol route is being edited on the map (clicks add waypoints).
@@ -375,6 +377,7 @@ impl Editor {
             lib: Default::default(),
             px: Default::default(),
             wizard: None,
+            builder: None,
             export: None,
             refs: Refs::default(),
             pointer_over_ui: false,
@@ -983,14 +986,31 @@ impl Editor {
         macroquad::math::vec2(x, (ty + 1.0) * ts - 1.0)
     }
 
-    /// Sprite of an entity definition (props / items; characters use their idle frame).
+    /// Sprite of an entity definition (props / items; characters use their idle frame, layered
+    /// ones a `@char:` marker that `widgets::paint_sprite` paints from their layers).
     pub fn def_sprite(&self, kind: EntityKind, def: &str) -> Option<rust2d_engine::defs::SpriteRef> {
         let db = &self.project.db;
         match kind {
             EntityKind::Prop => db.prop(def).map(|d| d.sprite.clone()),
             EntityKind::Item => db.item(def).map(|d| d.icon.clone()),
-            EntityKind::Character => db.character(def).map(|d| rust2d_engine::defs::SpriteRef::new(&d.sheet, 0)),
+            EntityKind::Character => db.character(def).map(crate::widgets::character_sprite),
         }
+    }
+
+    /// Layers of a character definition, or of a placed character with its own look / items.
+    pub fn char_layers(&self, def: &str, inst: Option<&rust2d_engine::entity::EntityInstance>, facing: rust2d_engine::entity::Facing, col: u32) -> Vec<rust2d_engine::render::character::Layer> {
+        use rust2d_engine::render::character;
+        let Some(d) = self.project.db.character(def) else { return Vec::new() };
+        character::layers(&self.project.db, character::appearance_of(d, inst), character::equipment_of(d, inst), facing, col, false)
+    }
+
+    /// Draws character layers with the bottom-center at `feet` (map view, macroquad).
+    pub fn draw_char_layers(&self, layers: &[rust2d_engine::render::character::Layer], feet: Vec2, tint: macroquad::color::Color) -> bool {
+        let mut any = false;
+        for l in layers {
+            any |= self.assets.draw_frame_colored(&l.sheet, l.frame, feet, tint, l.skin, l.hair);
+        }
+        any
     }
 
     /// Width of an entity definition's sprite in whole tiles (for snapping).
@@ -1047,7 +1067,7 @@ impl Editor {
             .flat_map(|k| -> Vec<(EntityKind, String, String, SpriteRef)> {
                 match k {
                     EntityKind::Prop => db.props.iter().map(|d| (k, d.id.clone(), d.name.clone(), d.sprite.clone())).collect(),
-                    EntityKind::Character => db.characters.iter().map(|d| (k, d.id.clone(), d.name.clone(), SpriteRef::new(&d.sheet, 0))).collect(),
+                    EntityKind::Character => db.characters.iter().map(|d| (k, d.id.clone(), d.name.clone(), crate::widgets::character_sprite(d))).collect(),
                     EntityKind::Item => db.items.iter().map(|d| (k, d.id.clone(), d.name.clone(), d.icon.clone())).collect(),
                 }
             })
@@ -1152,6 +1172,7 @@ impl Editor {
             return;
         }
         self.status_bar(ctx);
+        self.tex.set_characters(&self.project.db);
         match self.mode {
             Mode::Map => {
                 egui::SidePanel::left("left").resizable(true).default_width(290.0).show(ctx, |ui| {
@@ -1168,6 +1189,7 @@ impl Editor {
             Mode::Pixel => self.pixel_ui(ctx),
         }
         self.wizard_window(ctx);
+        self.builder_window(ctx);
         self.map_windows(ctx);
         self.model_window(ctx);
         self.new_project_window(ctx);
@@ -2024,6 +2046,7 @@ impl Editor {
         let refs = &self.refs;
         let mut delete = false;
         let mut duplicate = false;
+        let mut customize: Option<u32> = None;
         let mut arm: Option<(EntityKind, String)> = None;
         let mut rename_map: Option<(String, String)> = None;
         match self.sel {
@@ -2067,34 +2090,6 @@ impl Editor {
                     ui.label("Active");
                     ui.checkbox(&mut e.active, "visible at start");
                     ui.end_row();
-                    if e.kind == EntityKind::Character {
-                        ui.label("Model");
-                        ui.horizontal(|ui| {
-                            let def_sheet = db.character(&e.def).map(|d| d.sheet.clone()).unwrap_or_default();
-                            let sheet = if e.sheet.is_empty() { def_sheet.clone() } else { e.sheet.clone() };
-                            let frames = db.character(&e.def).map_or(4, |d| d.walk_frames.max(1));
-                            let thumb = widgets::frame_thumb(ui, &self.tex, &self.assets, &sheet, e.facing as u32 * frames, 40.0, false);
-                            if thumb.clicked() {
-                                crate::models::request_model(crate::models::ModelTarget::Instance(e.uid));
-                            }
-                            ui.vertical(|ui| {
-                                if e.sheet.is_empty() {
-                                    ui.weak(format!("{sheet} (definition's)"));
-                                } else {
-                                    ui.label(format!("{sheet} (own)"));
-                                }
-                                ui.horizontal(|ui| {
-                                    if ui.button("Change…").on_hover_text("Choose another look for this NPC only — from the project or the asset library").clicked() {
-                                        crate::models::request_model(crate::models::ModelTarget::Instance(e.uid));
-                                    }
-                                    if !e.sheet.is_empty() && ui.button("Reset").on_hover_text("Use the definition's model again").clicked() {
-                                        e.sheet.clear();
-                                    }
-                                });
-                            });
-                        });
-                        ui.end_row();
-                    }
                     if let Some(d) = (e.kind == EntityKind::Prop).then(|| db.prop(&e.def)).flatten() {
                         ui.label("State");
                         ui.horizontal(|ui| {
@@ -2145,6 +2140,40 @@ impl Editor {
                             ui.weak("Uses the definition's light.");
                         }
                         widgets::light_ui(ui, &format!("ent_light{}", e.uid), &mut e.light, what);
+                    });
+                }
+                if let Some(d) = (e.kind == EntityKind::Character).then(|| db.character(&e.def)).flatten() {
+                    // Look and items of this NPC: its definition's, or its own (set in the builder).
+                    ui.separator();
+                    let own = e.appearance.is_some() || e.equipment.is_some() || e.inventory.is_some();
+                    egui::CollapsingHeader::new(ui::t(ph::USER, "Look & equipment")).default_open(true).show(ui, |ui| {
+                        use rust2d_engine::render::character;
+                        widgets::character_preview(ui, &self.tex, &self.assets, db, character::appearance_of(d, Some(e)), character::equipment_of(d, Some(e)));
+                        let mut what = Vec::new();
+                        if e.appearance.is_some() {
+                            what.push("look");
+                        }
+                        if e.equipment.is_some() {
+                            what.push("equipment");
+                        }
+                        if e.inventory.is_some() {
+                            what.push("carried items");
+                        }
+                        if own {
+                            ui.label(format!("Own {} (the rest is the definition's).", what.join(", ")));
+                        } else {
+                            ui.weak("The definition's look, equipment and carried items.");
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button(ui::t(ph::USER, "Customize this one…")).on_hover_text("Give just this placed character its own body, colors, hair, clothes, gear and carried items").clicked() {
+                                customize = Some(e.uid);
+                            }
+                            if own && ui.button("Use the definition's").on_hover_text("Drop this one's own look, equipment and carried items").clicked() {
+                                e.appearance = None;
+                                e.equipment = None;
+                                e.inventory = None;
+                            }
+                        });
                     });
                 }
                 if e.kind == EntityKind::Character {
@@ -2514,6 +2543,9 @@ impl Editor {
         }
         if delete {
             self.delete_selection();
+        }
+        if let Some(uid) = customize {
+            self.open_builder(crate::builder::Target::Instance(uid));
         }
         if let Some((k, def)) = arm {
             self.tool = Tool::Entity;

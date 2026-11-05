@@ -226,6 +226,22 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         radius: num(&r),
         amount: num(&n).round() as i32
     })));
+    // Equipment and carried items of characters ("player", "self" or an entity name).
+    engine.register_fn("equip", with!(ctx, |c, t: &str, item: &str| c.actions.push(Action::Equip { target: t.into(), item: item.into() })));
+    engine.register_fn("unequip", with!(ctx, |c, t: &str, slot: &str| match crate::defs::EquipSlot::parse(slot) {
+        Some(slot) => c.actions.push(Action::Unequip { target: t.into(), slot }),
+        None => eprintln!("[script] unequip: unknown slot '{slot}' (clothing, head, body, weapon, offhand)"),
+    }));
+    engine.register_fn("give_item_to", with!(ctx, |c, t: &str, item: &str, n: i64| c.actions.push(Action::GiveItemTo {
+        target: t.into(),
+        item: item.into(),
+        count: n.max(0) as u32
+    })));
+    engine.register_fn("take_item_from", with!(ctx, |c, t: &str, item: &str, n: i64| c.actions.push(Action::TakeItemFrom {
+        target: t.into(),
+        item: item.into(),
+        count: n.max(0) as u32
+    })));
     // The player (position in tiles, updated every frame).
     engine.register_fn("player_x", with!(ctx, |c| c.player.x as f64));
     engine.register_fn("player_y", with!(ctx, |c| c.player.y as f64));

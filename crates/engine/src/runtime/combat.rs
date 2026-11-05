@@ -400,6 +400,7 @@ impl Game {
         self.effects.push((pos, 0.0));
         self.persist(i);
         self.drop_loot(&loot, feet);
+        self.drop_npc_items(i);
         if let Some(zone) = spawned_by {
             self.spawned_defeated(zone);
         }
@@ -539,6 +540,13 @@ impl Game {
                     2.0 * u,
                     Color::new(1.0, 1.0, 0.85, alpha),
                 );
+            }
+            // The weapon itself (out of the hand meanwhile) sweeps along the arc. Item icons
+            // point up-right, so they are turned by the arc's angle + 45 degrees.
+            let icon = self.world.equipment.item(crate::defs::EquipSlot::Weapon).and_then(|id| self.project.db.item(id)).map(|d| d.icon.clone());
+            if let Some(icon) = icon {
+                let at = center + vec2(a1.cos(), a1.sin()) * (r * 0.5).max(ts * 0.45);
+                self.assets.draw_frame_scaled(&icon.sheet, icon.frame, at, a1 + std::f32::consts::FRAC_PI_4, 1.0, WHITE);
             }
         }
         for e in self.loaded.entities.iter().filter(|e| e.active && e.max_hp > 0 && e.hp < e.max_hp) {

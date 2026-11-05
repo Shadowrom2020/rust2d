@@ -343,7 +343,7 @@ mod tests {
     use rust2d_engine::entity::{EntityInstance, EntityKind};
 
     fn assets() -> Assets {
-        Assets { tile_size: rust2d_engine::project::TILE_SIZE as f32, tilesets: HashMap::new(), sheets: HashMap::new(), errors: vec![] }
+        Assets::empty(rust2d_engine::project::TILE_SIZE as f32)
     }
 
     #[test]

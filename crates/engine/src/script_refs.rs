@@ -79,6 +79,9 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("knows_spell", 0, IdKind::Spell),
     ("learn_spell", 0, IdKind::Spell),
     ("fly", 0, IdKind::Sheet),
+    ("equip", 1, IdKind::Item),
+    ("give_item_to", 1, IdKind::Item),
+    ("take_item_from", 1, IdKind::Item),
     ("effect", 0, IdKind::Sheet),
 ];
 
@@ -498,6 +501,7 @@ fn reward() {
             value: 0,
         light: None,
         teaches: String::new(),
+        held: String::new(),
         });
         let maps = vec!["village".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("village".to_string(), vec!["gate".to_string()])].into();

@@ -9,6 +9,8 @@ mod skills;
 mod lights;
 mod creator;
 mod patrol;
+mod paperdoll;
+mod npc_items;
 mod shop_ui;
 mod locks;
 mod menu;
@@ -92,8 +94,6 @@ struct RtEntity {
     kind: EntityKind,
     def: String,
     name: String,
-    /// Character model override ("" = the definition's sheet).
-    sheet: String,
     body: Body,
     home: Vec2,
     active: bool,
@@ -130,6 +130,11 @@ struct RtEntity {
     loot: Vec<crate::defs::LootEntry>,
     /// Light of this placed entity instead of its definition's.
     light: Option<crate::defs::LightSpec>,
+    /// Characters: the model (its definition's, or the placed character's own).
+    appearance: crate::defs::Appearance,
+    /// Characters: what they wear and hold, and carry (dropped when defeated).
+    equipment: crate::state::Equipment,
+    inventory: Vec<crate::inventory::ItemStack>,
 }
 
 struct Loaded {
@@ -199,8 +204,6 @@ pub struct Game {
     loaded: Loaded,
     cache: VecDeque<Map>,
     player: Body,
-    player_sheet: Option<String>,
-    player_frames: u32,
     zones_inside: HashSet<u32>,
     fade: Fade,
     ui: Ui,
@@ -225,9 +228,9 @@ impl Game {
         let mut scripts = ScriptHost::new();
         scripts.load_dir(&project.scripts_dir());
         let ts = assets.tile_size;
-        let (hitbox, speed, sheet, frames) = match project.db.character(&project.config.player) {
-            Some(c) => (vec2(c.hitbox[0], c.hitbox[1]), c.speed, Some(c.sheet.clone()), c.walk_frames),
-            None => (vec2(ts * 0.75, ts * 0.5), 70.0, None, 1),
+        let (hitbox, speed) = match project.db.character(&project.config.player) {
+            Some(c) => (vec2(c.hitbox[0], c.hitbox[1]), c.speed),
+            None => (vec2(ts * 0.75, ts * 0.5), 70.0),
         };
         let map_name = start.map.clone().unwrap_or_else(|| project.config.start_map.clone());
         let map = project.load_map(&map_name)?;
@@ -272,8 +275,6 @@ impl Game {
             runner: ActionRunner::default(),
             cache: VecDeque::new(),
             player,
-            player_sheet: sheet,
-            player_frames: frames.max(1),
             zones_inside: HashSet::new(),
             fade: Fade::In { t: FADE_TIME },
             ui: Ui::default(),
@@ -347,12 +348,11 @@ impl Game {
             (EntityKind::Character, Some(d)) => (d.max_hp.max(0), d.hostile, d.damage.max(0), d.weapon.clone(), d.defense),
             _ => (0, false, 0, None, 0),
         };
-        RtEntity {
+        let mut rt = RtEntity {
             uid,
             kind,
             def: def.to_string(),
             name: name.to_string(),
-            sheet: String::new(),
             body: Body { pos, facing, hitbox, speed, moving: false, anim: 0.0, move_target: None },
             home: pos,
             active,
@@ -382,7 +382,12 @@ impl Game {
                 _ => Vec::new(),
             },
             light: None,
-        }
+            appearance: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.appearance.clone()).unwrap_or_default(),
+            equipment: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.equipment.clone()).unwrap_or_default(),
+            inventory: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.inventory.clone()).unwrap_or_default(),
+        };
+        npc_items::apply_gear(&self.project.db, &mut rt);
+        rt
     }
 
     /// Switches prop `i` to the named state (sprite + solidity) and saves it.
@@ -431,13 +436,27 @@ impl Game {
                     st.map_or(e.frame, |s| s.frame),
                 );
                 rt.count = count;
-                rt.sheet = e.sheet.clone();
                 rt.light = e.light.clone();
                 if e.kind == EntityKind::Character {
                     if let Some(loot) = &e.loot {
                         rt.loot = loot.clone();
                     }
                     rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
+                    // Look and items: the placed NPC's own, then what changed in this game.
+                    if let Some(a) = &e.appearance {
+                        rt.appearance = a.clone();
+                    }
+                    if let Some(eq) = &e.equipment {
+                        rt.equipment = eq.clone();
+                    }
+                    if let Some(inv) = &e.inventory {
+                        rt.inventory = inv.clone();
+                    }
+                    if let Some(saved) = self.world.npc_items.get(&map.name).and_then(|m| m.get(&e.uid)) {
+                        rt.equipment = saved.equipment.clone();
+                        rt.inventory = saved.inventory.clone();
+                    }
+                    npc_items::apply_gear(&self.project.db, &mut rt);
                     if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
                         let p = rt.patrol.get_or_insert_with(Default::default);
                         p.restore(ps);
@@ -1109,6 +1128,30 @@ impl Game {
         for inv in self.world.containers.values_mut().flat_map(|m| m.values_mut()) {
             inv.set_limits(limits.clone());
         }
+        self.dress_player();
+    }
+
+    /// The player definition's equipment and carried items: a new game starts with them; a save
+    /// from before clothing existed gets the clothing once (instead of showing the underwear).
+    fn dress_player(&mut self) {
+        if self.world.dressed {
+            return;
+        }
+        self.world.dressed = true;
+        let Some(d) = self.project.db.character(&self.project.config.player) else { return };
+        let (eq, inv) = (d.equipment.clone(), d.inventory.clone());
+        let fresh = self.world.play_time == 0.0 && self.world.current_map.is_empty();
+        for slot in crate::defs::EquipSlot::ALL {
+            let mine = self.world.equipment.slot_mut(slot);
+            if mine.is_none() && (fresh || slot == crate::defs::EquipSlot::Clothing) {
+                *mine = eq.get(slot).cloned();
+            }
+        }
+        if fresh {
+            for s in inv {
+                self.world.give_item(&s.item, s.count);
+            }
+        }
     }
 
     fn use_item(&mut self, item: &str) {
@@ -1227,7 +1270,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.npc_items_status(),
             self.fx_status(),
             self.world_map_status(),
             self.skills_status(),
@@ -1240,7 +1284,7 @@ impl Game {
                 let here = self.loaded.entities.iter().filter(|e| e.active && e.uid >= crate::state::DROPPED_UID_BASE);
                 here.map(|e| format!("{}x{}@{},{}", e.def, e.count, (e.body.pos.x / ts).floor(), ((e.body.pos.y - 1.0) / ts).floor())).collect::<Vec<_>>()
             },
-            format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_sheet_id().unwrap_or("-")),
+            format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_appearance().map_or("-".to_string(), |a| a.body)),
             self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
             self.shop_status(),
@@ -1371,10 +1415,10 @@ impl Game {
                     if self.combat.invuln > 0.0 && (self.combat.invuln * 12.0) as i32 % 2 == 0 {
                         continue;
                     }
-                    let col = if self.player.moving { (self.player.anim * 8.0) as u32 % self.player_frames } else { 0 };
-                    let frame = self.player.facing as u32 * self.player_frames + col;
-                    let drawn = self.player_sheet_id().is_some_and(|s| self.assets.draw_frame(s, frame, self.player.pos, WHITE));
-                    self.draw_armor_overlays(frame, self.player.pos, WHITE);
+                    let col = if self.player.moving { (self.player.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
+                    // During a melee swing the weapon is drawn along the swing instead.
+                    let swinging = self.combat.swing > 0.0;
+                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, WHITE, swinging));
                     if !drawn {
                         let r = self.player.rect();
                         draw_rectangle(r.x, r.y - ts * 0.5, r.w, r.h + ts * 0.5, YELLOW);
@@ -1459,12 +1503,10 @@ impl Game {
         let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { WHITE };
         let drawn = match e.kind {
             EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE)),
-            EntityKind::Character => db.character(&e.def).is_some_and(|d| {
-                let frames = d.walk_frames.max(1);
-                let col = if e.body.moving { (e.body.anim * 8.0) as u32 % frames } else { 0 };
-                let sheet = if e.sheet.is_empty() { &d.sheet } else { &e.sheet };
-                self.assets.draw_frame(sheet, e.body.facing as u32 * frames + col, e.body.pos, tint)
-            }),
+            EntityKind::Character => db.character(&e.def).is_some() && {
+                let col = if e.body.moving { (e.body.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
+                self.draw_character(&e.appearance, &e.equipment, (e.body.facing, col), e.body.pos, tint, false)
+            },
             EntityKind::Item => db.item(&e.def).is_some_and(|d| {
                 let u = self.u();
                 let bob = ((t * 3.0 + e.uid as f32).sin() * 1.5 * u).round();
@@ -1651,6 +1693,42 @@ impl ActionHost for Game {
             Action::HealArea { x, y, radius, amount } => {
                 let ts = self.ts();
                 self.heal_area(vec2(*x, *y) * ts, *radius, *amount);
+                Step::Continue
+            }
+            Action::Equip { target, item } => {
+                if target == "player" {
+                    if self.world.item_count(item) == 0 {
+                        self.world.give_item(item, 1);
+                    }
+                    self.equip_item(item);
+                } else if let Some(i) = self.entity_index(target, ctx.owner) {
+                    self.npc_equip(i, item);
+                } else {
+                    eprintln!("[events] Equip: no character '{target}' on this map");
+                }
+                Step::Continue
+            }
+            Action::Unequip { target, slot } => {
+                if target == "player" {
+                    self.unequip(*slot, None);
+                } else if let Some(i) = self.entity_index(target, ctx.owner) {
+                    self.npc_unequip(i, *slot);
+                }
+                Step::Continue
+            }
+            Action::GiveItemTo { target, item, count } | Action::TakeItemFrom { target, item, count } => {
+                let give = matches!(action, Action::GiveItemTo { .. });
+                if target == "player" {
+                    if give {
+                        self.world.give_item(item, *count);
+                    } else {
+                        self.world.take_item(item, *count);
+                    }
+                } else if let Some(i) = self.entity_index(target, ctx.owner) {
+                    self.npc_give(i, item, if give { *count as i64 } else { -(*count as i64) });
+                } else {
+                    eprintln!("[events] {}: no character '{target}' on this map", action.label());
+                }
                 Step::Continue
             }
             Action::OpenShop { target } => {
