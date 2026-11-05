@@ -2,7 +2,7 @@
 //!
 //! Click a row to select it, click its price button (or double-click the row, or press
 //! Enter / E) to buy or sell one; hold Shift for up to ten. Up/Down select, Left/Right or
-//! Tab switch sides, mouse wheel scrolls, Esc closes.
+//! Tab switch sides, the mouse wheel moves the selection up / down, Esc closes.
 
 use macroquad::prelude::*;
 
@@ -309,7 +309,7 @@ impl Game {
         let stock = self.world.shops.get(&self.loaded.map.name)?.get(&uid)?;
         let list: Vec<String> = stock.iter().map(|e| if e.unlimited { format!("{}:inf", e.item) } else { format!("{}:{}", e.item, e.count) }).collect();
         let msg = self.shop.msg.as_ref().map_or("", |m| m.0.as_str());
-        Some(format!("{} [{}] msg={msg:?}", self.shop_title(uid), list.join(" ")))
+        Some(format!("{} [{}] msg={msg:?} side={:?} sel={:?} scroll={:?}", self.shop_title(uid), list.join(" "), self.shop.side, self.shop.sel, self.shop.scroll))
     }
 
     /// Screen position of a row's trade button (for automated play-throughs):
@@ -362,15 +362,15 @@ impl Game {
         }
 
         // ---- mouse
+        // The wheel moves the selection (up / down) of the list under the pointer, else of the
+        // active side; the list scrolls along to keep it in view.
         let wheel = input::wheel();
         if wheel != 0.0 {
-            for side in [ShopSide::Merchant, ShopSide::Player] {
-                if l.lists[side.idx()].contains(m) {
-                    let n = self.shop_rows(side).len();
-                    let sc = &mut self.shop.scroll[side.idx()];
-                    *sc = if wheel > 0.0 { sc.saturating_sub(1) } else { (*sc + 1).min(n.saturating_sub(ROWS)) };
-                }
-            }
+            let side = [ShopSide::Merchant, ShopSide::Player].into_iter().find(|sd| l.lists[sd.idx()].contains(m)).unwrap_or(side);
+            self.shop.side = Some(side);
+            let sel = &mut self.shop.sel[side.idx()];
+            *sel = if wheel > 0.0 { sel.saturating_sub(1) } else { *sel + 1 };
+            self.clamp_selection();
         }
         if input::mouse_pressed(MouseButton::Left) {
             for side in [ShopSide::Merchant, ShopSide::Player] {
@@ -499,7 +499,7 @@ impl Game {
                 draw_text(text, f.x + f.w - tw - 10.0, f.y + 62.0, 20.0, c);
             }
         }
-        let hint = "Click price / Enter: trade one   Shift: ten   Tab: switch side   Esc: close";
+        let hint = "Click price / Enter: trade one   Shift: ten   Wheel / Up / Down: select   Tab: switch side   Esc: close";
         draw_text(hint, f.x + 10.0, f.y + f.h - 8.0, 16.0, GRAY);
     }
 }
