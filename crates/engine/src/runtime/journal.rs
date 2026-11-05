@@ -1,6 +1,7 @@
 //! The journal (J) with two tabs. *Quests*: active quests first, then finished ones; the
 //! selected quest shows its description and the objectives reached so far. *Bestiary*: every
 //! kind of character the player has defeated, with a portrait, the description and its stats.
+//! *Dialogs*: the last dialog lines of the game (newest at the bottom), scrollable.
 //! Up/Down or click select, Tab / Left / Right or a click on a tab switch, J / Esc close.
 
 use macroquad::prelude::*;
@@ -20,15 +21,23 @@ pub(super) enum JournalTab {
     #[default]
     Quests,
     Bestiary,
+    Dialogs,
 }
 
 impl JournalTab {
-    const ALL: [JournalTab; 2] = [JournalTab::Quests, JournalTab::Bestiary];
+    const ALL: [JournalTab; 3] = [JournalTab::Quests, JournalTab::Bestiary, JournalTab::Dialogs];
     fn label(self) -> &'static str {
         match self {
             JournalTab::Quests => "Quests",
             JournalTab::Bestiary => "Bestiary",
+            JournalTab::Dialogs => "Dialogs",
         }
+    }
+    /// The next (`step` 1) or previous (`step` -1) tab, wrapping around.
+    fn step(self, step: i32) -> JournalTab {
+        let n = Self::ALL.len() as i32;
+        let k = Self::ALL.iter().position(|t| *t == self).unwrap() as i32;
+        Self::ALL[(k + step).rem_euclid(n) as usize]
     }
 }
 
@@ -39,6 +48,11 @@ pub(super) struct Journal {
     sel: usize,
     /// Selected bestiary entry.
     best_sel: usize,
+    /// Dialog log: how many lines the view is scrolled up from the newest.
+    log_scroll: usize,
+    /// Dialog log: the farthest useful scroll (the oldest lines fill the page there), measured
+    /// while drawing.
+    log_max: std::cell::Cell<usize>,
     /// Quest to select when the journal opens next (the last one that changed).
     focus: Option<String>,
 }
@@ -58,7 +72,7 @@ fn rect() -> Rect {
 type Entry = (Option<String>, String);
 
 /// The tabs at the top of the journal.
-fn tab_rects(r: Rect) -> [(JournalTab, Rect); 2] {
+fn tab_rects(r: Rect) -> [(JournalTab, Rect); 3] {
     let w = 120.0;
     JournalTab::ALL.map(|t| {
         let k = JournalTab::ALL.iter().position(|x| *x == t).unwrap() as f32;
@@ -146,6 +160,7 @@ impl Game {
             if !key_consumed && input::pressed(KeyCode::J) {
                 self.journal.open = true;
                 self.journal.tab = JournalTab::Quests;
+                self.journal.log_scroll = 0;
                 let entries = self.journal_entries();
                 let rows = Self::quest_rows(&entries);
                 let focus = self.journal.focus.take();
@@ -161,18 +176,46 @@ impl Game {
             self.journal.open = false;
             return (true, true);
         }
-        // Switching tabs.
-        if input::any_pressed(&[KeyCode::Tab, KeyCode::Left, KeyCode::Right, KeyCode::A, KeyCode::D]) {
-            self.journal.tab = match self.journal.tab {
-                JournalTab::Quests => JournalTab::Bestiary,
-                JournalTab::Bestiary => JournalTab::Quests,
-            };
+        // Switching tabs (the dialog log opens at the newest line).
+        let before = self.journal.tab;
+        if input::any_pressed(&[KeyCode::Tab, KeyCode::Right, KeyCode::D]) {
+            self.journal.tab = self.journal.tab.step(1);
+        } else if input::any_pressed(&[KeyCode::Left, KeyCode::A]) {
+            self.journal.tab = self.journal.tab.step(-1);
         }
         if input::mouse_pressed(MouseButton::Left) {
             if let Some((t, _)) = tab_rects(r).into_iter().find(|(_, tr)| tr.contains(m)) {
                 self.journal.tab = t;
-                return (true, true);
             }
+        }
+        if self.journal.tab != before {
+            self.journal.log_scroll = 0;
+            return (true, true);
+        }
+        if self.journal.tab == JournalTab::Dialogs {
+            let max = self.journal.log_max.get().min(self.world.dialog_log.len().saturating_sub(1));
+            let s = &mut self.journal.log_scroll;
+            let wheel = input::wheel();
+            if input::any_pressed(&[KeyCode::Up, KeyCode::W]) || wheel > 0.0 {
+                *s += 1;
+            }
+            if input::any_pressed(&[KeyCode::Down, KeyCode::S]) || wheel < 0.0 {
+                *s = s.saturating_sub(1);
+            }
+            if input::pressed(KeyCode::PageUp) {
+                *s += 10;
+            }
+            if input::pressed(KeyCode::PageDown) {
+                *s = s.saturating_sub(10);
+            }
+            if input::pressed(KeyCode::Home) {
+                *s = max;
+            }
+            if input::pressed(KeyCode::End) {
+                *s = 0;
+            }
+            *s = (*s).min(max);
+            return (true, true);
         }
         if self.journal.tab == JournalTab::Bestiary {
             let n = self.bestiary_entries().len();
@@ -224,7 +267,12 @@ impl Game {
         draw_rectangle_lines(c.x, c.y, c.w, c.h, 1.5, Color::new(0.85, 0.8, 0.6, 1.0));
         draw_line(c.x + 6.0, c.y + 6.0, c.x + c.w - 6.0, c.y + c.h - 6.0, 2.0, WHITE);
         draw_line(c.x + c.w - 6.0, c.y + 6.0, c.x + 6.0, c.y + c.h - 6.0, 2.0, WHITE);
-        draw_text("Up/Down or click: select   Tab: quests / bestiary   J / Esc: close", r.x + PAD, r.y + r.h - 14.0, 16.0, GRAY);
+        let hint = if self.journal.tab == JournalTab::Dialogs {
+            "Up/Down, wheel, PgUp/PgDn, Home/End: scroll   Tab: next tab   J / Esc: close"
+        } else {
+            "Up/Down or click: select   Tab: next tab   J / Esc: close"
+        };
+        draw_text(hint, r.x + PAD, r.y + r.h - 14.0, 16.0, GRAY);
         for (t, tr) in tab_rects(r) {
             let on = self.journal.tab == t;
             let fill = if on { Color::new(0.85, 0.7, 0.3, 0.3) } else if tr.contains(m) { Color::new(1.0, 1.0, 1.0, 0.08) } else { Color::new(0.0, 0.0, 0.0, 0.25) };
@@ -233,9 +281,10 @@ impl Game {
             let tw = measure_text(t.label(), None, 20, 1.0).width;
             draw_text(t.label(), tr.x + (tr.w - tw) / 2.0, tr.y + 21.0, 20.0, if on { WHITE } else { LIGHTGRAY });
         }
-        if self.journal.tab == JournalTab::Bestiary {
-            self.draw_bestiary(r);
-            return;
+        match self.journal.tab {
+            JournalTab::Bestiary => return self.draw_bestiary(r),
+            JournalTab::Dialogs => return self.draw_dialog_log(r),
+            JournalTab::Quests => {}
         }
 
         let entries = self.journal_entries();
@@ -438,6 +487,91 @@ impl Game {
                 }
                 draw_text(&line, x, y, 18.0, LIGHTGRAY);
             }
+        }
+    }
+
+    /// The dialog log tab: who said what, newest at the bottom, from the scroll position up.
+    fn draw_dialog_log(&self, r: Rect) {
+        let log = &self.world.dialog_log;
+        if log.is_empty() {
+            draw_text("Nothing said yet. Conversations you have are kept here.", r.x + PAD, r.y + 80.0, 22.0, LIGHTGRAY);
+            return;
+        }
+        let (top, bottom) = (r.y + 56.0, r.y + r.h - 44.0);
+        let x = r.x + PAD + 8.0;
+        let w = r.w - 2.0 * PAD - 40.0;
+        let newest = log.len() - 1 - self.journal.log_scroll.min(log.len() - 1);
+        // An entry's wrapped lines and height; only entries near the view are wrapped.
+        let layout = |k: usize| {
+            let line = &log[k];
+            let lines = wrap_text(&line.text, 20, w - 20.0);
+            let head = if line.speaker.is_empty() { 0.0 } else { 22.0 };
+            let h = head + lines.len() as f32 * 22.0 + 10.0;
+            (k, lines, h)
+        };
+        let avail = bottom - top;
+        // How far up scrolling is useful: until the oldest entries fill the page from the top.
+        let mut fit = 0.0;
+        let mut top_last = 0;
+        for k in 0..log.len() {
+            fit += layout(k).2;
+            if fit > avail {
+                break;
+            }
+            top_last = k;
+        }
+        self.journal.log_max.set(log.len() - 1 - top_last);
+        // From the newest shown entry upwards while they fit.
+        let mut shown = vec![layout(newest)];
+        let mut used = shown[0].2;
+        while shown[0].0 > 0 {
+            let e = layout(shown[0].0 - 1);
+            if used + e.2 > avail {
+                break;
+            }
+            used += e.2;
+            shown.insert(0, e);
+        }
+        // At the oldest entries the page fills from the top (newer ones below).
+        let mut y = bottom - used;
+        if shown[0].0 == 0 {
+            while let Some(last) = shown.last().map(|e| e.0).filter(|&k| k + 1 < log.len()) {
+                let e = layout(last + 1);
+                if used + e.2 > avail {
+                    break;
+                }
+                used += e.2;
+                shown.push(e);
+            }
+            y = top;
+        }
+        let last_shown = shown.last().map_or(newest, |e| e.0);
+        for (k, lines, h) in &shown {
+            let line = &log[*k];
+            let mut ly = y + 18.0;
+            if !line.speaker.is_empty() {
+                let col = if line.answer { Color::new(0.6, 0.8, 1.0, 1.0) } else { GOLD };
+                draw_text(&line.speaker, x, ly, 19.0, col);
+                ly += 22.0;
+            }
+            for (n, l) in lines.iter().enumerate() {
+                let (tx, text) = if line.answer && n == 0 { (x + 10.0, format!("> {l}")) } else if line.answer { (x + 24.0, l.clone()) } else { (x + 10.0, l.clone()) };
+                draw_text(&text, tx, ly, 20.0, if line.answer { Color::new(0.75, 0.85, 1.0, 1.0) } else { WHITE });
+                ly += 22.0;
+            }
+            y += h;
+        }
+        // Scroll bar: the shown part of the whole log.
+        let (bx, bh) = (r.x + r.w - PAD - 8.0, bottom - top);
+        draw_rectangle(bx, top, 6.0, bh, Color::new(1.0, 1.0, 1.0, 0.08));
+        let n = log.len() as f32;
+        let thumb = (bh * (8.0 / n).min(1.0)).max(18.0);
+        let pos = (last_shown as f32 + 1.0) / n; // 1 = at the newest line
+        let ty = top + (bh - thumb) * pos;
+        draw_rectangle(bx, ty, 6.0, thumb, Color::new(0.85, 0.7, 0.3, 0.8));
+        let below = log.len() - 1 - last_shown;
+        if below > 0 {
+            draw_text(&format!("{below} newer line(s) below - Down / End")[..], x, r.y + r.h - 32.0, 16.0, Color::new(0.85, 0.8, 0.6, 0.9));
         }
     }
 }

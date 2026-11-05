@@ -132,6 +132,10 @@ pub fn key_from_name(name: &str) -> Option<KeyCode> {
         "f9" => KeyCode::F9,
         "delete" | "del" => KeyCode::Delete,
         "backspace" => KeyCode::Backspace,
+        "pageup" | "pgup" => KeyCode::PageUp,
+        "pagedown" | "pgdn" => KeyCode::PageDown,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
         _ => return None,
     })
 }

@@ -98,8 +98,13 @@ impl Ui {
                 if d.revealed < len {
                     d.revealed = len;
                 } else {
-                    if let Some((_, var, sel)) = &d.choice {
+                    if let Some((opts, var, sel)) = &d.choice {
                         world.set_var(var, *sel as i64);
+                        // The answer goes into the dialog log under the player's name.
+                        let me = if world.player_name.trim().is_empty() { "You".to_string() } else { world.player_name.clone() };
+                        if let Some(o) = opts.get(*sel) {
+                            world.log_dialog(&me, o, true);
+                        }
                     }
                     self.dialog = None;
                 }

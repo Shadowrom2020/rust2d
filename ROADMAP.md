@@ -212,6 +212,28 @@ counts, also scripted ones (*Defeat all enemies*). Scripts got a character id ki
 **Verify.** Defeat a slime, `press j`, `wintab bestiary` (new autoplay tab name), screenshot;
 `status` shows the count; save / load keeps it.
 
+### [x] Dialog log — `feature/dialog-log`
+
+**Goal.** The player can read past conversations again: a *Dialogs* tab in the journal (J) with
+the last 1000 dialog lines of the game, newest at the bottom, scrollable.
+
+**Design.** `WorldState.dialog_log: Vec<LogLine { speaker, text, answer }>` (saved, serde
+default; the oldest lines drop out beyond `DIALOG_LOG_MAX = 1000`). Recorded where the text is
+final: `execute` for *Dialog* and *Choice* (speaker names and placeholders expanded), the dialog
+UI for the option the player picked (`answer: true`, shown as `> option` under the player's
+name). The journal's third tab draws the log bottom-up from a scroll position (only the visible
+entries are wrapped, so 1000 lines cost nothing): Up / Down / mouse wheel scroll one line, PgUp /
+PgDn ten, Home / End jump; a scroll bar shows where the view is. `status()`: `dialog_log=N`;
+autoplay `wintab dialogs` (and the key names `pageup`, `pagedown`, `home`, `end`).
+Decided while building: at the oldest lines the page fills from the top, and scrolling stops
+where that starts (no dead keys); a log longer than 1000 lines (edited saves) is trimmed on load.
+
+**Touch points.** `state.rs`, `runtime/{mod,ui,journal}.rs`, README, CHANGELOG.
+
+**Verify.** Talk to the elder and answer a choice, `press j`, `wintab dialogs`, screenshot shows
+the lines and the answer; scroll with keys; quick save / load keeps the log; a crafted save with
+1100 lines keeps 1000 (oldest dropped).
+
 ## 0.4.0 — Controls and feel (player comfort)
 
 Theme: the game feels good in the hands, with keyboard, mouse or controller.
