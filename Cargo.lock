@@ -1547,7 +1547,7 @@ dependencies = [
 
 [[package]]
 name = "rust2d-editor"
-version = "0.0.9"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "egui-macroquad",
@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "rust2d-engine"
-version = "0.0.9"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "lz4_flex",
@@ -1576,7 +1576,7 @@ dependencies = [
 
 [[package]]
 name = "rust2d-game"
-version = "0.0.9"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "macroquad",

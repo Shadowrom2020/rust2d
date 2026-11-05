@@ -37,7 +37,7 @@ Note: this repository's main branch is called `master` (not `main`).
 4. Finishing a release: merge `release/<version>` into `master` with `--no-ff`, tag the merge
    commit `v<version>` on `master`, merge the release branch back into `develop` (so the version
    bump and fixes are not lost), then delete the release branch.
-5. Versions follow `MAJOR.MINOR.PATCH` (currently `0.0.x`); the version lives in
+5. Versions follow `MAJOR.MINOR.PATCH` (currently `0.x.y`); the version lives in
    `[workspace.package] version` in the root `Cargo.toml`.
 6. Push branches and tags only when asked to; publish a branch with `git push -u origin <branch>`.
 7. Before starting work, check which branch is checked out (`git branch --show-current`) and
