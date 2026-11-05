@@ -319,6 +319,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             Err(e) => println!("[script] {}: {e:#}", arg(0)),
         },
         "charcancel" => ed.builder = None,
+        // playable SHEET on|off: may players choose that body in the character creator?
+        "playable" => builder::request_playable(arg(1), arg(2) != "off"),
         "charreset" => {
             if let Selection::Entity(uid) = ed.sel {
                 ed.reset_instance_look(uid);

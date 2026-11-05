@@ -134,11 +134,14 @@ pub struct SheetDef {
     /// Bodies: a woman's body, which wears the female cut of outfits (`Armor::overlay_f`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub female: bool,
+    /// Bodies: players may choose it in the character creator (people yes, a slime no).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub playable: bool,
 }
 
 impl SheetDef {
     pub fn new(id: &str, image: &str, frame_w: u32, frame_h: u32) -> Self {
-        SheetDef { id: id.into(), image: image.into(), frame_w, frame_h, kind: SheetKind::Sprite, female: false }
+        SheetDef { id: id.into(), image: image.into(), frame_w, frame_h, kind: SheetKind::Sprite, female: false, playable: false }
     }
     /// "hair_short" -> "Short", "body_goblin_female" -> "Goblin female": the id without the kind's
     /// prefix, for pickers.
@@ -983,6 +986,11 @@ impl Database {
     /// Is `sheet` a female body?
     pub fn female_body(&self, sheet: &str) -> bool {
         self.sheet(sheet).is_some_and(|s| s.female)
+    }
+
+    /// Bodies players may choose for a character of sex `female` (in sheet order).
+    pub fn playable_bodies(&self, female: bool) -> Vec<&SheetDef> {
+        self.sheets.iter().filter(|s| s.kind == SheetKind::Body && s.playable && s.female == female).collect()
     }
 
     /// Converts a placed prop's legacy frame offsets (start frame, lock, container) to the

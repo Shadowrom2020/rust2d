@@ -1425,8 +1425,9 @@ fn outfits() -> Vec<(&'static str, &'static str, Look, &'static str)> {
 fn layered_characters(db: &mut Database) {
     use SheetKind as K;
     let sheet = |id: &str, kind: K, female: bool| SheetDef { kind, female, ..SheetDef::new(id, &format!("sprites/{id}.png"), 32, 48) };
+    // The shared bodies are people: playable (the slime's body is not).
     for (id, _, kind, female) in shared_layers() {
-        db.sheets.push(sheet(&id, kind, female));
+        db.sheets.push(SheetDef { playable: kind == K::Body, ..sheet(&id, kind, female) });
     }
     for (k, (id, name, _, desc)) in outfits().into_iter().enumerate() {
         db.sheets.push(sheet(&format!("outfit_{id}"), K::Outfit, false));
@@ -1541,7 +1542,7 @@ fn main() {
                 // The player picks skin, hair style, hair color and (men) a beard.
                 body_male: "body_male".into(),
                 body_female: "body_female".into(),
-                skin_colors: [0xf2c49b, 0xe8b88a, 0xd09068, 0x8d5a3b, 0x5a3a24].map(rgb).to_vec(),
+                skin_colors: [0xf2c49b, 0xe8b88a, 0xd09068, 0x8d5a3b, 0x5a3a24, 0x7cb342].map(rgb).to_vec(),
                 hair_styles: vec!["hair_short".into(), "hair_long".into(), "hair_ponytail".into(), String::new()],
                 hair_colors: [0x5d3a1a, 0xe0c060, 0x1e1612, 0x7a4a22, 0xd35400, 0xdedede].map(rgb).to_vec(),
                 beards: vec![String::new(), "beard_full".into(), "beard_goatee".into()],

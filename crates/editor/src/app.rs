@@ -1190,6 +1190,7 @@ impl Editor {
         }
         self.wizard_window(ctx);
         self.builder_window(ctx);
+        self.apply_builder_requests();
         self.map_windows(ctx);
         self.model_window(ctx);
         self.new_project_window(ctx);
