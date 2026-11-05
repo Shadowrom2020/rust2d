@@ -52,6 +52,10 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
 
 ### Gameplay
+- **Character window**: inventory, character sheet, skills and spells are one window with the
+  tabs *Character* (C / I), *Skills* (K) and *Spells* (L); one HUD button (next to the map
+  button) replaces the three inventory / character / skills buttons. Tab cycles the tabs, the
+  key of the open tab or Esc closes it. Container loot windows stay separate.
 - Trade window: the mouse wheel moves the selection up / down (on the list under the pointer,
   else the active side); the list scrolls along.
 - **Scripted spell effects**: new script functions (also trigger actions) `aim(fn)` (magic

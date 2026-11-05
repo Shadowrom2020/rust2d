@@ -1,5 +1,6 @@
 //! The game runtime: loads a project and plays it.
 
+mod charwin;
 mod combat;
 mod equipment;
 mod fx;
@@ -857,6 +858,10 @@ impl Game {
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
         let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
+        // The character window's tabs (C / I, K, L, Tab, tab clicks) before the tabs' contents.
+        let (win_key, win_mouse) = self.update_window_tabs(allow_windows && !input.consumed, input.consumed || shop_key);
+        let (shop_key, shop_mouse) = (shop_key || win_key, shop_mouse || win_mouse);
+        let allow_windows = allow_windows && !win_mouse;
         let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.skills_open(), input.consumed || shop_key);
         let (k_key, k_mouse) = self.update_skills_ui(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.journal_open(), input.consumed || shop_key || j_key);
         let (j_key, j_mouse) = (j_key || k_key, j_mouse || k_mouse);
@@ -1270,7 +1275,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.window_status(),
             self.npc_items_status(),
             self.fx_status(),
             self.world_map_status(),
@@ -1466,10 +1472,13 @@ impl Game {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
-            } else if self.skills_open() {
-                self.draw_skills_ui();
             } else {
-                self.draw_inventory_ui();
+                self.draw_window_frame();
+                if self.skills_open() {
+                    self.draw_skills_ui();
+                } else {
+                    self.draw_inventory_ui();
+                }
             }
             self.draw_world_map();
         }

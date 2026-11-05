@@ -1,17 +1,15 @@
 //! Skills and magic at runtime: skill bonuses, skill points, mana, learning and casting
-//! spells, the Skills & Magic screen (K) and the mana bar.
+//! spells, the Skills (K) and Spells (L) tabs of the character window and the mana bar.
 
 use std::collections::HashMap;
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Game};
+use super::{input, Game};
 use crate::defs::LightSpec;
 use crate::render::wrap_text;
 use crate::skills::{SkillEffect, SpellEffect, SPELL_PREFIX};
 
-const W: f32 = 820.0;
-const H: f32 = 520.0;
 const LIST_W: f32 = 300.0;
 const PAD: f32 = 16.0;
 const ROW: f32 = 40.0;
@@ -42,13 +40,11 @@ struct Aim {
     script: Option<String>,
 }
 
-fn rect() -> Rect {
-    let (sw, sh) = (screen_width(), screen_height());
-    Rect::new(((sw - W) / 2.0).max(4.0).round(), ((sh - H) / 2.0).max(4.0).round(), W, H)
-}
+/// Top of the list and details below the header line.
+const LIST_TOP: f32 = 56.0;
 
 fn row_rect(r: Rect, i: usize) -> Rect {
-    Rect::new(r.x + PAD, r.y + 84.0 + i as f32 * ROW, LIST_W - PAD, ROW - 4.0)
+    Rect::new(r.x + PAD, r.y + LIST_TOP + i as f32 * ROW, LIST_W - PAD, ROW - 4.0)
 }
 
 impl Game {
@@ -499,11 +495,26 @@ impl Game {
         self.skills.open
     }
 
-    /// Opens the Skills & Magic screen (the HUD button).
-    pub(super) fn open_skills(&mut self) {
+    /// 0 = the Skills tab, 1 = the Spells tab.
+    pub(super) fn skills_tab(&self) -> usize {
+        self.skills.tab
+    }
+
+    /// Shows the Skills (0) or Spells (1) tab of the character window.
+    pub(super) fn show_skills(&mut self, tab: usize) {
         if self.skills_on() {
             self.skills.open = true;
+            self.skills.tab = if self.magic_on() { tab.min(1) } else { 0 };
         }
+    }
+
+    pub(super) fn close_skills(&mut self) {
+        self.skills.open = false;
+    }
+
+    /// The tab's area: the character window's content.
+    fn skills_rect(&self) -> Rect {
+        self.window_content()
     }
 
     /// Rows of the current tab: skill or spell ids.
@@ -518,36 +529,18 @@ impl Game {
         }
     }
 
-    /// Handles K and the open screen. Returns (key consumed, mouse consumed).
-    pub(super) fn update_skills_ui(&mut self, allow: bool, key_consumed: bool) -> (bool, bool) {
-        if !allow || !self.skills_on() {
+    /// Handles the open Skills / Spells tab (the keys that open, switch and close tabs are the
+    /// character window's). Returns (key consumed, mouse consumed).
+    pub(super) fn update_skills_ui(&mut self, allow: bool, _key_consumed: bool) -> (bool, bool) {
+        if !allow || !self.skills_on() || !self.skills.open {
             return (false, false);
         }
-        if !self.skills.open {
-            if !key_consumed && input::pressed(KeyCode::K) {
-                self.skills.open = true;
-                return (true, false);
-            }
-            return (false, false);
-        }
-        let r = rect();
+        let r = self.skills_rect();
         let m = input::mouse_pos();
-        let close = Rect::new(r.x + r.w - 30.0, r.y + 8.0, 22.0, 22.0);
-        if input::any_pressed(&[KeyCode::K, KeyCode::Escape]) || (input::mouse_pressed(MouseButton::Left) && close.contains(m)) {
+        let click = input::mouse_pressed(MouseButton::Left);
+        if input::pressed(KeyCode::Escape) || (click && !self.window_rect().contains(m)) {
             self.skills.open = false;
             return (true, true);
-        }
-        let tabs = if self.magic_on() { 2 } else { 1 };
-        if tabs > 1 && (input::any_pressed(&[KeyCode::Left, KeyCode::A, KeyCode::Right, KeyCode::D, KeyCode::Tab])) {
-            self.skills.tab = (self.skills.tab + 1) % tabs;
-        }
-        let click = input::mouse_pressed(MouseButton::Left);
-        if click {
-            for t in 0..tabs {
-                if Self::tab_rect(r, t).contains(m) {
-                    self.skills.tab = t;
-                }
-            }
         }
         let rows = self.skill_rows();
         let tab = self.skills.tab;
@@ -587,9 +580,6 @@ impl Game {
         (true, true)
     }
 
-    fn tab_rect(r: Rect, t: usize) -> Rect {
-        Rect::new(r.x + PAD + t as f32 * 120.0, r.y + 48.0, 112.0, 26.0)
-    }
     fn plus_rect(row: Rect) -> Rect {
         Rect::new(row.x + row.w - 30.0, row.y + 5.0, 26.0, 26.0)
     }
@@ -601,41 +591,29 @@ impl Game {
         if !self.skills.open {
             return;
         }
-        let r = rect();
+        // The window frame (panel, tabs, close button) is drawn by `draw_window_frame`.
+        let r = self.skills_rect();
         let m = input::mouse_pos();
-        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
-        panel(r.x, r.y, r.w, r.h);
-        draw_text(if self.magic_on() { "Skills & Magic" } else { "Skills" }, r.x + PAD, r.y + 34.0, 30.0, GOLD);
-        let c = Rect::new(r.x + r.w - 30.0, r.y + 8.0, 22.0, 22.0);
-        draw_rectangle_lines(c.x, c.y, c.w, c.h, 1.5, Color::new(0.85, 0.8, 0.6, 1.0));
-        draw_line(c.x + 6.0, c.y + 6.0, c.x + c.w - 6.0, c.y + c.h - 6.0, 2.0, WHITE);
-        draw_line(c.x + c.w - 6.0, c.y + 6.0, c.x + 6.0, c.y + c.h - 6.0, 2.0, WHITE);
         let points = self.world.skill_points;
-        let head = format!("Skill points: {points}");
-        let hw = measure_text(&head, None, 20, 1.0).width;
-        draw_text(&head, r.x + r.w - PAD - hw - 40.0, r.y + 34.0, 20.0, if points > 0 { GOLD } else { LIGHTGRAY });
-        // Tabs.
-        let tabs: &[&str] = if self.magic_on() { &["Skills", "Magic"] } else { &["Skills"] };
-        for (t, name) in tabs.iter().enumerate() {
-            let tr = Self::tab_rect(r, t);
-            let on = self.skills.tab == t;
-            draw_rectangle(tr.x, tr.y, tr.w, tr.h, if on { Color::new(0.85, 0.7, 0.3, 0.25) } else { Color::new(1.0, 1.0, 1.0, 0.06) });
-            draw_rectangle_lines(tr.x, tr.y, tr.w, tr.h, if on { 2.0 } else { 1.0 }, if on { GOLD } else { Color::new(0.85, 0.8, 0.6, 0.5) });
-            draw_text(name, tr.x + 10.0, tr.y + 19.0, 18.0, if on { WHITE } else { LIGHTGRAY });
-        }
-        let help = if self.skills.tab == 0 {
-            "Up/Down: select   Enter or +: spend a point   Left/Right: tab   K / Esc: close"
+        let head = if self.skills.tab == 0 {
+            format!("Skill points: {points}")
         } else {
-            "Up/Down: select   Enter: cast   1-8: put on the quick bar   Left/Right: tab   K / Esc: close"
+            format!("Mana {:.0} / {}   -   spells known: {}", self.world.mana, self.max_mana(), self.world.spells.len())
+        };
+        draw_text(&head, r.x + PAD, r.y + 32.0, 22.0, if self.skills.tab == 0 && points > 0 { GOLD } else { LIGHTGRAY });
+        let help = if self.skills.tab == 0 {
+            "Up/Down: select   Enter or +: spend a point   Tab: next tab   K / Esc: close"
+        } else {
+            "Up/Down: select   Enter: cast   1-8: put on the quick bar   Tab: next tab   L / Esc: close"
         };
         draw_text(help, r.x + PAD, r.y + r.h - 14.0, 16.0, GRAY);
-        draw_line(r.x + LIST_W + 8.0, r.y + 84.0, r.x + LIST_W + 8.0, r.y + r.h - 40.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
+        draw_line(r.x + LIST_W + 8.0, r.y + LIST_TOP, r.x + LIST_W + 8.0, r.y + r.h - 40.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
 
         let rows = self.skill_rows();
         let tab = self.skills.tab;
         let sel = self.skills.sel[tab].min(rows.len().saturating_sub(1));
         if rows.is_empty() {
-            draw_text(if tab == 0 { "No skills in this game." } else { "No spells in this game." }, r.x + PAD, r.y + 110.0, 22.0, LIGHTGRAY);
+            draw_text(if tab == 0 { "No skills in this game." } else { "No spells in this game." }, r.x + PAD, r.y + LIST_TOP + 26.0, 22.0, LIGHTGRAY);
             return;
         }
         for (i, id) in rows.iter().enumerate() {
@@ -691,7 +669,7 @@ impl Game {
         // Details.
         let x = r.x + LIST_W + 26.0;
         let w = r.x + r.w - PAD - x;
-        let mut y = r.y + 108.0;
+        let mut y = r.y + LIST_TOP + 24.0;
         let id = &rows[sel];
         if tab == 0 {
             let Some(d) = self.project.db.skill(id) else { return };
