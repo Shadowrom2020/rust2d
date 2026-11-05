@@ -92,7 +92,17 @@ fn song(melody: &[i32], bass: &[i32], step: f32) -> Vec<f32> {
 
 type SoundFn = fn() -> Vec<f32>;
 
-const SOUNDS: [(&str, SoundFn); 13] = [
+const SOUNDS: [(&str, SoundFn); 14] = [
+    // A bright, bell-like arpeggio for magic (the forest shrine).
+    ("chime", || {
+        let mut out = vec![0.0; (1.6 * RATE as f32) as usize];
+        for (k, n) in [76, 80, 83, 88, 92].iter().enumerate() {
+            let f = midi(*n);
+            mix(&mut out, &tone(f, f, 1.2, Wave::Triangle, 0.22, 2.2), k * (0.09 * RATE as f32) as usize);
+            mix(&mut out, &tone(f * 2.0, f * 2.0, 0.6, Wave::Triangle, 0.06, 4.0), k * (0.09 * RATE as f32) as usize);
+        }
+        out
+    }),
     ("unlock", || concat(&[tone(1800.0, 1800.0, 0.03, Wave::Square, 0.25, 40.0), tone(900.0, 700.0, 0.06, Wave::Square, 0.25, 25.0), tone(2400.0, 2400.0, 0.04, Wave::Square, 0.2, 40.0)])),
     ("creak", || concat(&[tone(90.0, 160.0, 0.18, Wave::Square, 0.18, 4.0), tone(160.0, 120.0, 0.12, Wave::Triangle, 0.4, 6.0)])),
     ("pickup", || concat(&[tone(880.0, 880.0, 0.06, Wave::Square, 0.3, 10.0), tone(1320.0, 1320.0, 0.12, Wave::Square, 0.3, 12.0)])),
@@ -286,8 +296,9 @@ fn village() -> Map {
         let (x, y) = (rng.range(w) as i32, rng.range(h) as i32);
         b.set(0, x, y, if rng.chance(0.5) { t::FLOWERS } else { t::TALL_GRASS });
     }
-    // Main road west -> east edge (y = 18), and north-south street.
-    b.fill(0, 4, 17, w as i32 - 4, 3, t::PATH);
+    // Main road from the west edge (where travellers arrive) to the east edge (y = 18), and
+    // the north-south street.
+    b.fill(0, 0, 17, w as i32, 3, t::PATH);
     b.fill(0, 21, 8, 3, 12, t::PATH);
     // Pond with sand rim and bridge-less shore.
     b.fill(0, 5, 24, 11, 7, t::SAND);
@@ -311,14 +322,14 @@ fn village() -> Map {
             b.set(1, x, y, t::BUSH);
         }
     }
-    // Tree border, leaving the road gap open to the east.
+    // Tree border, leaving the road open to the west and the east.
     for x in 0..w as i32 {
         b.tree(x, 1);
         b.tree(x, h as i32 - 1);
     }
     for y in 2..h as i32 - 1 {
-        b.tree(0, y);
         if !(16..=20).contains(&y) {
+            b.tree(0, y);
             b.tree(w as i32 - 1, y);
         }
     }
@@ -453,7 +464,10 @@ fn village() -> Map {
     guard.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "guard_talk".into() }])];
 
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
-    b.m.triggers = vec![Trigger {
+    b.m.triggers = vec![
+        // A new game's intro: a cut-scene (the script's intro_cutscene()), then the welcome.
+        Trigger { once: true, ..trig(TriggerOn::MapEnter, vec![], vec![Action::Cutscene { function: "intro_cutscene".into() }]) },
+        Trigger {
         on: TriggerOn::MapEnter,
         conditions: vec![],
         actions: vec![dialog(
@@ -529,10 +543,11 @@ fn shop() -> Map {
                 dialog("Tilda", "Welcome, welcome, {good sir|my lady}! Potions, arrows, armor - and I pay fair coin for whatever you find out there."),
             ],
         ),
-        // Quest "Pest Control": offered until accepted, rewarded once five slimes are gone.
+        // Quest "Pest Control": offered until accepted (not any more once the shrine has driven
+        // the monsters out of Whisperwood), rewarded once the slimes are gone.
         trig(
             TriggerOn::Interact,
-            vec![quest_is("pest_control", QuestCheck::NotStarted, 0)],
+            vec![quest_is("pest_control", QuestCheck::NotStarted, 0), not(flag("shrine_lit"))],
             vec![
                 Action::Choice {
                     speaker: "Tilda".into(),
@@ -551,11 +566,21 @@ fn shop() -> Map {
             TriggerOn::Interact,
             vec![quest_is("pest_control", QuestCheck::AtStage, 1)],
             vec![
-                dialog("Tilda", "Five slimes? My deliveries are safe again - thank you, {player}! Here, as promised."),
+                dialog("Tilda", "The slimes are gone? My deliveries are safe again - thank you, {player}! Here, as promised."),
                 Action::GiveItem { item: "coin".into(), count: 30 },
                 Action::GiveItem { item: "potion".into(), count: 1 },
                 Action::GiveSkillPoints { amount: 1 },
                 quest("pest_control", QuestOp::Complete, 0),
+            ],
+        ),
+        // The shrine was lit before her quest was taken: no slimes left to hunt - she thanks the hero.
+        trig(
+            TriggerOn::Interact,
+            vec![quest_is("pest_control", QuestCheck::NotStarted, 0), cond(flag("shrine_lit")), not(flag("tilda_thanked"))],
+            vec![
+                Action::SetFlag { name: "tilda_thanked".into(), value: true },
+                dialog("Tilda", "So you're the one who woke the old shrine! Not a single slime has touched my deliveries since. You're a hero, {player} - the whole town owes you."),
+                dialog("Tilda", "Now, care to look at my wares?"),
             ],
         ),
     ];
@@ -628,9 +653,9 @@ fn forest() -> Map {
             b.fill(0, x, y, 1, 3, t::PATH);
         }
     }
-    // Clearing with the shrine.
+    // Clearing with the shrine on a stone platform (centered on the 3-tile shrine at 46-48).
     b.fill(0, 40, 16, 14, 14, t::GRASS);
-    b.fill(0, 44, 20, 6, 6, t::STONE_FLOOR);
+    b.fill(0, 43, 19, 9, 7, t::STONE_FLOOR);
     // Stream; where it crosses the path it becomes a bridge.
     for yy in 0..h as i32 {
         let x = 28 + ((yy as f32 / 6.0).sin() * 2.0) as i32;
@@ -665,12 +690,13 @@ fn forest() -> Map {
     }
 
     b.spawn("west", 2, 24);
+    // Two statues guard the shrine, one tile in from the platform's edges.
     b.big("statue", 44, 21, 1, 2);
     b.big("statue", 50, 21, 1, 2);
     b.big("big_oak", 39, 15, 3, 4);
     b.big("big_pine", 54, 28, 2, 4);
     b.big("big_oak", 24, 12, 3, 4);
-    let shrine = b.entity(EntityKind::Prop, "shrine", 47, 21);
+    let shrine = b.big("shrine", 47, 21, 3, 2);
     shrine.name = "shrine".into();
     shrine.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "shrine_touch".into() }])];
     let clearing = b.zone("clearing", 40, 16, 14, 14, ZoneKind::Trigger);
@@ -728,7 +754,7 @@ fn forest() -> Map {
     b.m.triggers = vec![trig(
         TriggerOn::Custom { name: "shrine_lit".into() },
         vec![],
-        vec![Action::Wait { seconds: 0.4 }, dialog("", "A warm light spreads through the forest.")],
+        vec![Action::Wait { seconds: 0.4 }, dialog("", "A warm light spreads through the forest. The slime den and the goblin camp fall silent.")],
     )];
     b.m.edges.west = Some(EdgeLink { target_map: "village".into(), offset: -6, depth: 1 });
     b.m.background = [10, 25, 10];
@@ -1006,6 +1032,8 @@ fn database() -> Database {
             // Spell effects (the Fireball script).
             SheetDef::new("fireball", "sprites/fireball.png", 32, 32),
             SheetDef::new("explosion", "sprites/explosion.png", 64, 64),
+            // The forest shrine's awakening (cut-scene).
+            SheetDef::new("magic_burst", "sprites/magic_burst.png", 64, 64),
         ],
         items: vec![
             stack(item("key", "Gate Key", "An old iron key. Opens the east gate.", it::KEY, false, vec![]), 1),
@@ -1087,10 +1115,12 @@ fn database() -> Database {
                 ..prop("gate", "Iron Gate", p::GATE, true, [16.0, 16.0])
             },
             PropDef { container: Some(ContainerSpec { size: 4, ..Default::default() }), ..prop("barrel", "Barrel", p::BARREL, true, [10.0, 6.0]) },
+            // The forest shrine: 3x2 cells, a monolith between two lamp pillars on a dais.
             PropDef {
                 default_state: "dormant".into(),
-                states: vec![state("glowing", sprite("props", p::SHRINE + 1), true)],
-                ..prop("shrine", "Shrine", p::SHRINE, true, [10.0, 6.0])
+                states: vec![state("glowing", SpriteRef::block("props", p::GRAND_SHRINE + 3, 3, 2), true)],
+                sprite: SpriteRef::block("props", p::GRAND_SHRINE, 3, 2),
+                ..prop("shrine", "Shrine", p::GRAND_SHRINE, true, [40.0, 7.0])
             },
             prop("well", "Well", p::WELL, true, [14.0, 8.0]),
             // Multi-tile props.
@@ -1188,7 +1218,7 @@ fn database() -> Database {
     }
     // The shrine glows once it is lit.
     if let Some(st) = db.props.iter_mut().find(|p| p.id == "shrine").and_then(|p| p.states.iter_mut().find(|s| s.name == "glowing")) {
-        st.light = Some(LightSpec { intensity: 0.85, ..LightSpec::new(5.0, [150, 200, 255], false) });
+        st.light = Some(LightSpec { intensity: 0.9, ..LightSpec::new(6.5, [150, 210, 255], true) });
     }
     db
 }
@@ -1275,6 +1305,8 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
 //               open_shop(target) set_state(target, state)
 //               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
+// Cut-scenes:   cutscene(fn) walk_to(target, x, y) approach(target, other) place(target, x, y)
+//               hide_ui() show_ui() dim(amount, seconds) disable_spawners(map) enable_spawners(map)
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
 //               fail_quest(id) (queued); quest_stage(id) (-1 = not started) quest_active(id)
 //               quest_done(id)
@@ -1325,17 +1357,50 @@ fn mira_walk() {
 
 fn shrine_touch() {
     if flag("shrine_lit") {
-        say("The shrine glows softly.");
+        say("The shrine glows softly. The forest is calm.");
         return;
     }
     if !flag("quest_accepted") {
         say("An old stone shrine. It seems dormant.");
         return;
     }
-    say("You touch the shrine. Ancient runes begin to glow!");
+    cutscene("shrine_awakening");
+}
+
+// The shrine awakens (a cut-scene, the first time it is touched on the elder's quest): the
+// clearing darkens, the statues' eyes and the shrine light up, a burst of magic rolls out -
+// every monster left in the forest is destroyed and its spawners go quiet. Tilda's slime
+// hunt can't go on then: accepted, it is done (she rewards it); not accepted, she won't offer it.
+fn shrine_awakening() {
+    face("player", "up");
+    say("You lay your hand on the cold stone. It begins to hum under your fingers...");
+    dim(0.8, 1.5);
+    play_sound("chime");
+    wait(1.6);
+    let blue = #{ color: [120, 200, 255], flicker: true };
+    light_at(47.5, 20.5, 1.5, 8, blue);         // a glow in the crystal
+    wait(0.8);
+    light_at(44.5, 20.2, 2.5, 7, blue);         // the statues' eyes
+    wait(0.4);
+    light_at(50.5, 20.2, 2.5, 6.6, blue);
+    wait(0.6);
+    set_state("shrine", "glowing");
+    play_sound("chime");
+    effect("magic_burst", 47.5, 20.5, #{ scale: 1.5, fps: 14, light: 5, color: [140, 210, 255] });
+    wait(0.5);
+    effect("magic_burst", 47.5, 20.5, #{ scale: 3.5, fps: 9, light: 9, color: [170, 230, 255] });
+    light_at(47.5, 21, 9, 3.5, #{ color: [180, 230, 255] });
+    wait(1.0);
+    say("Ancient runes flare up! A wave of light rolls out from the shrine, deep into Whisperwood.");
+    defeat_enemies();                           // every monster left in the forest
+    disable_spawners("forest");                 // and no new ones
+    if quest_active("pest_control") && quest_stage("pest_control") == 0 {
+        set_quest_stage("pest_control", 1);     // the slimes are gone: back to Tilda
+    }
     set_flag("shrine_lit", true);
-    set_state("self", "glowing");
     set_quest_stage("strange_lights", 2);
+    dim(0, 2);
+    wait(1.5);
     emit("shrine_lit");
 }
 
@@ -1366,6 +1431,21 @@ fn slime_defeated() {
 
 // The town guard patrols the road (see his patrol route in the map inspector). Once the
 // shrine is lit he stops: stop_patrol(target) / patrol(target) / patrol(target, [[x, y], ...]).
+// The intro of a new game, a cut-scene (village Map enter trigger, once): the player walks
+// into town from the west, the guard comes over and sends them to the elder.
+fn intro_cutscene() {
+    place("player", 0, 18);
+    face("player", "right");
+    wait(0.8);
+    walk_to("player", 5, 18);
+    wait(0.4);
+    approach("guard", "player");
+    say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("Guard", "Something is not right in Whisperwood, east of town. Strange lights flicker between the trees at night, and the slimes grow bolder every day.");
+    say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well in the middle of town.");
+    wait(0.3);
+}
+
 fn guard_talk() {
     if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
@@ -1507,6 +1587,7 @@ fn main() {
     items(&out);
     fireball(&out);
     explosion(&out);
+    magic_burst(&out);
     let (_, png) = art::extra::dungeon_tileset();
     std::fs::write(out.join("tilesets/dungeon.png"), png).unwrap();
     std::fs::create_dir_all(out.join("sounds")).unwrap();

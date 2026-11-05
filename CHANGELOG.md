@@ -52,6 +52,23 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
 
 ### Gameplay
+- Fix: arriving on a map (edge, spawn, transition, loaded save) inside something solid - e.g.
+  a gate post at the village's east edge when coming back from the forest - left the player
+  stuck; the player now arrives on the nearest free tile.
+- **Cut-scenes**: the action *Play cutscene* / `cutscene("fn")` plays a script function as a
+  cut-scene (HUD hidden, black bars, everyone else waits; the HUD comes back afterwards).
+  New actions and script functions *Walk to tile* `walk_to`, *Walk up to character* `approach`
+  and *Place at tile* `place`. The example's new game opens with one: the hero walks into town
+  from the west and the guard sends them to Elder Rowan. Editor: *+ Cutscene* template and
+  *Play as cutscene* in the Scripts tab, *Preview* on the action, `rust2d-game --cutscene FN`.
+- **More for scenes**: `dim(amount, seconds)` / action *Dim the scene* (lights show by day),
+  `disable_spawners(map[, zone])` / `enable_spawners(...)` / action *Spawners on / off* (saved),
+  `defeat_enemies()` / action *Defeat all enemies*, a light `color` for effects; effects and timed lights keep playing during cut-scenes.
+- Example: the forest shrine is a 3x2 monolith with lamp pillars on a larger stone platform
+  (both statues on it); touching it on the elder's quest plays a cut-scene with light effects
+  (new `magic_burst` sheet, `chime` sound), defeats the monsters left in the forest and switches
+  off its spawners. Tilda's slime hunt is done then (she rewards it); not yet taken, she only
+  thanks the hero.
 - **Hide the interface**: H hides / shows the HUD (status frame, clock, quick bar, buttons);
   dialogs and windows the player opens still show. Scripts: `hide_ui()`, `show_ui()`;
   triggers: the new action *Show / hide UI* (e.g. for cut-scenes). Not saved.

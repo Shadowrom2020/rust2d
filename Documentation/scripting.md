@@ -290,6 +290,43 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 
+### Cut-scenes
+
+A cut-scene is an ordinary script function played with `cutscene("name")` or the trigger action
+*Play cutscene*. While it plays the HUD is hidden, black bars slide in at the top and bottom,
+and the player and the other characters wait (no input, no wandering or attacking) until the
+function's queued actions are done: walks, dialogs, waits, sounds, … Afterwards the HUD is back
+(also if the player had hidden it with H before, it stays hidden). A cut-scene started from
+another one becomes part of it.
+
+| Function | Description |
+|---|---|
+| `cutscene(function)` | Plays a script function as a cut-scene. *(queued)* |
+| `walk_to(target, x, y)` | Walks a character (`"player"` too) onto tile `x`, `y`. *(queued, blocks until it arrives)* |
+| `approach(target, other)` | Walks a character up to another one, stopping a tile before it (along the longer axis); then both face each other. *(queued, blocks)* |
+| `place(target, x, y)` | Puts a character (`"player"` too) on tile `x`, `y` at once. Saved for NPCs. *(queued)* |
+| `dim(amount, seconds)` | Darkens the scene to `amount` (0 = normal, 1 = deep night) over `seconds`, so that lights (`light_at`, glowing effects, lamps) show even by day. A cut-scene's end brightens it again; not saved. *(queued)* |
+
+`move_by`, `face`, `say`, `choice`, `wait`, `teleport`, `play_sound`, `play_music` and every other
+queued function work in cut-scenes as everywhere. Scripted walks go straight to their target
+and ignore walls and characters, so a scene can't get stuck - plan the paths. Tile positions are
+the editor's tile coordinates (shown in its status bar).
+
+In the editor, the Scripts tab's *+ Cutscene* adds a template function, *Play as cutscene*
+play-tests any function of the open script as a cut-scene on the open map, and the *Play
+cutscene* action has a *Preview* button. A preview starts without the map's *Map enter*
+triggers.
+
+### Enemy spawners
+
+| Function | Description |
+|---|---|
+| `disable_spawners(map)` | Switches off every enemy spawner of a map (`""` = the current one). The characters they spawned on the current map vanish; nothing spawns there any more. Saved. *(queued)* |
+| `disable_spawners(map, zone)` | The same for one spawner zone, by its name. *(queued)* |
+| `enable_spawners(map)` | Switches all of a map's spawners on again. *(queued)* |
+| `enable_spawners(map, zone)` | Switches on a spawner zone that was switched off by name. *(queued)* |
+| `defeat_enemies()` | Defeats every hostile character on the current map at once, like in combat: their loot drops and their *Defeated* triggers run (e.g. quest counters). *(queued)* |
+
 ### Equipment and carried items of characters
 
 Every humanoid character has equipment (Clothing, Head, Body, Weapon, Left hand) and carried items.
@@ -374,9 +411,9 @@ Use these to build spells (and traps, cut-scenes, …) in scripts.
 |---|---|
 | `aim(function)` | Starts magic targeting: the cursor turns into a crosshair, and the player's next click (on an enemy or any spot) calls `function(x, y)` with the target. X fires straight ahead (5 tiles), right-click or Esc cancels. *(queued)* |
 | `fly(sheet, x, y, function)` | An animated sprite flies from the player to point `x, y`, turned in its direction, then calls `function(x, y)` (`""` = call nothing). *(queued)* |
-| `fly(sheet, x, y, function, options)` | Like above with [options](#options-maps): `speed`, `frames`, `fps`, `scale`, `light`. *(queued)* |
+| `fly(sheet, x, y, function, options)` | Like above with [options](#options-maps): `speed`, `frames`, `fps`, `scale`, `light`, `color`. *(queued)* |
 | `effect(sheet, x, y)` | Plays the frames of a sprite sheet once, centered on `x, y` (explosions, sparkles). *(queued)* |
-| `effect(sheet, x, y, options)` | Like above with options: `frames`, `fps`, `scale`, `light`. *(queued)* |
+| `effect(sheet, x, y, options)` | Like above with options: `frames`, `fps`, `scale`, `light`, `color`. *(queued)* |
 | `damage_area(x, y, radius, damage)` | Damages every character within `radius` tiles of `x, y`. Spell damage skills increase it. Never hurts the player. *(queued)* |
 | `damage_around(damage, radius)` | The same around the player. *(queued)* |
 
@@ -410,8 +447,8 @@ keys are ignored, missing keys use the default.
 | `frame` | `fly`, `effect` | A single frame | — |
 | `fps` | `fly`, `effect` | Frames per second (`fly` loops, `effect` plays once) | `12` |
 | `scale` | `fly`, `effect` | Size factor (`2` = twice the frame size) | `1` |
-| `light` | `fly`, `effect` | Radius of a warm glow in tiles (an effect's glow fades with it) | `0` (none) |
-| `color` | `player_light`, `light_at` | `[red, green, blue]`, each `0`–`255` | cool white (player), warm white (`light_at`) |
+| `light` | `fly`, `effect` | Radius of a glow in tiles (an effect's glow fades with it) | `0` (none) |
+| `color` | `player_light`, `light_at`, `fly`, `effect` | `[red, green, blue]`, each `0`–`255` (for `fly` / `effect`: the glow's color) | cool white (player), warm white (`light_at`), fire orange (glows) |
 | `flicker` | `player_light`, `light_at` | `true` = flickers like a flame | `false` |
 
 ```rust
@@ -536,7 +573,7 @@ fn trap() {
 }
 ```
 
-### A short cut-scene
+### A short scripted scene
 
 ```rust
 fn guard_steps_aside() {
@@ -551,6 +588,56 @@ fn gate_open() {
     set_state("gate", "open");
     play_sound("creak");
     show_ui();
+}
+```
+
+### A cut-scene: arriving in town
+
+The example project's intro (a *Map enter* trigger of the village, *once*, with the action *Play
+cutscene* → `intro_cutscene`):
+
+```rust
+fn intro_cutscene() {
+    place("player", 0, 18);         // at the west edge of the village
+    face("player", "right");
+    wait(0.8);
+    walk_to("player", 5, 18);       // into town along the road
+    wait(0.4);
+    approach("guard", "player");    // the guard comes over
+    say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well.");
+}
+```
+
+### A cut-scene with light: the shrine awakens
+
+The example's forest shrine (its *Interact* trigger runs `shrine_touch()`, which plays this the
+first time): the clearing darkens so the lights show by day, the statues and the shrine light
+up, two bursts of magic roll out, and the forest's spawners go quiet.
+
+```rust
+fn shrine_awakening() {
+    face("player", "up");
+    say("You lay your hand on the cold stone. It begins to hum under your fingers...");
+    dim(0.8, 1.5);
+    play_sound("chime");
+    wait(1.6);
+    let blue = #{ color: [120, 200, 255], flicker: true };
+    light_at(47.5, 20.5, 1.5, 8, blue);         // a glow in the crystal
+    wait(0.8);
+    light_at(44.5, 20.2, 2.5, 7, blue);         // the statues' eyes
+    light_at(50.5, 20.2, 2.5, 6.6, blue);
+    wait(0.6);
+    set_state("shrine", "glowing");
+    effect("magic_burst", 47.5, 20.5, #{ scale: 1.5, fps: 14, light: 5, color: [140, 210, 255] });
+    wait(0.5);
+    effect("magic_burst", 47.5, 20.5, #{ scale: 3.5, fps: 9, light: 9, color: [170, 230, 255] });
+    wait(1.0);
+    say("Ancient runes flare up! A wave of light rolls out from the shrine.");
+    disable_spawners("forest");
+    set_flag("shrine_lit", true);
+    dim(0, 2);
+    wait(1.5);
 }
 ```
 

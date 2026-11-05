@@ -1657,6 +1657,24 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     ui.label(format!("Project folder: {}", ed.project.root.display()));
 }
 
+/// A cut-scene function to start from (Scripts tab, *+ Cutscene*).
+fn cutscene_template(name: &str) -> String {
+    format!(
+        r#"
+// A cut-scene: play it with the trigger action "Play cutscene" (or cutscene("{name}") in a
+// script). While it plays the HUD is hidden and everyone else waits. Positions are tiles.
+fn {name}() {{
+    place("player", 5, 5);            // put the player on a tile at once
+    walk_to("player", 8, 5);          // walk onto a tile (the scene waits until it's there)
+    approach("guard", "player");      // walk up to someone; both face each other
+    say("Guard", "Hello, {{player}}!");
+    face("guard", "down");
+    wait(0.5);                        // seconds
+}}
+"#
+    )
+}
+
 /// `fn name(` definitions in a script, with the character index where each starts.
 fn script_functions(text: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
@@ -1848,6 +1866,32 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 ui.colored_label(Color32::YELLOW, "• edited");
             }
             save = ui.button("\u{E248} Save & check").on_hover_text("Ctrl+S").clicked();
+            ui.separator();
+            // Cut-scenes: a template to start from, and a preview of any function as one.
+            if ui.button(ui::t(ph::FILM_SLATE, "+ Cutscene")).on_hover_text("Adds a cut-scene template function at the end of this script").clicked() {
+                let names: Vec<String> = script_functions(&st.script_text).into_iter().map(|f| f.0).collect();
+                let name = (1..).map(|n| if n == 1 { "my_cutscene".to_string() } else { format!("my_cutscene_{n}") }).find(|n| !names.contains(n)).unwrap();
+                let at = st.script_text.chars().count();
+                if !st.script_text.ends_with('\n') && !st.script_text.is_empty() {
+                    st.script_text.push('\n');
+                }
+                st.script_text.push_str(&cutscene_template(&name));
+                st.script_dirty = true;
+                st.script_jump = Some(at);
+            }
+            ui.menu_button(ui::t(ph::PLAY, "Play as cutscene"), |ui| {
+                ui.label("Play-test a function of this script as a cut-scene on the open map (saves first):");
+                let funcs = script_functions(&st.script_text);
+                if funcs.is_empty() {
+                    ui.weak("No functions in this script.");
+                }
+                for (func, _) in funcs {
+                    if ui.button(format!("{func}()")).clicked() {
+                        crate::widgets::request_play_cutscene(&func);
+                        ui.close_menu();
+                    }
+                }
+            });
         });
         if let Some(ci) = st.script_jump.take() {
             st.script_ed.set_cursor = Some(ci);

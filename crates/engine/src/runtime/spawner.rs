@@ -24,7 +24,50 @@ pub(super) struct SpawnerRt {
 }
 
 impl Game {
-    /// Called on map enter: creates the spawners' characters.
+    /// Is the spawner zone `zone` of map `map` switched off (`SetSpawners`)?
+    fn spawner_off(&self, map: &str, zone: &str) -> bool {
+        self.world.spawners_off.get(map).is_some_and(|s| s.contains("") || s.contains(zone))
+    }
+
+    /// `SetSpawners`: switches spawners off (or on again). On the current map the characters of
+    /// switched-off spawners vanish (with a puff), switched-on ones start spawning.
+    pub(super) fn set_spawners(&mut self, map: &str, zone: &str, active: bool) {
+        let map = if map.is_empty() { self.loaded.map.name.clone() } else { map.to_string() };
+        let set = self.world.spawners_off.entry(map.clone()).or_default();
+        if active {
+            // All on again, or one zone switched off by name (after "all off" use all on).
+            if zone.is_empty() {
+                set.clear();
+            } else {
+                set.remove(zone);
+            }
+        } else {
+            set.insert(zone.to_string());
+        }
+        if set.is_empty() {
+            self.world.spawners_off.remove(&map);
+        }
+        if map != self.loaded.map.name {
+            return;
+        }
+        // The current map: the spawned characters of switched-off spawners vanish.
+        let ts = self.ts();
+        let names: std::collections::HashMap<u32, String> = self.loaded.map.zones.iter().map(|z| (z.uid, z.name.clone())).collect();
+        let off: Vec<u32> = self.spawners.iter().map(|s| s.zone).filter(|z| self.spawner_off(&map, names.get(z).map_or("", |n| n.as_str()))).collect();
+        for e in self.loaded.entities.iter_mut().filter(|e| e.active && e.spawned_by.is_some_and(|z| off.contains(&z))) {
+            e.active = false;
+            self.effects.push((e.body.pos - vec2(0.0, ts * 0.4), 0.0));
+        }
+        if active {
+            // Rebuild: spawners switched on start over with their full group.
+            self.loaded.entities.retain(|e| e.spawned_by.is_none());
+            self.setup_spawners();
+        } else {
+            self.spawners.retain(|s| !off.contains(&s.zone));
+        }
+    }
+
+    /// Called on map enter: creates the spawners' characters (not of switched-off spawners).
     pub(super) fn setup_spawners(&mut self) {
         self.spawners.clear();
         let map = self.loaded.map.name.clone();
@@ -33,6 +76,7 @@ impl Game {
             .map
             .zones
             .iter()
+            .filter(|z| !self.spawner_off(&map, &z.name))
             .filter_map(|z| match &z.kind {
                 ZoneKind::Spawner { character, count, respawn } => {
                     Some((z.uid, character.clone(), *count, respawn.clone(), (z.x, z.y, z.w, z.h)))

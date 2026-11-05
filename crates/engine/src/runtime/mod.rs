@@ -2,6 +2,7 @@
 
 mod charwin;
 mod combat;
+mod cutscene;
 mod equipment;
 mod fx;
 mod inventory_ui;
@@ -64,6 +65,9 @@ pub struct StartOptions {
     pub map: Option<String>,
     pub spawn: Option<String>,
     pub pos: Option<Vec2>,
+    /// Play this script function as a cut-scene right after arriving (instead of the map's
+    /// *Map enter* triggers): previews from the editor.
+    pub cutscene: Option<String>,
     /// Show the title screen (main menu) first.
     pub title: bool,
 }
@@ -214,6 +218,7 @@ pub struct Game {
     slot: Option<String>,
     /// The HUD is hidden (H, or a script / action); not saved.
     ui_hidden: bool,
+    cutscene: cutscene::CutsceneState,
 }
 
 impl Game {
@@ -285,6 +290,7 @@ impl Game {
             pending_events: Vec::new(),
             slot: None,
             ui_hidden: false,
+            cutscene: Default::default(),
         };
         let arrival = match (start.pos, start.spawn) {
             (Some(p), _) => Arrival::Pos(p),
@@ -299,6 +305,11 @@ impl Game {
         game.prepare_world();
         if start.title {
             game.open_title();
+        }
+        if let Some(f) = &start.cutscene {
+            // A preview: the cut-scene instead of the map's Map enter triggers.
+            game.resuming = true;
+            game.runner.push(&[Action::Cutscene { function: f.clone() }], &ActionCtx::default());
         }
         game.enter_map(map, arrival);
         Ok(game)
@@ -526,7 +537,8 @@ impl Game {
                 }
             },
         };
-        self.player.pos = pos;
+        // Never inside something solid (a gate post at a map edge, a prop placed on a spawn).
+        self.player.pos = self.free_spot(pos);
         self.player.move_target = None;
         self.world.current_map = self.loaded.map.name.clone();
         // Zones we arrive in don't fire Enter (avoids bouncing back through portals).
@@ -611,6 +623,30 @@ impl Game {
             .entities
             .iter()
             .any(|e| e.active && e.solid && Some(e.uid) != ignore && e.body.rect().overlaps(&r))
+    }
+
+    /// Where the player can stand near `pos`: `pos` itself if the player's hitbox is free there,
+    /// else the nearest spot whole tiles away (searching rings around it) that is free.
+    fn free_spot(&self, pos: Vec2) -> Vec2 {
+        let ts = self.ts();
+        let fits = |p: Vec2| !self.rect_blocked(self.player.rect_at(p), None, false);
+        if fits(pos) {
+            return pos;
+        }
+        for r in 1..=12i32 {
+            let mut ring: Vec<Vec2> = (-r..=r)
+                .flat_map(|dy| (-r..=r).map(move |dx| (dx, dy)))
+                .filter(|(dx, dy)| dx.abs().max(dy.abs()) == r)
+                .map(|(dx, dy)| pos + vec2(dx as f32, dy as f32) * ts)
+                .collect();
+            ring.sort_by(|a, b| a.distance_squared(pos).total_cmp(&b.distance_squared(pos)));
+            if let Some(p) = ring.into_iter().find(|p| fits(*p)) {
+                eprintln!("[game] arrival at {:.0},{:.0} on {} is blocked; moved to {:.0},{:.0}", pos.x, pos.y, self.loaded.map.name, p.x, p.y);
+                return p;
+            }
+        }
+        eprintln!("[game] no free spot near {:.0},{:.0} on {}", pos.x, pos.y, self.loaded.map.name);
+        pos
     }
 
     /// Moves along each axis separately so actors slide along walls.
@@ -889,6 +925,7 @@ impl Game {
         let mut runner = std::mem::take(&mut self.runner);
         runner.update(self, dt);
         self.runner = runner;
+        self.update_cutscene(dt);
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
         if !frozen && !self.on_title() {
@@ -900,8 +937,11 @@ impl Game {
         self.update_combat(dt, frozen, consumed);
         if !frozen {
             self.update_projectiles(dt);
-            self.update_fx(dt);
             self.update_spawners(dt);
+        }
+        // Effects and timed lights also play on during cut-scenes (they are part of the show).
+        if !frozen || self.cutscene_active() {
+            self.update_fx(dt);
         }
         if let Some(m) = &mut self.click_marker {
             m.1 += dt;
@@ -1287,7 +1327,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.cutscene_status(),
             self.ui_hidden,
             self.window_status(),
             self.npc_items_status(),
@@ -1350,6 +1391,7 @@ impl Game {
         let world = WorldState::from_ron(&s)?;
         self.slot = Some(slot.to_string());
         self.ui_hidden = false;
+        self.reset_cutscene();
         let map = world.current_map.clone();
         let pos = vec2(world.player_pos.0, world.player_pos.1);
         self.player.facing = world.player_facing;
@@ -1459,7 +1501,7 @@ impl Game {
             render::draw_layer(m, layer, &sets, ts, view, WHITE);
         }
 
-        if let Some(ambient) = render::lighting::ambient(self.loaded.map.lighting, self.world.hour) {
+        if let Some(ambient) = self.scene_ambient(render::lighting::ambient(self.loaded.map.lighting, self.world.hour)) {
             let lights = self.lights();
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(&cam, ambient, &lights, ts, get_time());
             set_camera(&cam);
@@ -1500,6 +1542,7 @@ impl Game {
         if !self.on_title() {
             self.draw_aim_cursor();
         }
+        self.draw_cutscene_bars();
         self.draw_fps();
         self.ui.draw_toasts();
         self.ui.draw_dialog();
@@ -1759,6 +1802,44 @@ impl ActionHost for Game {
                 self.ui_hidden = !*visible;
                 Step::Continue
             }
+            Action::Cutscene { function } => {
+                self.begin_cutscene(function);
+                Step::Insert(vec![(Action::RunScript { function: function.clone() }, ctx.clone()), (Action::EndCutscene, ctx.clone())])
+            }
+            Action::EndCutscene => {
+                self.end_cutscene();
+                Step::Continue
+            }
+            Action::WalkTo { target, x, y } => {
+                if self.walk_to(target, ctx, *x, *y) {
+                    Step::Block
+                } else {
+                    Step::Continue
+                }
+            }
+            Action::Approach { target, to } => {
+                if self.approach(target, to, ctx) {
+                    Step::Block
+                } else {
+                    Step::Continue
+                }
+            }
+            Action::Place { target, x, y } => {
+                self.place(target, ctx, *x, *y);
+                Step::Continue
+            }
+            Action::Dim { amount, seconds } => {
+                self.dim_to(*amount, *seconds);
+                Step::Continue
+            }
+            Action::SetSpawners { map, zone, active } => {
+                self.set_spawners(map, zone, *active);
+                Step::Continue
+            }
+            Action::DefeatEnemies => {
+                self.defeat_enemies();
+                Step::Continue
+            }
             Action::OpenShop { target } => {
                 match self.entity_index(target, ctx.owner) {
                     Some(i) if self.try_open_shop(i, false) => {}
@@ -1809,10 +1890,12 @@ impl ActionHost for Game {
     }
 
     fn blocked(&mut self) -> bool {
-        self.ui.dialog_open()
-            || !matches!(self.fade, Fade::None)
-            || self.player.move_target.is_some()
-            || self.loaded.entities.iter().any(|e| e.body.move_target.is_some())
+        let walking = self.player.move_target.is_some() || self.loaded.entities.iter().any(|e| e.body.move_target.is_some());
+        if !walking {
+            // Characters that walked up to someone turn to face them.
+            self.apply_face_after();
+        }
+        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking
     }
 
     fn script_condition(&mut self, function: &str, ctx: &ActionCtx) -> bool {

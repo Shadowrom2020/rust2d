@@ -117,6 +117,7 @@ impl Game {
     pub(super) fn new_game(&mut self) {
         self.reset_world();
         self.ui_hidden = false;
+        self.reset_cutscene();
         let (map, spawn) = (self.project.config.start_map.clone(), self.project.config.start_spawn.clone());
         self.transition(&map, Arrival::Spawn(spawn));
     }
@@ -390,6 +391,21 @@ impl Game {
         } else {
             self.audio.play(&self.project.config.sfx.hit);
         }
+    }
+
+    /// `DefeatEnemies`: defeats every living hostile character on the map. Returns how many.
+    pub(super) fn defeat_enemies(&mut self) -> usize {
+        let hostile: Vec<usize> = (0..self.loaded.entities.len())
+            .filter(|&i| {
+                let e = &self.loaded.entities[i];
+                e.active && e.hostile && e.max_hp > 0 && e.kind == crate::entity::EntityKind::Character
+            })
+            .collect();
+        for &i in &hostile {
+            self.loaded.entities[i].hp = 0;
+            self.defeat(i);
+        }
+        hostile.len()
     }
 
     fn defeat(&mut self, i: usize) {
