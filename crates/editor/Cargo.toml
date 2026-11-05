@@ -12,3 +12,5 @@ egui-phosphor = "0.9"
 anyhow.workspace = true
 ron.workspace = true
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+# Writes the squashfs image of AppImage exports (export.rs / package.rs).
+backhand = { version = "0.25", default-features = false, features = ["gzip"] }
