@@ -159,10 +159,10 @@ impl Game {
         if !self.combat.enabled() || frozen {
             return;
         }
-        if !key_consumed && input::pressed(KeyCode::Q) {
+        if !key_consumed && input::act_pressed(input::Act::SwitchWeapon) {
             self.cycle_weapon();
         }
-        if !key_consumed && self.combat.cooldown <= 0.0 && input::any_pressed(&[KeyCode::X]) {
+        if !key_consumed && self.combat.cooldown <= 0.0 && input::act_pressed(input::Act::Attack) {
             self.order = None;
             self.attack_at(None);
         }

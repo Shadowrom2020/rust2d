@@ -42,10 +42,12 @@ Instructions for every session (people and coding agents) that implements roadma
    them, add new ideas to *Backlog*. Keep every item's block in the same shape. Don't delete
    design notes of open items; replace them.
 
-## 0.3.0 — Heroes and foes (progression and combat)
+## 0.3.0 — Heroes, foes and feel (progression, combat, player comfort)
 
-Theme: the player grows, enemies get interesting. All three systems are optional per project
-(disabled or absent → nothing changes for existing games).
+Theme: the player grows, enemies get interesting, and the game feels good in the hands, with
+keyboard, mouse or controller. The progression systems are optional per project (disabled or
+absent → nothing changes for existing games). The *Controls and feel* items (input actions and
+gamepad, key rebinding, screen shake, save thumbnails) were planned for 0.4.0 and moved here.
 
 ### [x] Experience and levels — `feature/progression`
 
@@ -234,11 +236,7 @@ where that starts (no dead keys); a log longer than 1000 lines (edited saves) is
 the lines and the answer; scroll with keys; quick save / load keeps the log; a crafted save with
 1100 lines keeps 1000 (oldest dropped).
 
-## 0.4.0 — Controls and feel (player comfort)
-
-Theme: the game feels good in the hands, with keyboard, mouse or controller.
-
-### [ ] Input actions and gamepad — `feature/gamepad`
+### [x] Input actions and gamepad — `feature/gamepad`
 
 **Goal.** One input layer of named actions, driven by the keyboard and by a gamepad.
 
@@ -252,6 +250,17 @@ keys; names as in `input::key_from_name`). Gamepad through the `gilrs` crate (ma
 gamepad API; the only new dependency): left stick / d-pad move, A confirm and interact, B cancel,
 X attack, Y inventory, bumpers switch weapon / quick-bar page, Start pause, Select map; the loot
 window gets d-pad selection (today mouse-only). Autoplay `pad BUTTON` injects buttons.
+
+**Decided while building.** The actions are `input::Act` (`Up`, `Down`, `Left`, `Right`, `Run`,
+`Confirm`, `Cancel`, `Pause`, `Attack`, `SwitchWeapon`, `Character`, `Skills`, `Spells`, `NextTab`,
+`PrevTab`, `Map`, `Journal`, `HideUi`, `Drop`, `Use`, `TakeAll`, `ZoomIn`, `ZoomOut`, `MapCenter`,
+`Quick1..8`, `QuickSave`, `QuickLoad`, `Debug`) with fixed defaults in `Act::keys()` /
+`Act::pad()`; the `Settings` bindings come with *Key rebinding*. Text fields keep raw keys
+(`input::nav_pressed` = arrows or pad, not WASD). Pad buttons are `input::Pad` (gilrs, polled in
+`Game::frame`, left stick = d-pad with hysteresis); autoplay `pad BUTTON[+BUTTON]` and `padhold
+BUTTON SECS`; `status()` prints `pad=` (the connected gamepad). The game now links `libudev`
+(CI installs `libudev-dev`); Flatpaks get `--device=all` (`--device=input` needs Flatpak 1.15.6).
+Quick-bar slots have no buttons (use items from the character window).
 
 **Verify.** Every autoplay script of the README still works (key names unchanged); `pad a`
 walks a dialog; screenshots of inventory / shop / loot operated by pad commands.
@@ -289,7 +298,7 @@ show a placeholder. Play time and date are already stored.
 
 **Verify.** Save, open Load, screenshot shows the thumbnail; delete removes both files.
 
-## 0.5.0 — Editor productivity (creator tools)
+## 0.4.0 — Editor productivity (creator tools)
 
 Theme: faster map making and faster iteration on scripts.
 
@@ -333,9 +342,9 @@ draws grass/dirt and grass/water edge tiles and defines the terrains; the starte
 them up (bump `STARTER_RULES`). This is the biggest item of the release because of the art.
 
 **Verify.** Editor script: `tool terrain`, `terrain grass`, `drag …`, screenshot shows edges;
-undo; a map painted with v0.4.0 looks unchanged.
+undo; a map painted with v0.3.0 looks unchanged.
 
-## 0.6.0 — Living world
+## 0.5.0 — Living world
 
 Theme: the world moves without the player: weather, routines, companions, crafting, portraits.
 
@@ -387,7 +396,7 @@ A proper node-graph dialog editor stays in the backlog.
 
 **Verify.** Screenshot of a dialog with the elder; the player's own lines show the hero.
 
-## 0.7.0 — Beyond Linux (reach)
+## 0.6.0 — Beyond Linux (reach)
 
 Theme: games made with rust2d reach more players.
 

@@ -34,7 +34,7 @@ const CHARS_PER_SEC: f32 = 60.0;
 const FONT: u16 = 26;
 
 fn confirm_pressed() -> bool {
-    input::any_pressed(&[KeyCode::E, KeyCode::Space, KeyCode::Enter])
+    input::act_pressed(input::Act::Confirm)
 }
 
 impl Ui {
@@ -75,10 +75,10 @@ impl Ui {
             d.revealed = if self.text_speed <= 0.0 { len } else { (d.revealed + dt * CHARS_PER_SEC * self.text_speed).min(len) };
             if let Some((opts, _, sel)) = &mut d.choice {
                 let n = opts.len().max(1);
-                if input::pressed(KeyCode::Up) || input::pressed(KeyCode::W) {
+                if input::act_pressed(input::Act::Up) {
                     *sel = (*sel + n - 1) % n;
                 }
-                if input::pressed(KeyCode::Down) || input::pressed(KeyCode::S) {
+                if input::act_pressed(input::Act::Down) {
                     *sel = (*sel + 1) % n;
                 }
             }

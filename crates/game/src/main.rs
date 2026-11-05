@@ -162,6 +162,8 @@ struct Autoplay {
     cmds: std::collections::VecDeque<Vec<String>>,
     timer: f32,
     held: Vec<KeyCode>,
+    /// Gamepad buttons held by `padhold`.
+    held_pad: Vec<rust2d_engine::runtime::input::Pad>,
     /// Screenshot to take after the next frame is drawn.
     shot: Option<String>,
     mouse: Option<Vec2>,
@@ -180,12 +182,12 @@ impl Autoplay {
             .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .filter(|c| !c.is_empty())
             .collect();
-        Autoplay { cmds, timer: 0.0, held: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new() }
+        Autoplay { cmds, timer: 0.0, held: Vec::new(), held_pad: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new() }
     }
 
     /// Advances the script; returns false to quit.
     fn step(&mut self, game: &Game) -> bool {
-        use rust2d_engine::runtime::input::{inject, inject_mouse, key_from_name, MouseInject};
+        use rust2d_engine::runtime::input::{inject, inject_mouse, inject_pad, key_from_name, MouseInject, Pad};
         // Queued mouse frames (clicks, drags) play one per frame; afterwards the cursor rests.
         if let Some(f) = self.mouse_frames.pop_front() {
             self.mouse = Some(f.pos);
@@ -203,10 +205,13 @@ impl Autoplay {
         if self.timer > 0.0 {
             self.timer -= get_frame_time();
             inject(&self.held, &[]);
+            inject_pad(&self.held_pad, &[]);
             return true;
         }
         self.held.clear();
+        self.held_pad.clear();
         inject(&[], &[]);
+        inject_pad(&[], &[]);
         while let Some(cmd) = self.cmds.pop_front() {
             let arg = |i: usize| cmd.get(i).map(String::as_str).unwrap_or("");
             let secs = |i: usize| arg(i).parse::<f32>().unwrap_or(0.5);
@@ -222,6 +227,24 @@ impl Autoplay {
                     inject(&keys, &keys); // held too, so "shift+g" works
                     // Let one frame consume the press, then idle a little.
                     self.timer = 0.1;
+                    return true;
+                }
+                // pad BUTTON[+BUTTON]: press gamepad buttons (a b x y lb rb lt rt select start ls rs
+                // up down left right) · padhold BUTTON SECS: hold them
+                "pad" | "padhold" => {
+                    let buttons: Vec<Pad> = arg(1).split('+').filter_map(Pad::from_name).collect();
+                    if buttons.is_empty() {
+                        println!("[autoplay] pad: unknown button '{}'", arg(1));
+                        continue;
+                    }
+                    if arg(0) == "pad" {
+                        inject_pad(&buttons, &buttons);
+                        self.timer = 0.1;
+                    } else {
+                        inject_pad(&buttons, &[]);
+                        self.timer = secs(2);
+                        self.held_pad = buttons;
+                    }
                     return true;
                 }
                 // click X Y [right]: mouse click on a tile (tile coordinates)

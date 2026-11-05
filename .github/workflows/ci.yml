@@ -57,7 +57,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev libudev-dev
       # No separate `cargo build`: clippy checks every target (all features, so xtask's dist
       # too) and `cargo test` compiles every crate, binaries included.
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -87,7 +87,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libasound2-dev libudev-dev
       - uses: ./.github/actions/packages
       - uses: actions/upload-artifact@v7
         with:

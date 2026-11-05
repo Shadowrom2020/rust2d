@@ -33,6 +33,7 @@ use macroquad::prelude::*;
 use crate::audio::Audio;
 use crate::defs::{Behavior, Weapon};
 use crate::entity::{EntityKind, Facing};
+use input::Act;
 use crate::events::runner::{conditions_met, ActionCtx, ActionHost, ActionRunner, Step};
 use crate::events::{Action, GameEvent, Trigger};
 use crate::map::transition::edge_destination;
@@ -834,6 +835,7 @@ impl Game {
 
     /// Runs one frame: update and draw.
     pub fn frame(&mut self) {
+        input::poll_pad();
         let dt = get_frame_time().min(0.05);
         self.update(dt);
         self.draw();
@@ -867,16 +869,16 @@ impl Game {
         if !self.on_title() && self.project.config.day_minutes > 0.0 {
             self.world.hour = (self.world.hour + dt * 24.0 / (self.project.config.day_minutes * 60.0)).rem_euclid(24.0);
         }
-        if input::pressed(KeyCode::F3) {
+        if input::act_pressed(Act::Debug) {
             self.debug = !self.debug;
         }
-        if input::pressed(KeyCode::F5) {
+        if input::act_pressed(Act::QuickSave) {
             match self.save_game("quick") {
                 Ok(()) => self.ui.toast("Game saved".into()),
                 Err(e) => self.ui.toast(format!("Save failed: {e}")),
             }
         }
-        if input::pressed(KeyCode::F9) {
+        if input::act_pressed(Act::QuickLoad) {
             if let Err(e) = self.load_game("quick") {
                 self.ui.toast(format!("Load failed: {e}"));
             }
@@ -921,7 +923,7 @@ impl Game {
         let (shop_key, shop_mouse) = (shop_key || win_key, shop_mouse || win_mouse);
         let allow_windows = allow_windows && !win_mouse;
         // H hides / shows the HUD.
-        let hide_key = allow_windows && !input.consumed && !shop_key && input::pressed(KeyCode::H);
+        let hide_key = allow_windows && !input.consumed && !shop_key && input::act_pressed(Act::HideUi);
         if hide_key {
             self.ui_hidden = !self.ui_hidden;
             if self.ui_hidden {
@@ -1002,19 +1004,19 @@ impl Game {
         }
 
         let mut dir = Vec2::ZERO;
-        if input::down(KeyCode::Left) || input::down(KeyCode::A) {
+        if input::act_down(Act::Left) {
             dir.x -= 1.0;
         }
-        if input::down(KeyCode::Right) || input::down(KeyCode::D) {
+        if input::act_down(Act::Right) {
             dir.x += 1.0;
         }
-        if input::down(KeyCode::Up) || input::down(KeyCode::W) {
+        if input::act_down(Act::Up) {
             dir.y -= 1.0;
         }
-        if input::down(KeyCode::Down) || input::down(KeyCode::S) {
+        if input::act_down(Act::Down) {
             dir.y += 1.0;
         }
-        let mut run = if input::down(KeyCode::LeftShift) { 1.8 } else { 1.0 };
+        let mut run = if input::act_down(Act::Run) { 1.8 } else { 1.0 };
         if dir != Vec2::ZERO {
             // Keyboard movement cancels click-to-move.
             self.order = None;
@@ -1069,7 +1071,7 @@ impl Game {
             }
         }
 
-        if !key_consumed && input::any_pressed(&[KeyCode::E, KeyCode::Space, KeyCode::Enter]) {
+        if !key_consumed && input::act_pressed(Act::Confirm) {
             self.interact();
         }
     }
@@ -1366,7 +1368,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1381,6 +1383,7 @@ impl Game {
             self.ai_status(),
             self.bestiary_status(),
             self.world.dialog_log.len(),
+            input::pad_name(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),

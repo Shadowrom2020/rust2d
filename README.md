@@ -32,6 +32,8 @@ Current version: **0.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed
 
 ## Quick start
 
+Building needs a Rust toolchain and the ALSA and udev headers (Debian / Ubuntu: `sudo apt install libasound2-dev libudev-dev`; Fedora: `alsa-lib-devel systemd-devel`).
+
 ```sh
 cargo run -p rust2d-engine --example gen_example   # (re)generate example_project/
 cargo build --workspace                            # builds game + editor
@@ -70,6 +72,23 @@ The example project contains a short quest: talk to the elder, get the key from 
 | Window close button | While playing: asks *Save and exit* (to the slot "Save and quit" uses; not possible in the middle of an event), *Exit without saving* or *Cancel*. On the main menu or the game-over screen the game closes right away. |
 | F5 / F9 | Quick save / quick load (`<project>/saves/quick.ron`) |
 | F3 | Debug overlay (collision, zones, edge strips, hitboxes) |
+
+**Gamepad**: any controller Linux knows (Xbox, PlayStation, Switch Pro, generic ones) works next to the keyboard and mouse; the left stick and the d-pad move and navigate. Text fields (character name, save names) take Enter / A to confirm and Escape / B to go back.
+
+| Button (Xbox names) | Action |
+|---|---|
+| Left stick / d-pad | Move; navigate menus, windows, the map |
+| A | Interact, talk, advance dialogs, choose, use the selected item, buy / sell; on the map: center on the player |
+| B | Close a window, go back in a menu |
+| Start | Pause menu (also closes windows) |
+| X | Attack (while aiming a spell: cast straight ahead); in a loot window: take all; on the Load page: delete the save |
+| Y | Character window (inventory) |
+| RB / LB | Next / previous tab (character window, journal, shop and loot sides); on the map: zoom in / out |
+| LT (hold) | Run; buy / sell ten |
+| RT | Switch weapon |
+| Select | Map |
+| Right stick click | Journal |
+| Left stick click | Hide / show the interface |
 
 ### Editor basics
 
@@ -144,7 +163,7 @@ The executable is a copy of `rust2d-game`; started without arguments it runs the
 **Linux packages** (ticked in the export dialog, built from the bundle):
 
 - **AppImage** — one file that runs on most distributions: players make it executable (`chmod +x`) and start it; without FUSE, `./<game>-x86_64.AppImage --appimage-extract-and-run` works. The editor writes it itself; only the official AppImage runtime is downloaded once (from github.com/AppImage, checked against a pinned SHA-256, cached in `~/.cache/rust2d/`).
-- **Flatpak bundle** — a sandboxed single file: players install it with `flatpak install --user <game>.flatpak` (Flatpak fetches the freedesktop runtime from Flathub) and start it from the app menu or with `flatpak run <app id>`; saves go to `~/.var/app/<app id>/data/<game>/saves`. Needs the `flatpak` command on the creator's machine (not the runtime). Set the **app id** (default `org.rust2d.<game>`) and the **runtime** (freedesktop 25.08 or 26.08) in the dialog. The game gets a window (X11; XWayland on Wayland desktops), the GPU and sound — nothing else.
+- **Flatpak bundle** — a sandboxed single file: players install it with `flatpak install --user <game>.flatpak` (Flatpak fetches the freedesktop runtime from Flathub) and start it from the app menu or with `flatpak run <app id>`; saves go to `~/.var/app/<app id>/data/<game>/saves`. Needs the `flatpak` command on the creator's machine (not the runtime). Set the **app id** (default `org.rust2d.<game>`) and the **runtime** (freedesktop 25.08 or 26.08) in the dialog. The game gets a window (X11; XWayland on Wayland desktops), sound and device access (the GPU and gamepads) — nothing else.
 
 Both get a desktop entry and an **icon**: the player character, drawn large, or a PNG picked in the dialog.
 
