@@ -23,7 +23,9 @@ impl Rgba {
         let mut dec = png::Decoder::new(Cursor::new(bytes));
         dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
         let mut reader = dec.read_info().context("not a PNG image")?;
-        let mut buf = vec![0; reader.output_buffer_size()];
+        // None: the image's size doesn't fit in memory (a broken or hostile file).
+        let size = reader.output_buffer_size().context("PNG image too large")?;
+        let mut buf = vec![0; size];
         let info = reader.next_frame(&mut buf).context("reading PNG")?;
         let data = &buf[..info.buffer_size()];
         let px: Vec<u8> = match info.color_type {
@@ -108,5 +110,33 @@ mod tests {
         assert_eq!(big.get(5, 3), [0, 0, 255, 128]);
         assert_eq!(big.resized(3, 2), img);
         assert_eq!(img.with_canvas(4, 1).get(0, 0), [255, 0, 0, 255]);
+    }
+
+    /// Every image of the example project decodes (all PNG colour types it uses) and survives
+    /// an encode / decode round trip unchanged.
+    #[test]
+    fn example_images_roundtrip() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../example_project");
+        let mut n = 0;
+        for dir in ["sprites", "tilesets"] {
+            for e in std::fs::read_dir(root.join(dir)).unwrap().flatten() {
+                let p = e.path();
+                if p.extension().is_some_and(|x| x == "png") {
+                    let img = Rgba::decode(&std::fs::read(&p).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                    assert_eq!(img.px.len(), (img.w * img.h * 4) as usize, "{}", p.display());
+                    assert_eq!(Rgba::decode(&img.encode().unwrap()).unwrap(), img, "{}", p.display());
+                    n += 1;
+                }
+            }
+        }
+        assert!(n > 20, "only {n} images found");
+    }
+
+    #[test]
+    fn broken_data_is_an_error() {
+        assert!(Rgba::decode(b"not a png").is_err());
+        let mut png = Rgba::new(4, 4).encode().unwrap();
+        png.truncate(png.len() / 2);
+        assert!(Rgba::decode(&png).is_err());
     }
 }
