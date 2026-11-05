@@ -31,7 +31,7 @@ jobs:
     name: Release
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Version
@@ -58,7 +58,7 @@ jobs:
         if: steps.v.outputs.exists == 'false' || inputs.dry_run
       - name: Packages of the dry run
         if: inputs.dry_run
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust2d-packages
           path: dist/
