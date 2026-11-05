@@ -52,6 +52,8 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   offers human and goblin bodies, 6 skin tones, 4 hair styles, 6 hair colors and 3 beard choices.
 
 ### Gameplay
+- Trade window: the mouse wheel moves the selection up / down (on the list under the pointer,
+  else the active side); the list scrolls along.
 - **Scripted spell effects**: new script functions (also trigger actions) `aim(fn)` (magic
   targeting; the click calls `fn(x, y)`, a spell's cost is paid only then), `fly(sheet, x, y, fn,
   #{ speed, frames, fps, scale, light })` (an animated, glowing sprite flies to a point and calls
