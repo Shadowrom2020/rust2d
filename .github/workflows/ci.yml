@@ -23,7 +23,7 @@ jobs:
     name: Branch policy
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -44,7 +44,7 @@ jobs:
     name: Build, lint, test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -60,7 +60,7 @@ jobs:
     name: Version
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
@@ -85,7 +85,7 @@ jobs:
     name: Packages
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Needed?
@@ -111,7 +111,7 @@ jobs:
         if: steps.need.outputs.run == 'true'
       - uses: ./.github/actions/packages
         if: steps.need.outputs.run == 'true'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: steps.need.outputs.run == 'true'
         with:
           name: rust2d-packages
