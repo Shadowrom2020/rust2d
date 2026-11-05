@@ -752,6 +752,7 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
             match &t.on {
                 TriggerOn::UseItem { item } if !item.is_empty() => format!(" [{item}]"),
                 TriggerOn::Custom { name } => format!(" [{name}]"),
+                TriggerOn::HpBelow { percent } => format!(" [{percent} %]"),
                 _ => String::new(),
             },
             t.conditions.len(),
@@ -777,6 +778,11 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
                     }
                     TriggerOn::Custom { name } => {
                         ui.add(egui::TextEdit::singleline(name).hint_text("event name").desired_width(110.0));
+                    }
+                    TriggerOn::HpBelow { percent } => {
+                        ui.add(egui::DragValue::new(percent).range(1..=99).suffix(" %")).on_hover_text(
+                            "Runs when the character's HP falls below this share of its max HP (and it survives the hit) — e.g. a boss calling for help at 50 %. Again after healing above it.",
+                        );
                     }
                     _ => {}
                 }

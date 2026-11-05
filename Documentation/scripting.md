@@ -289,6 +289,18 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
+| `hp_of(target)` | A character's HP right now: `"player"`, `"self"` (or `SELF`) or the name of a character on this map; `-1` if there is none (or it can't be hurt). |
+
+A character's *HP below %* trigger runs when its HP falls below that share of its max HP and it
+survives the hit, e.g. a boss calling for help at half its HP. It runs again if the character
+is healed above the threshold and falls below it once more; tick *once* to prevent that.
+
+```rust
+fn ogre_hurt() {                      // the ogre's "HP below 30 %" trigger runs this
+    say(SELF, "You will pay for that!");
+    if hp_of(SELF) < 3 { apply_effect("self", "strength", 50, 20); }
+}
+```
 
 ### Cut-scenes
 

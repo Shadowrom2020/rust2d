@@ -61,10 +61,13 @@ impl Game {
             if hp > 0 {
                 e.hp = (e.hp + hp).min(e.max_hp);
             } else {
+                let before = e.hp;
                 e.hp += hp;
                 e.flash = 0.15;
                 if e.hp <= 0 {
                     self.defeat(i);
+                } else {
+                    self.hp_dropped(i, before);
                 }
             }
         }

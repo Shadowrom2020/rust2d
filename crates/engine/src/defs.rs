@@ -669,8 +669,27 @@ pub enum Behavior {
     Static,
     /// Walks randomly within `radius` tiles of its start position.
     Wander { radius: f32 },
-    /// Runs at the player when closer than `sight` tiles, otherwise wanders near home.
-    Chase { sight: f32 },
+    /// Runs at the player when it sees them within `sight` tiles, otherwise wanders near home.
+    Chase {
+        sight: f32,
+        /// Gives up and walks back home when this many tiles from home (0 = never).
+        #[serde(default)]
+        leash: f32,
+        /// Runs away from the player below this fraction of its max HP (0 = never).
+        #[serde(default)]
+        flee_below: f32,
+        /// Shooters back off to stay this many tiles from the player (0 = they just stop
+        /// coming closer once the player is well within range).
+        #[serde(default)]
+        keep_distance: f32,
+    },
+}
+
+impl Behavior {
+    /// Chasing with only a sight range (no leash, never flees, no kept distance).
+    pub fn chase(sight: f32) -> Self {
+        Behavior::Chase { sight, leash: 0.0, flee_below: 0.0, keep_distance: 0.0 }
+    }
 }
 
 /// A character: a layered model (`appearance` + `equipment`) with behavior and combat values.
@@ -1054,6 +1073,12 @@ fn is_zero_u32(n: &u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_chase_behavior_loads() {
+        let b: Behavior = ron::from_str("Chase(sight: 4.0)").unwrap();
+        assert_eq!(b, Behavior::chase(4.0));
+    }
 
     #[test]
     fn loot_rolls() {

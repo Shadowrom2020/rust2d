@@ -62,6 +62,11 @@ impl ActionRunner {
         self.queue.extend(actions.iter().cloned().map(|a| (a, ctx.clone())));
     }
 
+    /// Adds the queued actions of `other` after this runner's own.
+    pub fn append(&mut self, other: ActionRunner) {
+        self.queue.extend(other.queue);
+    }
+
     fn push_front(&mut self, items: Vec<(Action, ActionCtx)>) {
         for item in items.into_iter().rev() {
             self.queue.push_front(item);

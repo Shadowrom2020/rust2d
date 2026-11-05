@@ -32,6 +32,8 @@ pub enum GameEvent {
     Unlock,
     /// An opened prop was locked again.
     Lock,
+    /// A character's HP dropped from `from` to `to` (fractions of its max HP, still alive).
+    HpBelow { from: f32, to: f32 },
 }
 
 /// Which events a trigger reacts to.
@@ -50,6 +52,8 @@ pub enum TriggerOn {
     Unlock,
     /// The owning prop was locked again (by the player with its key, or by a Set locked action).
     Lock,
+    /// The owning character's HP fell below `percent` of its max HP (and it is still alive).
+    HpBelow { percent: u32 },
 }
 
 /// Where a trigger lives. The game only sends some events to each kind of owner (see
@@ -79,7 +83,7 @@ impl TriggerOwner {
             (O::Map | O::Zone | O::Character | O::Prop | O::Pickup, T::Custom { .. }) => true,
             (O::Map, T::MapEnter) => true,
             (O::Zone, T::Enter | T::Leave | T::Interact) => true,
-            (O::Character, T::Interact | T::UseItem { .. } | T::Defeat) => true,
+            (O::Character, T::Interact | T::UseItem { .. } | T::Defeat | T::HpBelow { .. }) => true,
             (O::Prop, T::Interact | T::UseItem { .. } | T::Unlock | T::Lock) => true,
             (O::Pickup, T::Interact | T::UseItem { .. }) => true,
             (O::ItemUse, T::UseItem { .. }) => true,
@@ -139,6 +143,11 @@ impl TriggerOn {
                 want.is_empty() || want == item
             }
             (TriggerOn::Custom { name: want }, GameEvent::Custom { name }) => want == name,
+            // Fires when the HP crosses the threshold on its way down.
+            (TriggerOn::HpBelow { percent }, GameEvent::HpBelow { from, to }) => {
+                let p = *percent as f32 / 100.0;
+                *from >= p && *to < p
+            }
             _ => false,
         }
     }
@@ -154,6 +163,7 @@ impl TriggerOn {
             TriggerOn::Defeat => "Defeated",
             TriggerOn::Unlock => "Unlocked",
             TriggerOn::Lock => "Locked again",
+            TriggerOn::HpBelow { .. } => "HP below %",
         }
     }
 
@@ -168,6 +178,7 @@ impl TriggerOn {
             TriggerOn::Defeat,
             TriggerOn::Unlock,
             TriggerOn::Lock,
+            TriggerOn::HpBelow { percent: 50 },
         ]
     }
 }
@@ -708,6 +719,17 @@ mod tests {
         assert!(!TriggerOn::Interact.matches(&GameEvent::Enter));
         let c = TriggerOn::Custom { name: "boom".into() };
         assert!(c.matches(&GameEvent::Custom { name: "boom".into() }));
+    }
+
+    #[test]
+    fn hp_below_fires_on_crossing() {
+        let t = TriggerOn::HpBelow { percent: 50 };
+        assert!(t.matches(&GameEvent::HpBelow { from: 0.6, to: 0.4 }));
+        assert!(t.matches(&GameEvent::HpBelow { from: 0.5, to: 0.3 }));
+        assert!(!t.matches(&GameEvent::HpBelow { from: 0.4, to: 0.2 }), "already below");
+        assert!(!t.matches(&GameEvent::HpBelow { from: 0.9, to: 0.6 }), "not there yet");
+        assert!(TriggerOwner::Character.allows(&t));
+        assert!(!TriggerOwner::Prop.allows(&t));
     }
 
     #[test]

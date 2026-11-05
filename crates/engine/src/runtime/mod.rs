@@ -1,5 +1,6 @@
 //! The game runtime: loads a project and plays it.
 
+mod ai;
 mod charwin;
 mod combat;
 mod cutscene;
@@ -146,6 +147,8 @@ struct RtEntity {
     inventory: Vec<crate::inventory::ItemStack>,
     /// Running status effects (not saved, like the HP).
     effects: Vec<crate::effects::ActiveEffect>,
+    /// Chasing characters: hunting, returning home, fleeing (not saved).
+    ai: ai::Ai,
 }
 
 struct Loaded {
@@ -410,6 +413,7 @@ impl Game {
             equipment: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.equipment.clone()).unwrap_or_default(),
             inventory: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.inventory.clone()).unwrap_or_default(),
             effects: Vec::new(),
+            ai: ai::Ai::default(),
         };
         npc_items::apply_gear(&self.project.db, &mut rt);
         rt
@@ -939,7 +943,10 @@ impl Game {
 
         let mut runner = std::mem::take(&mut self.runner);
         runner.update(self, dt);
-        self.runner = runner;
+        // Actions queued while it ran (triggers fired by an action, e.g. the 'Defeated' triggers
+        // of characters a 'Damage area' defeats) went to the stand-in runner: keep them.
+        let queued = std::mem::replace(&mut self.runner, runner);
+        self.runner.append(queued);
         self.update_cutscene(dt);
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
@@ -1359,7 +1366,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1371,6 +1378,7 @@ impl Game {
             self.skills_status(),
             self.progression_status(),
             self.effects_status(),
+            self.ai_status(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),

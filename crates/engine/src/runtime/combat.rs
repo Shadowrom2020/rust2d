@@ -3,7 +3,7 @@
 use macroquad::prelude::*;
 
 use super::{input, Arrival, Game, Source};
-use crate::defs::{Behavior, CharacterDef, Ranged, SpriteRef};
+use crate::defs::{CharacterDef, Ranged, SpriteRef};
 use crate::entity::Facing;
 use crate::events::GameEvent;
 use crate::state::WorldState;
@@ -175,7 +175,7 @@ impl Game {
                 .loaded
                 .entities
                 .iter()
-                .position(|e| e.active && e.hostile && e.damage > 0 && !crate::effects::stunned(&e.effects) && e.body.rect().overlaps(&me));
+                .position(|e| e.active && e.hostile && e.damage > 0 && !e.ai.harmless() && !crate::effects::stunned(&e.effects) && e.body.rect().overlaps(&me));
             if let Some(i) = hit {
                 let e = &self.loaded.entities[i];
                 let (dmg, from) = (crate::effects::scale_damage(&e.effects, e.damage), e.body.pos);
@@ -290,7 +290,7 @@ impl Game {
         let mut shots = Vec::new();
         for i in 0..self.loaded.entities.len() {
             let e = &mut self.loaded.entities[i];
-            if !e.active || !e.hostile || crate::effects::stunned(&e.effects) {
+            if !e.active || !e.hostile || e.ai.harmless() || crate::effects::stunned(&e.effects) {
                 continue;
             }
             let Some(w) = &e.weapon else { continue };
@@ -402,6 +402,7 @@ impl Game {
     pub(super) fn damage_entity(&mut self, i: usize, dmg: i32, from: Vec2, knockback: f32) {
         let u = self.u();
         let e = &mut self.loaded.entities[i];
+        let before = e.hp;
         e.hp -= (dmg - e.defense - crate::effects::defense_bonus(&e.effects)).max(1);
         e.invuln = HIT_INVULN;
         e.flash = 0.15;
@@ -412,6 +413,7 @@ impl Game {
             self.defeat(i);
         } else {
             self.audio.play(&self.project.config.sfx.hit);
+            self.hp_dropped(i, before);
         }
     }
 
@@ -534,35 +536,6 @@ impl Game {
         let e = &mut self.loaded.entities[i];
         e.body.pos = p;
         e.body.moving = false;
-        true
-    }
-
-    /// Moves a `Chase` character towards the player if in sight; returns true if it chased.
-    pub(super) fn chase(&mut self, i: usize, dt: f32) -> bool {
-        let ts = self.ts();
-        let e = &self.loaded.entities[i];
-        let Behavior::Chase { sight } = e.behavior else { return false };
-        let to_player = self.player.pos - e.body.pos;
-        if self.game_over.is_some() || to_player.length() > sight * ts || to_player.length() < 1.0 {
-            return false;
-        }
-        let dir = to_player.normalize();
-        // Shooters keep their distance once the player is well within range.
-        if let Some(r) = e.weapon.as_ref().and_then(|w| w.ranged.as_ref()) {
-            if to_player.length() < r.range * ts * 0.6 {
-                let e = &mut self.loaded.entities[i];
-                e.body.facing = Facing::from_vec(dir.x, dir.y).unwrap_or(e.body.facing);
-                e.body.moving = false;
-                return true;
-            }
-        }
-        let (body, uid) = (e.body.clone(), e.uid);
-        let p = self.try_move(&body, dir * body.speed * dt, Some(uid), false);
-        let e = &mut self.loaded.entities[i];
-        e.body.facing = Facing::from_vec(dir.x, dir.y).unwrap_or(e.body.facing);
-        e.body.moving = p != e.body.pos;
-        e.body.pos = p;
-        e.body.anim += dt;
         true
     }
 

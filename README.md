@@ -19,6 +19,7 @@ Current version: **0.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed
 - **Real-time combat**: hearts (1 heart = 2 HP) in the **status frame** at the top left (a small portrait of the hero as dressed, the hero's name, the hearts, the mana bar, the defense and the ammo of an equipped bow or crossbow; the held weapon shows in the hero's hand), **melee weapons** with their own damage, speed, reach, swing arc and knockback (sword, spear, axe) and **ranged weapons** (bow, crossbow, with ammo), knockback and invulnerability frames, hostile characters that chase or shoot at the player, `Defeated` triggers, healing items. A defeated player gets a **defeat menu**: *Continue from last save* (the newest save, autosave included), *Start over* (a new game as the same hero) or *Quit to main menu*.
 - **Experience and levels** (optional, *Database › Project › Experience and levels*): defeated characters give the XP set in their definition, completed quests their *Experience reward*. Enough XP raises the level: each level adds max HP (and heals as much), mana and skill points as set in the project; the XP needed grows per level (*XP for level 2* × *Growth* per level, up to the *Highest level*). The status frame shows `Lv N` with a gold XP bar under the mana bar, the character window *Level N (XP a / b)*, and a message announces every level. Triggers use the *Give experience* action and the *Player level* condition, scripts `give_xp(n)`, `xp()` and `level()`. *Defeat all enemies* gives no XP. The example levels up over its fights and quests (slime 5 XP, goblin 12, quests 40 and 80).
 - **Status effects**: timed effects on the player and on characters — *poison* and *burning* (HP lost per second, defense doesn't help), *regeneration*, *slow* / *haste* (movement), *strength* / *weakness* (damage dealt), *shield* (defense) and *stun* (can't move, attack or interact). Weapons give one *on hit* (melee and projectiles), hostile characters *on touch* (or through a melee weapon they hold), potions, traps and scripts with the *Apply effect* / *Cure effect* actions or `apply_effect` / `cure`. Applying a running effect again restarts it (longer duration, stronger strength wins). The status frame shows a badge per effect with the seconds left (e.g. `PSN 5`), characters with effects get small colored markers over their head, poisoned / burning / stunned ones are tinted. The player's effects are saved; a character's last until the map is left. In the example, slimes poison, skeletons in the library slow, and Tilda sells an *Antidote*, an *Elixir of Strength* and a *Swiftness Potion*.
+- **Enemy behaviour** (*Chase player* characters): they notice the player within their *sight* in a clear line (behind walls and trees only within half of it), keep hunting for a few seconds after losing them (walking to where they saw them last), and slide around obstacles. Per character: a *Leash* (beyond that many tiles from home they give up and walk back, harmless on the way), *Flee below %* (badly hurt, they run away and stop attacking) and, for shooters, *Keep distance* (they back off when the player comes closer). An *HP below %* trigger lets a character react when its HP falls below a share of its max HP, e.g. a boss calling for help; scripts read any character's HP with `hp_of(target)`. In the example the goblin archers keep 4 tiles away, flee once wounded and give up 10 tiles from their camp, and a *Bandit Chief* in the south-east of Whisperwood calls two outlaws at half his HP.
 - **Autosave**: the game saves to the *Autosave* slot after every map change (once the new map's *Map enter* events and cut-scenes are done; "Autosaved" shows briefly). Scripts add autosaves with `autosave()`, triggers with the *Autosave* action; it is written as soon as the running event has finished.
 - **Inventory & containers**: slot-based inventory (size set per project, stack size per item) with a grid window (drag to rearrange, double-click to use/equip). Chests, barrels etc. are lootable containers: a window shows the container next to your inventory and you choose what to take (or store things in it). Size, starting contents, lock conditions and an "opened" sprite frame are set in the editor; contents are saved.
 - **Mouse controls**: left-click a tile to walk there (A* pathfinding), left-click an enemy to attack it, right-click an NPC/item/prop to walk over and interact; dialogs, choices and the inventory are clickable.
@@ -195,6 +196,7 @@ A **trigger** = *when* (event) + *if* (all conditions) + *do* (actions), optiona
 | Defeated | a character whose HP reached 0 |
 | Unlocked | a prop whose key lock was opened |
 | Locked | a prop that was locked again |
+| HP below % | a character whose HP fell below that share of its max HP and survived the hit |
 
 The editor only offers the events that can reach a trigger where it is defined:
 
@@ -202,7 +204,7 @@ The editor only offers the events that can reach a trigger where it is defined:
 |---|---|
 | a map | Map enter, Custom event |
 | a zone | Enter, Leave, Interact, Custom event |
-| a character (placed or definition) | Interact, Use item, Defeat, Custom event |
+| a character (placed or definition) | Interact, Use item, Defeat, HP below %, Custom event |
 | a prop (placed or definition) | Interact, Use item, Unlocked, Locked, Custom event |
 | an item pickup on a map | Interact, Use item, Custom event |
 | an item's *On use* | Use item |
@@ -260,7 +262,7 @@ fn shrine_touch() {
   - The script editor completes every engine function with its parameters and a description (a test keeps the completion table in step with the engine).
 - Experience and levels: `xp()`, `level()`; queued `give_xp(n)` (may raise several levels at once; negative takes XP away, the level never drops).
 - Status effects: queued `apply_effect(target, "poison", 1, 6)` (`poison`, `burn`, `regen`, `slow`, `haste`, `stun`, `strength`, `weakness`, `shield`), `cure(target, "poison")`, `cure(target)` (all); immediate `has_effect("poison")` (the player).
-- Other: `player_hp()`, `random(n)` (0..n), `quest_stage(id)` (-1 = not started), `quest_active(id)`, `quest_done(id)`.
+- Other: `player_hp()`, `hp_of(target)` (a character's HP: `"player"`, `"self"` / `SELF` or a name; -1 if none), `random(n)` (0..n), `quest_stage(id)` (-1 = not started), `quest_active(id)`, `quest_done(id)`.
 - `SELF` is the owner entity's uid (or -1). Scripts are sandboxed (no file access, operation limit); errors are logged and never crash the game.
 
 ## Architecture

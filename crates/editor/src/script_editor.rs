@@ -88,6 +88,7 @@ pub const API: &[ApiFn] = api! {
     "apply_effect"(target: Target, effect: Effect, strength: Num, seconds: Num) "Starts a status effect on \"player\" or a character: \"poison\", \"burn\" (HP per second), \"regen\" (HP per second), \"slow\", \"haste\", \"strength\", \"weakness\" (percent), \"shield\" (defense), \"stun\" (queued)";
     "cure"(target: Target, effect: Effect) "Ends a status effect, e.g. cure(\"player\", \"poison\") (queued)";
     "cure"(target: Target) "Ends all status effects (queued)";
+    "hp_of"(target: Target) "A character's HP right now: \"player\", \"self\" (also SELF), or a name on this map; -1 if there is no such character";
     "has_effect"(effect: Effect) "Whether the player has a status effect, e.g. has_effect(\"poison\")";
     "give_xp"(amount: Num) "Gives experience; enough of it raises the level (negative takes it away, the level never drops) (queued)";
     "damage_around"(damage: Num, radius: Num) "Damages every character within radius tiles of the player (queued)";

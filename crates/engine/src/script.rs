@@ -18,6 +18,10 @@ struct Ctx {
     world: WorldState,
     actions: Vec<Action>,
     player: PlayerInfo,
+    /// The entity whose trigger runs the script (`SELF`).
+    owner: Option<u32>,
+    /// Characters on the current map that can be hurt: (uid, name, HP).
+    characters: Vec<(u32, String, i32)>,
 }
 
 /// What scripts can read about the player besides the world state (the game updates it every
@@ -51,6 +55,11 @@ impl ScriptHost {
 
     pub fn set_player(&mut self, info: PlayerInfo) {
         self.ctx.borrow_mut().player = info;
+    }
+
+    /// The current map's characters that can be hurt, as (uid, name, HP), for `hp_of()`.
+    pub fn set_characters(&mut self, characters: Vec<(u32, String, i32)>) {
+        self.ctx.borrow_mut().characters = characters;
     }
 
     /// Compiles every `*.rhai` file in `dir` into one module (functions are global).
@@ -102,6 +111,7 @@ impl ScriptHost {
             let mut c = self.ctx.borrow_mut();
             c.world = std::mem::take(world);
             c.actions.clear();
+            c.owner = owner;
         }
         let mut scope = Scope::new();
         scope.push_constant("SELF", owner.map_or(-1, |u| u as i64));
@@ -214,6 +224,13 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("xp", with!(ctx, |c| c.world.xp.min(i64::MAX as u64) as i64));
     engine.register_fn("level", with!(ctx, |c| c.world.player_level() as i64));
     engine.register_fn("give_xp", with!(ctx, |c, n: i64| c.actions.push(Action::GiveXp { amount: n })));
+    // Characters' HP: "player", "self", a name, or an entity uid (SELF); -1 = no such character.
+    engine.register_fn("hp_of", with!(ctx, |c, t: &str| match t {
+        "player" => c.world.player_hp.unwrap_or(0) as i64,
+        "" | "self" => c.owner.and_then(|u| c.characters.iter().find(|ch| ch.0 == u)).map_or(-1, |ch| ch.2 as i64),
+        name => c.characters.iter().find(|ch| ch.1 == name).map_or(-1, |ch| ch.2 as i64),
+    }));
+    engine.register_fn("hp_of", with!(ctx, |c, uid: i64| c.characters.iter().find(|ch| ch.0 as i64 == uid).map_or(-1, |ch| ch.2 as i64)));
     // Status effects.
     engine.register_fn("apply_effect", with!(ctx, |c, t: &str, kind: &str, s: Dynamic, secs: Dynamic| {
         if let Some(k) = effect_kind(kind) {
@@ -457,6 +474,16 @@ fn fly(sheet: &str, x: &Dynamic, y: &Dynamic, function: &str, o: &Map) -> Action
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hp_of_characters() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn hp() { [hp_of("self"), hp_of(SELF), hp_of("chief"), hp_of("nobody"), hp_of("player")] }"#).unwrap();
+        host.set_characters(vec![(7, "chief".into(), 5), (9, String::new(), 2)]);
+        let mut w = WorldState { player_hp: Some(11), ..Default::default() };
+        let v = host.call_inner(&mut w, "hp", vec![], Some(9)).unwrap().into_typed_array::<i64>().unwrap();
+        assert_eq!(v, vec![2, 2, 5, -1, 11]);
+    }
 
     #[test]
     fn api_mutates_world_and_queues_actions() {

@@ -149,7 +149,7 @@ shows `hp=` falling and `effects=`; Antidote from a quick-bar `slot` cures; Stun
 then `status` tile unchanged; screenshots of the player badges and a slowed skeleton. Save with
 active effects, `press f9`, same `effects=`.
 
-### [ ] Enemy AI — `feature/enemy-ai`
+### [x] Enemy AI — `feature/enemy-ai`
 
 **Goal.** Enemies remember the player for a moment, give up beyond a leash and return home,
 flee at low HP, ranged enemies keep their distance, and bosses react to HP thresholds.
@@ -171,6 +171,15 @@ flee at low HP, ranged enemies keep their distance, and bosses react to HP thres
 - Editor: the Chase radio in the character form gains *Leash*, *Flee below %*, *Keep distance*;
   the exhaustive `Behavior` matches (`database.rs`, `runtime/mod.rs`) are updated.
   `status()`: the `npcs=` list adds `aggro / returning / fleeing` marks.
+
+- Decided while building: the state is `runtime/ai.rs` `Ai` (aggro, last seen, returning,
+  fleeing, way home), `chase()` moved there; noticing needs a clear line only beyond half the
+  sight (dense forests otherwise hide every enemy); blocked steps slide along obstacles, scored by
+  progress towards the goal; `GameEvent::HpBelow { from, to }` matches thresholds that were
+  crossed, so the trigger fires again after healing (tick *once* to avoid that) and no
+  `hp_fired` list is needed; `hp_of` reads a per-frame (uid, name, HP) list in the script context.
+  The goblins flee below 60 % (they have 2 HP: a quarter could never be reached). Found and fixed
+  on the way: actions queued while the runner ran (triggers fired by an action) were dropped.
 
 **Touch points.** `defs.rs`, `runtime/{combat,mod,patrol}.rs`, `events/mod.rs`, `script.rs`,
 editor `database.rs`, `widgets.rs` (event list), gen_example.

@@ -1074,7 +1074,7 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
                 d.behavior = match kind {
                     0 => Behavior::Static,
                     1 => Behavior::Wander { radius: 3.0 },
-                    _ => Behavior::Chase { sight: 4.0 },
+                    _ => Behavior::chase(4.0),
                 };
             }
             match &mut d.behavior {
@@ -1082,14 +1082,44 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
                     ui.label("radius");
                     ui.add(egui::DragValue::new(radius).range(0.5..=64.0).speed(0.1));
                 }
-                Behavior::Chase { sight } => {
+                Behavior::Chase { sight, .. } => {
                     ui.label("sight");
-                    ui.add(egui::DragValue::new(sight).range(0.5..=64.0).speed(0.1)).on_hover_text("Tiles; wanders near home when the player is farther away");
+                    ui.add(egui::DragValue::new(sight).range(0.5..=64.0).speed(0.1))
+                        .on_hover_text("Tiles. It notices the player this close in a clear line, behind walls and trees only within half of it; after losing them it searches where it saw them last for a few seconds, then wanders near home.");
                 }
                 Behavior::Static => {}
             }
         });
         ui.end_row();
+        if let Behavior::Chase { leash, flee_below, keep_distance, .. } = &mut d.behavior {
+            ui.label("Leash");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(leash).range(0.0..=256.0).speed(0.1).suffix(" tiles"))
+                    .on_hover_text("Gives up and walks back home when this far from home (its start position); harmless on the way. 0 = follows the player anywhere.");
+                ui.weak(if *leash > 0.0 { "from home" } else { "(no leash)" });
+            });
+            ui.end_row();
+            ui.label("Flee below");
+            ui.horizontal(|ui| {
+                let mut pct = (*flee_below * 100.0).round() as i32;
+                if ui
+                    .add(egui::DragValue::new(&mut pct).range(0..=100).suffix(" % HP"))
+                    .on_hover_text("Runs away from the player when its HP is below this share of its max HP (doesn't attack meanwhile). 0 = fights to the end.")
+                    .changed()
+                {
+                    *flee_below = pct as f32 / 100.0;
+                }
+                ui.weak(if *flee_below > 0.0 { "runs away" } else { "(never flees)" });
+            });
+            ui.end_row();
+            ui.label("Keep distance");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(keep_distance).range(0.0..=64.0).speed(0.1).suffix(" tiles"))
+                    .on_hover_text("Shooters (ranged weapon): back off when the player comes closer than this. 0 = they only stop coming closer once the player is well within range.");
+                ui.weak("(shooters)");
+            });
+            ui.end_row();
+        }
     });
     hitbox(ui, &mut d.hitbox);
     ui.separator();
