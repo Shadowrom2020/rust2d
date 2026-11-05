@@ -25,6 +25,8 @@ pub enum IdKind {
     Spell,
     /// A sprite sheet (animated effects).
     Sheet,
+    /// A character definition.
+    Character,
 }
 
 impl IdKind {
@@ -39,6 +41,7 @@ impl IdKind {
             IdKind::Skill => "skill",
             IdKind::Spell => "spell",
             IdKind::Sheet => "sprite sheet",
+            IdKind::Character => "character",
         }
     }
     /// The definition kind renamed together with this id kind.
@@ -50,6 +53,7 @@ impl IdKind {
             IdKind::Sheet => Some(RefKind::Sheet),
             IdKind::Skill => Some(RefKind::Skill),
             IdKind::Spell => Some(RefKind::Spell),
+            IdKind::Character => Some(RefKind::Character),
             _ => None,
         }
     }
@@ -85,6 +89,7 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("give_item_to", 1, IdKind::Item),
     ("take_item_from", 1, IdKind::Item),
     ("effect", 0, IdKind::Sheet),
+    ("defeated_count", 0, IdKind::Character),
 ];
 
 /// A string literal argument of a function call.
@@ -413,6 +418,7 @@ pub fn check_script(src: &str, db: &Database, maps: &[String], spawns: &HashMap<
             IdKind::Skill => db.skill(v).is_some(),
             IdKind::Spell => db.spell(v).is_some(),
             IdKind::Sheet => db.sheet(v).is_some(),
+            IdKind::Character => db.character(v).is_some(),
         };
         if !known {
             let extra = match kind {

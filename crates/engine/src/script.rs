@@ -231,6 +231,8 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         name => c.characters.iter().find(|ch| ch.1 == name).map_or(-1, |ch| ch.2 as i64),
     }));
     engine.register_fn("hp_of", with!(ctx, |c, uid: i64| c.characters.iter().find(|ch| ch.0 as i64 == uid).map_or(-1, |ch| ch.2 as i64)));
+    // Bestiary: how many characters of a definition the player has defeated.
+    engine.register_fn("defeated_count", with!(ctx, |c, id: &str| c.world.defeated(id) as i64));
     // Status effects.
     engine.register_fn("apply_effect", with!(ctx, |c, t: &str, kind: &str, s: Dynamic, secs: Dynamic| {
         if let Some(k) = effect_kind(kind) {

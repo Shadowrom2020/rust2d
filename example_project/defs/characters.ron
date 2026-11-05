@@ -159,6 +159,7 @@
             strength: 0.5,
             seconds: 6.0,
         )),
+        description: "A wobbling lump of green jelly from the Whisperwood dens. Slow and harmless-looking, but its touch is poisonous - keep an antidote handy.",
         triggers: [
             (
                 on: Defeat,
@@ -227,6 +228,7 @@
         )),
         defense: 0,
         xp: 12,
+        description: "Goblin archers guard a camp south of the forest path. They shoot from a distance, back off when you close in and run once wounded - but never far from their camp.",
         triggers: [],
         shop: None,
         loot: [
@@ -297,6 +299,7 @@
         )),
         defense: 0,
         xp: 12,
+        description: "Quicker than the archers, goblin scouts roam the wilds in small bands, bows ready.",
         triggers: [],
         shop: None,
         loot: [
@@ -351,6 +354,7 @@
         weapon: None,
         defense: 0,
         xp: 60,
+        description: "The leader of the bandits in south-east Whisperwood: tough, armed with an axe, and quick to call his outlaws for help when a fight turns against him.",
         triggers: [],
         shop: None,
         loot: [
@@ -417,6 +421,7 @@
         weapon: None,
         defense: 0,
         xp: 20,
+        description: "The Bandit Chief\'s men. They hide in the woods until he calls, fight with swords and flee when the fight goes badly.",
         triggers: [],
         shop: None,
         loot: [

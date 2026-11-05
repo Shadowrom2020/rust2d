@@ -1419,6 +1419,7 @@ fn characters(x: &mut Extras) {
         defense: 0,
         xp: 0,
         touch_effect: None,
+        description: String::new(),
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -1428,6 +1429,15 @@ fn characters(x: &mut Extras) {
         inventory: Vec::new(),
     };
     let foe = |mut d: CharacterDef, hp: i32, damage: i32, xp: u32| {
+        d.description = match d.id.as_str() {
+            "bandit" | "bandit_f" => "Highway robbers who chase travellers through the woods and over the roads.",
+            "skeleton" | "skeleton_f" => "Restless bones from old graves. Their cold touch slows you down.",
+            "goblin_f" => "Quicker than the archers, goblin scouts roam the wilds in small bands, bows ready.",
+            "bat" => "Fast, erratic and always in a swarm. Weak alone, a nuisance in caves.",
+            "ghost" => "A pale shape drifting through ruins at night. It passes through what you can't.",
+            _ => "",
+        }
+        .into();
         d.max_hp = hp;
         d.damage = damage;
         d.hostile = true;

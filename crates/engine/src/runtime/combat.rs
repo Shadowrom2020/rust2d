@@ -443,6 +443,11 @@ impl Game {
             let n = self.xp_of(&self.loaded.entities[i].def);
             self.give_xp(n as i64);
         }
+        // The bestiary counts every defeated character kind.
+        if self.loaded.entities[i].kind == crate::entity::EntityKind::Character {
+            let def = self.loaded.entities[i].def.clone();
+            *self.world.bestiary.entry(def).or_insert(0) += 1;
+        }
         let e = &mut self.loaded.entities[i];
         e.active = false;
         e.knock = Vec2::ZERO;

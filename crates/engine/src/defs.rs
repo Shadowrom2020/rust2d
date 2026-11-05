@@ -729,6 +729,9 @@ pub struct CharacterDef {
     /// A status effect its touch gives the player (hostile characters, with contact damage).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub touch_effect: Option<crate::effects::EffectSpec>,
+    /// What the bestiary says about it (shown once the player has defeated one).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     #[serde(default)]
     pub triggers: Vec<Trigger>,
     /// Makes the character a merchant (placed instances can override it).

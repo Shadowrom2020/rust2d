@@ -896,6 +896,16 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                     });
                     ui.add(egui::DragValue::new(value).range(1..=999));
                 }
+                Cond::Defeated { character, op, count } => {
+                    ui.label("defeated");
+                    suggest(ui, &format!("{id}/dc"), character, &refs.characters, 100.0);
+                    egui::ComboBox::from_id_salt(format!("{id}/dcop")).width(40.0).selected_text(op.symbol()).show_ui(ui, |ui| {
+                        for o in CmpOp::ALL {
+                            ui.selectable_value(op, o, o.symbol());
+                        }
+                    });
+                    ui.add(egui::DragValue::new(count).range(0..=100_000)).on_hover_text("How many characters of this kind the player has defeated (the bestiary's count)");
+                }
                 Cond::HasEffect { kind } => {
                     ui.label("player has");
                     effect_kind_combo(ui, &format!("{id}/fx"), kind);

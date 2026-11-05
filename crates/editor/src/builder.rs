@@ -351,6 +351,7 @@ pub fn default_character(db: &Database, id: &str, name: &str) -> CharacterDef {
         defense: 0,
         xp: 0,
         touch_effect: None,
+        description: String::new(),
         triggers: vec![],
         shop: None,
         loot: vec![],

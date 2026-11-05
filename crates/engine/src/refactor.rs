@@ -161,8 +161,10 @@ impl Renamer<'_> {
 
     fn conditions(&mut self, cs: &mut [Condition]) {
         for c in cs {
-            if let Cond::HasItem { item, .. } = &mut c.cond {
-                self.fix(RefKind::Item, item);
+            match &mut c.cond {
+                Cond::HasItem { item, .. } => self.fix(RefKind::Item, item),
+                Cond::Defeated { character, .. } => self.fix(RefKind::Character, character),
+                _ => {}
             }
         }
     }
@@ -380,6 +382,19 @@ mod tests {
         let Action::If { then, otherwise, .. } = &t.actions[0] else { panic!() };
         assert_eq!(then[0], Action::TakeItem { item: "gate_key".into(), count: 1 });
         assert_eq!(otherwise[0], Action::GiveItem { item: "coin".into(), count: 1 });
+    }
+
+    #[test]
+    fn renames_characters_in_defeated_conditions() {
+        let mut m = Map::new("village", 4, 4);
+        m.triggers.push(Trigger {
+            on: TriggerOn::MapEnter,
+            conditions: vec![Condition::new(Cond::Defeated { character: "slime".into(), op: crate::events::CmpOp::Ge, count: 3 })],
+            actions: vec![],
+            once: false,
+        });
+        assert_eq!(rename_in_map(&mut m, RefKind::Character, "slime", "jelly"), 1);
+        assert_eq!(m.triggers[0].conditions[0].cond, Cond::Defeated { character: "jelly".into(), op: crate::events::CmpOp::Ge, count: 3 });
     }
 
     #[test]
