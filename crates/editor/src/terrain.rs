@@ -1,11 +1,11 @@
 //! Auto-tiling in the editor: the Terrain map tool (palette, painting through the undo
 //! history, picking) and the *Terrains* section of Database › Tilesets. The tile choice itself
-//! is `rust2d_engine::autotile`.
+//! is `rustpg2d_engine::autotile`.
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureId};
-use rust2d_engine::autotile::{self, Terrain, EAST, NORTH, SOUTH, WEST};
-use rust2d_engine::defs::TilesetDef;
-use rust2d_engine::render::TilesetTex;
+use rustpg2d_engine::autotile::{self, Terrain, EAST, NORTH, SOUTH, WEST};
+use rustpg2d_engine::defs::TilesetDef;
+use rustpg2d_engine::render::TilesetTex;
 
 use crate::app::{Editor, Mode, Tool};
 use crate::ui::{self, ph};

@@ -21,7 +21,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: rust2d version
+      label: R(ust)PG2D version
       description: Release (e.g. 0.2.0, AppImage or Flatpak) or the commit you built.
     validations:
       required: true

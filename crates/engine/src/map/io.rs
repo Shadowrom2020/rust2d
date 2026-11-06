@@ -173,7 +173,7 @@ pub fn encode(map: &Map) -> Result<Vec<u8>> {
 
 pub fn decode(bytes: &[u8]) -> Result<Map> {
     if bytes.len() < 10 || &bytes[..6] != MAGIC {
-        bail!("not a rust2d map file");
+        bail!("not an R(ust)PG2D map file");
     }
     let version = u32::from_le_bytes(bytes[6..10].try_into().unwrap());
     let raw = lz4_flex::decompress_size_prepended(&bytes[10..]).context("decompressing map")?;

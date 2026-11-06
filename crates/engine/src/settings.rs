@@ -1,6 +1,6 @@
 //! Player options (graphics, sound, text): chosen in the game's Options menu and kept between
-//! sessions per game in `$XDG_CONFIG_HOME/rust2d/<game>/settings.ron` (`~/.config/...`;
-//! `$RUST2D_SETTINGS_DIR` overrides the folder).
+//! sessions per game in `$XDG_CONFIG_HOME/rustpg2d/<game>/settings.ron` (`~/.config/...`;
+//! `$RUSTPG2D_SETTINGS_DIR` overrides the folder).
 
 use std::path::PathBuf;
 
@@ -43,11 +43,14 @@ pub const TEXT_SPEEDS: [(f32, &str); 4] = [(0.5, "Slow"), (1.0, "Normal"), (2.0,
 impl Settings {
     /// Folder of a game's settings (by the game's name).
     pub fn dir(game_name: &str) -> Option<PathBuf> {
-        if let Some(d) = std::env::var_os("RUST2D_SETTINGS_DIR") {
+        if let Some(d) = std::env::var_os("RUSTPG2D_SETTINGS_DIR") {
             return Some(PathBuf::from(d).join(crate::release::slug(game_name)));
         }
         let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-        Some(base.join("rust2d").join(crate::release::slug(game_name)))
+        let slug = crate::release::slug(game_name);
+        let dir = base.join("rustpg2d").join(&slug);
+        crate::legacy::adopt(&dir, &base.join(crate::legacy::OLD_NAME).join(&slug));
+        Some(dir)
     }
 
     /// The saved settings of a game (defaults if there are none or they can't be read).
@@ -87,8 +90,8 @@ mod tests {
 
     #[test]
     fn round_trip_and_defaults() {
-        let dir = std::env::temp_dir().join(format!("rust2d_settings_{}", std::process::id()));
-        std::env::set_var("RUST2D_SETTINGS_DIR", &dir);
+        let dir = std::env::temp_dir().join(format!("rustpg2d_settings_{}", std::process::id()));
+        std::env::set_var("RUSTPG2D_SETTINGS_DIR", &dir);
         assert_eq!(Settings::load("My Game"), Settings::default());
         let s = Settings { fullscreen: true, zoom: 2.0, music_volume: 0.3, ..Default::default() };
         let path = s.save("My Game").unwrap();

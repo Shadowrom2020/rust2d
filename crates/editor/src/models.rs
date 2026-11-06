@@ -6,11 +6,11 @@ use std::cell::RefCell;
 
 use anyhow::{Context, Result};
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind};
-use rust2d_engine::defs::{Appearance, CharacterDef};
-use rust2d_engine::library::Bundle;
-use rust2d_engine::project::TILE_SIZE;
-use rust2d_engine::refactor::{refs_of_character, RefKind};
-use rust2d_engine::state::Equipment;
+use rustpg2d_engine::defs::{Appearance, CharacterDef};
+use rustpg2d_engine::library::Bundle;
+use rustpg2d_engine::project::TILE_SIZE;
+use rustpg2d_engine::refactor::{refs_of_character, RefKind};
+use rustpg2d_engine::state::Equipment;
 
 use crate::app::Editor;
 use crate::doc::Objects;
@@ -187,7 +187,7 @@ impl Editor {
                 ui.selectable_value(&mut st.gender, Gender::Female, "Female");
             });
             let q = st.search.to_lowercase();
-            let gender_ok = |db: &rust2d_engine::defs::Database, c: &CharacterDef| match st.gender {
+            let gender_ok = |db: &rustpg2d_engine::defs::Database, c: &CharacterDef| match st.gender {
                 Gender::All => true,
                 Gender::Male => !db.female_body(&c.appearance.body),
                 Gender::Female => db.female_body(&c.appearance.body),
@@ -295,7 +295,7 @@ impl Editor {
 
     /// Paints the idle frame of direction `row` (0 down, 1 left, 2 right, 3 up) of a pick.
     fn paint_model(&self, ui: &egui::Ui, pick: &ModelPick, row: u32, rect: Rect) {
-        let facing = [rust2d_engine::entity::Facing::Down, rust2d_engine::entity::Facing::Left, rust2d_engine::entity::Facing::Right, rust2d_engine::entity::Facing::Up][row as usize % 4];
+        let facing = [rustpg2d_engine::entity::Facing::Down, rustpg2d_engine::entity::Facing::Left, rustpg2d_engine::entity::Facing::Right, rustpg2d_engine::entity::Facing::Up][row as usize % 4];
         match pick {
             ModelPick::Project(id) => {
                 let layers = self.char_layers(id, None, facing, 0);

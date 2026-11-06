@@ -2,12 +2,12 @@
 //! distributions) and **Flatpak bundle** (sandboxed, `flatpak install --user X.flatpak`).
 //!
 //! Used by the editor's *Export game* (a game: its executable next to `data/`) and by
-//! `cargo xtask-dist` (the rust2d toolkit: editor, game runner and the example project).
+//! `cargo xtask-dist` (the R(ust)PG2D toolkit: editor, game runner and the example project).
 //!
 //! Both formats get the same tree below their prefix (`usr/` in the AppImage, `/app` in the
 //! Flatpak), commands as symlinks in `bin/`, a desktop entry and an icon:
 //! - AppImage: the official AppImage runtime (type 2, static; downloaded once, pinned by SHA-256,
-//!   cached in `~/.cache/rust2d/`) followed by a squashfs image written with `backhand` - no
+//!   cached in `~/.cache/rustpg2d/`) followed by a squashfs image written with `backhand` - no
 //!   AppImage tools needed. `AppRun` links to `usr/bin/<command>`.
 //! - Flatpak: a build folder finished with `flatpak build-finish`, exported to a temporary OSTree
 //!   repo and bundled with `flatpak build-bundle` (only the `flatpak` command is needed; inside a
@@ -24,10 +24,10 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use backhand::compression::Compressor;
 use backhand::{FilesystemCompressor, FilesystemWriter, NodeHeader};
-use rust2d_engine::entity::Facing;
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::project::Project;
-use rust2d_engine::render::{character, recolor};
+use rustpg2d_engine::entity::Facing;
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::project::Project;
+use rustpg2d_engine::render::{character, recolor};
 
 /// The AppImage runtime (type 2, static: needs no libfuse on the player's machine, only
 /// `fusermount`; without FUSE, `--appimage-extract-and-run` works).
@@ -464,11 +464,11 @@ fn scan_glibc_names(binary: &[u8]) -> Vec<String> {
 }
 
 fn cache_dir() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .unwrap_or_else(std::env::temp_dir)
-        .join("rust2d")
+    let base = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache"))).unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("rustpg2d");
+    // The downloaded AppImage runtime of a rust2d install (saves a download, works offline).
+    rustpg2d_engine::legacy::adopt(&dir, &base.join(rustpg2d_engine::legacy::OLD_NAME));
+    dir
 }
 
 fn now() -> u64 {
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn app_ids() {
-        assert!(check_app_id("org.rust2d.knight_tales").is_ok());
+        assert!(check_app_id("org.rustpg2d.knight_tales").is_ok());
         assert!(check_app_id("org.example").is_err());
         assert!(check_app_id("org.example.1game").is_err());
         assert!(check_app_id("org.exa mple.game").is_err());
@@ -609,7 +609,7 @@ mod tests {
             name: "Knight Tales".into(),
             comment: "A game".into(),
             categories: "Game;RolePlaying;".into(),
-            app_id: "org.rust2d.knight_tales".into(),
+            app_id: "org.rustpg2d.knight_tales".into(),
             runtime: FLATPAK_RUNTIMES[0].into(),
             finish_args: vec!["--socket=x11".into()],
             files: vec![Entry { dest: "lib/knight-tales/knight-tales".into(), src: Source::Bytes(b"\x7fELF game".to_vec()), exec: true }],
@@ -624,7 +624,7 @@ mod tests {
     #[test]
     fn appimage_contents() {
         use backhand::{FilesystemReader, InnerNode};
-        let tmp = std::env::temp_dir().join(format!("rust2d_appimage_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("rustpg2d_appimage_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let img = appimage_squashfs(&spec(&tmp)).unwrap();
         let fs = FilesystemReader::from_reader(Cursor::new(img)).unwrap();
@@ -655,10 +655,10 @@ mod tests {
 
     #[test]
     fn desktop_and_metainfo() {
-        let tmp = std::env::temp_dir().join(format!("rust2d_meta_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("rustpg2d_meta_test_{}", std::process::id()));
         let s = spec(&tmp);
-        let d = desktop_entry(&s, "knight-tales", "org.rust2d.knight_tales");
-        assert!(d.contains("Exec=knight-tales\n") && d.contains("Icon=org.rust2d.knight_tales\n") && d.contains("Categories=Game;RolePlaying;\n"));
+        let d = desktop_entry(&s, "knight-tales", "org.rustpg2d.knight_tales");
+        assert!(d.contains("Exec=knight-tales\n") && d.contains("Icon=org.rustpg2d.knight_tales\n") && d.contains("Categories=Game;RolePlaying;\n"));
         let m = metainfo(&s);
         assert!(m.contains("<category>Game</category><category>RolePlaying</category>"));
         assert!(!m.contains("project_license"), "no license claimed for a game");

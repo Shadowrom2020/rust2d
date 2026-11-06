@@ -1,6 +1,6 @@
-//! rust2d game runner.
+//! R(ust)PG2D game runner.
 //!
-//! Usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--dev]
+//! Usage: rustpg2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--dev]
 //!
 //! Without PROJECT_DIR a released game runs the project in `data/` next to the executable
 //! (saves in `~/.local/share/<game>/saves`); otherwise `example_project` is used.
@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use macroquad::prelude::*;
-use rust2d_engine::project::{Project, ProjectConfig};
-use rust2d_engine::release;
-use rust2d_engine::runtime::{Game, StartOptions};
+use rustpg2d_engine::project::{Project, ProjectConfig};
+use rustpg2d_engine::release;
+use rustpg2d_engine::runtime::{Game, StartOptions};
 
 /// Project folder and whether it is the bundle next to the executable.
 fn default_root() -> (PathBuf, bool) {
@@ -56,7 +56,7 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
                 start.pos = Some(vec2(x.trim().parse()?, y.trim().parse()?));
             }
             "-h" | "--help" => {
-                println!("usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--cutscene FUNCTION] [--dev]");
+                println!("usage: rustpg2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--cutscene FUNCTION] [--dev]");
                 std::process::exit(0);
             }
             s if s.starts_with('-') => bail!("unknown option {s}"),
@@ -70,7 +70,7 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
 
 fn window_conf() -> Conf {
     if std::env::args().any(|a| a == "--engine-build") {
-        println!("{}", rust2d_engine::ENGINE_BUILD);
+        println!("{}", rustpg2d_engine::ENGINE_BUILD);
         std::process::exit(0);
     }
     // The window is titled with the game's name.
@@ -80,7 +80,7 @@ fn window_conf() -> Conf {
         .and_then(|s| ron::from_str::<ProjectConfig>(&s).ok())
         .map(|c| c.name)
         .filter(|n| !n.trim().is_empty())
-        .unwrap_or_else(|| "rust2d".to_owned());
+        .unwrap_or_else(|| "R(ust)PG2D".to_owned());
     Conf {
         window_title: title,
         window_width: 1280,
@@ -103,7 +103,7 @@ async fn main() {
         // A released game may live in a read-only folder: keep saves in the user's data folder.
         if root_arg().is_none() && default_root().1 {
             if let Some(dir) = release::user_saves_dir(&project.config.name) {
-                rust2d_engine::project::set_saves_dir(dir);
+                rustpg2d_engine::project::set_saves_dir(dir);
             }
         }
         Game::new(project, start)
@@ -116,9 +116,9 @@ async fn main() {
         }
     };
     // Debug aids:
-    //   RUST2D_SHOT=out.png        screenshot after ~1s, then exit
-    //   RUST2D_AUTOPLAY="hold right 2; press e; wait 1; shot a.png; status; quit"
-    let mut auto = match (std::env::var("RUST2D_AUTOPLAY"), std::env::var("RUST2D_SHOT")) {
+    //   RUSTPG2D_SHOT=out.png        screenshot after ~1s, then exit
+    //   RUSTPG2D_AUTOPLAY="hold right 2; press e; wait 1; shot a.png; status; quit"
+    let mut auto = match (std::env::var("RUSTPG2D_AUTOPLAY"), std::env::var("RUSTPG2D_SHOT")) {
         (Ok(script), _) => Some(Autoplay::parse(&script)),
         (_, Ok(path)) => Some(Autoplay::parse(&format!("wait 1; shot {path}; quit"))),
         _ => None,
@@ -172,11 +172,11 @@ struct Autoplay {
     timer: f32,
     held: Vec<KeyCode>,
     /// Gamepad buttons held by `padhold`.
-    held_pad: Vec<rust2d_engine::runtime::input::Pad>,
+    held_pad: Vec<rustpg2d_engine::runtime::input::Pad>,
     /// Screenshot to take after the next frame is drawn.
     shot: Option<String>,
     mouse: Option<Vec2>,
-    mouse_frames: std::collections::VecDeque<rust2d_engine::runtime::input::MouseInject>,
+    mouse_frames: std::collections::VecDeque<rustpg2d_engine::runtime::input::MouseInject>,
     /// Simulates the window's close button.
     close: bool,
     /// `settime H`: applied by the main loop.
@@ -200,7 +200,7 @@ impl Autoplay {
 
     /// Advances the script; returns false to quit.
     fn step(&mut self, game: &Game) -> bool {
-        use rust2d_engine::runtime::input::{inject, inject_mouse, inject_pad, key_from_name, MouseInject, Pad};
+        use rustpg2d_engine::runtime::input::{inject, inject_mouse, inject_pad, key_from_name, MouseInject, Pad};
         // Queued mouse frames (clicks, drags) play one per frame; afterwards the cursor rests.
         if let Some(f) = self.mouse_frames.pop_front() {
             self.mouse = Some(f.pos);
@@ -394,7 +394,7 @@ impl Autoplay {
                 }
                 // type TEXT: typed characters (rest of the command, spaces kept)
                 "type" => {
-                    rust2d_engine::runtime::input::inject_text(&cmd[1..].join(" "));
+                    rustpg2d_engine::runtime::input::inject_text(&cmd[1..].join(" "));
                 }
                 "wait" => {
                     self.timer = secs(1);

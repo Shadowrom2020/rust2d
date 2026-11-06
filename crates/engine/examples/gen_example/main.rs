@@ -1,21 +1,21 @@
 //! Generates `example_project/`: procedural pixel art, definitions, maps and scripts.
 //!
-//! Run: `cargo run -p rust2d-engine --example gen_example [OUT_DIR]`
+//! Run: `cargo run -p rustpg2d-engine --example gen_example [OUT_DIR]`
 
 use std::path::{Path, PathBuf};
 
-use rust2d_engine::defs::*;
-use rust2d_engine::effects::{EffectKind, EffectSpec};
-use rust2d_engine::achievements::AchievementDef;
-use rust2d_engine::crafting::RecipeDef;
-use rust2d_engine::entity::{EntityInstance, EntityKind, Facing, ScheduleStop};
-use rust2d_engine::events::*;
-use rust2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
-use rust2d_engine::audio::wav_bytes;
-use rust2d_engine::inventory::ItemStack;
-use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
-use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
-use rust2d_engine::skills::{SkillDef, SpellDef};
+use rustpg2d_engine::defs::*;
+use rustpg2d_engine::effects::{EffectKind, EffectSpec};
+use rustpg2d_engine::achievements::AchievementDef;
+use rustpg2d_engine::crafting::RecipeDef;
+use rustpg2d_engine::entity::{EntityInstance, EntityKind, Facing, ScheduleStop};
+use rustpg2d_engine::events::*;
+use rustpg2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
+use rustpg2d_engine::audio::wav_bytes;
+use rustpg2d_engine::inventory::ItemStack;
+use rustpg2d_engine::project::{GameSfx, Project, ProjectConfig};
+use rustpg2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
+use rustpg2d_engine::skills::{SkillDef, SpellDef};
 
 mod art;
 mod music;
@@ -156,7 +156,7 @@ impl B {
         self.set(1, door.0, door.1, t::DOOR);
         self.set(1, door.0, door.1 - 1, t::HOUSE_WALL);
         // The door tile is walkable so the player can step into the portal.
-        self.m.set_collision(door.0 as u32, door.1 as u32, rust2d_engine::map::CollisionOverride::Walkable);
+        self.m.set_collision(door.0 as u32, door.1 as u32, rustpg2d_engine::map::CollisionOverride::Walkable);
         door
     }
     fn zone(&mut self, name: &str, x: u32, y: u32, w: u32, h: u32, kind: ZoneKind) -> u32 {
@@ -215,7 +215,7 @@ fn teach(mut d: ItemDef, spell: &str) -> ItemDef {
 
 /// The example's skills: combat, defense, lockpicking, haggling, arcana and a scripted one.
 fn skills() -> Vec<SkillDef> {
-    use rust2d_engine::skills::SkillEffect as E;
+    use rustpg2d_engine::skills::SkillEffect as E;
     let icon = |f: u32| SpriteRef::new("items", f);
     vec![
         SkillDef::new("swordsmanship", "Swordsmanship", "Training with blades and fists: every level adds 10% to your melee damage.", icon(it::SWORD), 5, E::MeleeDamage { percent: 10.0 }),
@@ -265,7 +265,7 @@ fn recipes() -> Vec<RecipeDef> {
 
 /// The example's spells, learned from scrolls and books.
 fn spells() -> Vec<SpellDef> {
-    use rust2d_engine::skills::SpellEffect as E;
+    use rustpg2d_engine::skills::SpellEffect as E;
     let icon = |f: u32| SpriteRef::new("items", f);
     vec![
         SpellDef::new("heal", "Heal", "Mends your wounds: restores 3 hearts.", icon(it::SPELL_HEAL), 10, 2.0, E::Heal { amount: 6 }),
@@ -321,7 +321,7 @@ fn ground(m: &Map, x: i32, y: i32) -> Option<u32> {
 fn autotile_terrain(m: &mut Map, class: impl Fn(&Map, i32, i32) -> Option<&'static str>, extra: impl Fn(&Map, &str, i32, i32) -> bool) {
     let terrains = terrains();
     let slot = m.tileset_slot("terrain");
-    rust2d_engine::autotile::retile(
+    rustpg2d_engine::autotile::retile(
         m,
         0,
         slot,
@@ -516,9 +516,9 @@ fn village() -> Map {
     guard.name = "guard".into();
     // The guard carries a lantern: at night it lights the road as he walks.
     guard.light = Some(LightSpec::new(4.5, [255, 220, 170], false));
-    guard.patrol = Some(rust2d_engine::entity::PatrolRoute {
+    guard.patrol = Some(rustpg2d_engine::entity::PatrolRoute {
         points: vec![(8, 18), (20, 18), (30, 18), (38, 18)],
-        mode: rust2d_engine::entity::PatrolMode::PingPong,
+        mode: rustpg2d_engine::entity::PatrolMode::PingPong,
         pause: 1.5,
         speed: 0.0,
     });
@@ -560,7 +560,7 @@ fn village() -> Map {
         conditions: vec![],
         actions: vec![dialog(
             "",
-            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Character & inventory: C or I, skills: K, spells: L. Quest journal: J. Map: M. Save/Load: F5/F9. Debug: F3.",
+            "Welcome to the R(ust)PG2D demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Character & inventory: C or I, skills: K, spells: L. Quest journal: J. Map: M. Save/Load: F5/F9. Debug: F3.",
         )],
         once: true,
     }];
@@ -601,13 +601,13 @@ fn shop() -> Map {
     b.fill(0, 4, 6, 5, 2, t::RUG);
     b.set(0, 6, 9, t::WOOD_FLOOR);
     b.set(1, 6, 9, t::DOOR);
-    b.m.set_collision(6, 9, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(6, 9, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.spawn("entrance", 6, 8);
     b.portal(6, 9, "village", "shop_door");
     // Tilda behind her counter, with her own stock and prices.
     let merchant = b.entity(EntityKind::Character, "merchant_f", 6, 3);
     merchant.name = "tilda".into();
-    merchant.facing = rust2d_engine::entity::Facing::Down;
+    merchant.facing = rustpg2d_engine::entity::Facing::Down;
     merchant.shop = Some(ShopSpec {
         title: "Tilda's Wares".into(),
         currency: "coin".into(),
@@ -722,7 +722,7 @@ fn house() -> Map {
     b.set(1, 9, 5, t::TABLE);
     b.set(0, 6, 9, t::WOOD_FLOOR);
     b.set(1, 6, 9, t::DOOR);
-    b.m.set_collision(6, 9, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(6, 9, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.spawn("entrance", 6, 8);
     b.portal(6, 9, "village", "house_door");
     // The elder's chest: a container that only opens once the quest was accepted.
@@ -788,7 +788,7 @@ fn forest() -> Map {
     // Cave entrance to the wilds in the north-east.
     b.fill(1, 52, 3, 9, 4, t::CLIFF);
     b.set(1, 56, 6, t::CAVE);
-    b.m.set_collision(56, 6, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(56, 6, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.fill(0, 56, 7, 1, 10, t::PATH);
     b.portal(56, 6, "wilds", "start");
     b.spawn("cave", 56, 7);
@@ -882,7 +882,7 @@ fn forest() -> Map {
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.8 };
     // An eerie fog over Whisperwood: it lifts when the shrine is lit (shrine_awakening).
-    b.m.weather = rust2d_engine::map::Weather::new(rust2d_engine::map::WeatherKind::Fog, 0.45);
+    b.m.weather = rustpg2d_engine::map::Weather::new(rustpg2d_engine::map::WeatherKind::Fog, 0.45);
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
     // The old mine: a second cave mouth in the cliff, west of the one to the wilds.
@@ -893,7 +893,7 @@ fn forest() -> Map {
         }
     }
     b.set(1, 53, 6, t::CAVE);
-    b.m.set_collision(53, 6, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(53, 6, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.fill(0, 53, 7, 4, 1, t::PATH);
     b.portal(53, 6, "mine", "entrance");
     b.spawn("mine", 53, 7);
@@ -1008,7 +1008,7 @@ fn wilds() -> Map {
     }
     b.fill(1, 510, 506, 5, 3, t::CLIFF);
     b.set(1, 512, 508, t::CAVE);
-    b.m.set_collision(512, 508, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(512, 508, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.portal(512, 508, "forest", "cave");
     b.spawn("start", 512, 510);
     // Scatter coins across the land.
@@ -1077,7 +1077,7 @@ fn wilds() -> Map {
     b.m.background = [30, 60, 120];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.75 };
-    b.m.weather = rust2d_engine::map::Weather::new(rust2d_engine::map::WeatherKind::Rain, 0.5);
+    b.m.weather = rustpg2d_engine::map::Weather::new(rustpg2d_engine::map::WeatherKind::Rain, 0.5);
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
     // Auto-tiling: lakes with sandy shores, soft edges between grass, forest and snow.
@@ -1561,7 +1561,7 @@ fn mine() -> Map {
     // Entrance: a door in the bottom wall leads back to the forest.
     set(&mut b, 0, 14, 19, 0);
     set(&mut b, 1, 14, 19, 6);
-    b.m.set_collision(14, 19, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(14, 19, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.portal(14, 19, "forest", "mine");
     b.spawn("entrance", 14, 18);
     // Wall torches (tile lights) in the entrance hall and the cavern.
@@ -1604,13 +1604,13 @@ fn mine() -> Map {
         set(&mut b, 0, x, y, chasm_tile);
     }
     let of = |m: &Map, x: i32, y: i32| m.layers[0].get(x as u32, y as u32).parts().filter(|p| p.0 == dg as usize).map(|p| p.1);
-    rust2d_engine::autotile::retile(
+    rustpg2d_engine::autotile::retile(
         &mut b.m,
         0,
         dg,
         &dterrains,
-        |m, x, y| of(m, x, y).and_then(|i| rust2d_engine::autotile::terrain_of(&dterrains, i)),
-        |m, k, x, y| of(m, x, y).is_some_and(|i| rust2d_engine::autotile::counts_as(&dterrains, k, i)),
+        |m, x, y| of(m, x, y).and_then(|i| rustpg2d_engine::autotile::terrain_of(&dterrains, i)),
+        |m, k, x, y| of(m, x, y).is_some_and(|i| rustpg2d_engine::autotile::counts_as(&dterrains, k, i)),
     );
     b.m
 }
@@ -1888,7 +1888,7 @@ fn layered_characters(db: &mut Database) {
         beard: if beard { "beard_full".into() } else { String::new() },
     };
     let worn = |slots: &[(EquipSlot, &str)]| {
-        let mut e = rust2d_engine::state::Equipment::default();
+        let mut e = rustpg2d_engine::state::Equipment::default();
         for (slot, item) in slots {
             *e.slot_mut(*slot) = Some(ItemStack::new(item, 1));
         }
@@ -1963,7 +1963,7 @@ fn main() {
     let project = Project {
         root: out.clone(),
         config: ProjectConfig {
-            name: "rust2d example".into(),
+            name: "R(ust)PG2D example".into(),
             tile_size: TS,
             start_map: "village".into(),
             start_spawn: "start".into(),
@@ -1981,9 +1981,9 @@ fn main() {
                 unlock: "unlock".into(),
             },
             inventory_size: 24,
-            creation: rust2d_engine::project::CharacterCreation {
+            creation: rustpg2d_engine::project::CharacterCreation {
                 enabled: true,
-                sex: rust2d_engine::project::SexChoice::Both,
+                sex: rustpg2d_engine::project::SexChoice::Both,
                 default_name: "Alex".into(),
                 // The player picks skin, hair style, hair color and (men) a beard.
                 body_male: "body_male".into(),
@@ -1994,9 +1994,9 @@ fn main() {
                 beards: vec![String::new(), "beard_full".into(), "beard_goatee".into()],
             },
         day_minutes: 24.0, start_hour: 8.0,
-        skills: rust2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
+        skills: rustpg2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
         // Experience and levels: a few levels over the example's quests and fights.
-        progression: rust2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
+        progression: rustpg2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
         // Dialog boxes show the speaker's portrait (found from the speaker's name).
         dialog_portraits: true,
         },
@@ -2018,8 +2018,8 @@ fn main() {
 /// Rhai functions are dropped (they belong to the example's story); skills and spells made of
 /// scripts keep the functions they need.
 fn write_starter_pack(project: &Project) {
-    use rust2d_engine::library::{all_assets, Bundle};
-    let mut b = Bundle::collect(&project.db, &project.root, TS, "rust2d starter assets", &all_assets(&project.db)).unwrap();
+    use rustpg2d_engine::library::{all_assets, Bundle};
+    let mut b = Bundle::collect(&project.db, &project.root, TS, "R(ust)PG2D starter assets", &all_assets(&project.db)).unwrap();
     // Library-only extras: more tilesets, props and characters.
     let extra = art::extra::library_extras();
     // (The example project's own version wins when an id exists in both, e.g. "merchant_f".)
@@ -2048,9 +2048,9 @@ fn write_starter_pack(project: &Project) {
     }
     // Script functions the remaining assets need travel along (Fireball's cast_fireball() and
     // what it calls, Scavenging's scavenging()); everything else in main.rhai stays behind.
-    let fns = rust2d_engine::library::read_scripts(&project.root);
-    let roots: Vec<String> = all_assets(&b.db).iter().flat_map(|a| rust2d_engine::library::script_roots(&b.db, a)).collect();
-    let needed = rust2d_engine::script_refs::needed_functions(&fns, &roots);
+    let fns = rustpg2d_engine::library::read_scripts(&project.root);
+    let roots: Vec<String> = all_assets(&b.db).iter().flat_map(|a| rustpg2d_engine::library::script_roots(&b.db, a)).collect();
+    let needed = rustpg2d_engine::script_refs::needed_functions(&fns, &roots);
     b.scripts = fns.into_iter().filter(|f| needed.contains(&f.name)).map(|f| (f.name, f.text)).collect();
     println!("starter scripts: {:?}", b.scripts.keys().collect::<Vec<_>>());
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../editor/assets/starter.r2dpack");

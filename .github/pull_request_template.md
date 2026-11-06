@@ -10,7 +10,7 @@
 
 ## How it was tested
 
-<!-- Scripted game / editor runs (RUST2D_AUTOPLAY, RUST2D_EDITOR_SCRIPT), screenshots, unit tests. -->
+<!-- Scripted game / editor runs (RUSTPG2D_AUTOPLAY, RUSTPG2D_EDITOR_SCRIPT), screenshots, unit tests. -->
 
 ## Checklist
 

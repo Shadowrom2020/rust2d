@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn upgrades_16px_project() {
-        let tmp = std::env::temp_dir().join(format!("rust2d_migrate_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("rustpg2d_migrate_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         // A library with a 32px sheet, and a project holding a shrunken copy of it plus an
         // image of its own.

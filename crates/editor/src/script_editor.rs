@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use egui_macroquad::egui::{self, text::LayoutJob, Color32, FontId, Key, Modifiers, Stroke, TextFormat};
-use rust2d_engine::defs::Database;
+use rustpg2d_engine::defs::Database;
 
 /// What a function argument expects (drives completion inside string arguments).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,7 +63,7 @@ macro_rules! api {
     };
 }
 
-/// The engine's script API (see `rust2d_engine::script`). Overloads are listed separately.
+/// The engine's script API (see `rustpg2d_engine::script`). Overloads are listed separately.
 pub const API: &[ApiFn] = api! {
     "flag"(name: Flag) "Whether a flag is set";
     "set_flag"(name: Flag, value: Bool) "Sets or clears a flag (immediately)";
@@ -503,9 +503,9 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                     v.dedup();
                     v.iter().map(|s| c(s, "crafting station")).collect()
                 }
-                Some(Arg::Effect) => rust2d_engine::effects::EffectKind::ALL.iter().map(|k| c(k.id(), k.label())).collect(),
+                Some(Arg::Effect) => rustpg2d_engine::effects::EffectKind::ALL.iter().map(|k| c(k.id(), k.label())).collect(),
                 Some(Arg::Weather) => {
-                    let mut v: Vec<Cand> = rust2d_engine::map::WeatherKind::ALL.iter().map(|k| c(k.id(), k.label())).collect();
+                    let mut v: Vec<Cand> = rustpg2d_engine::map::WeatherKind::ALL.iter().map(|k| c(k.id(), k.label())).collect();
                     v.push(c("default", "the map's own weather"));
                     v
                 }
@@ -910,7 +910,7 @@ mod tests {
     #[test]
     fn suggestions() {
         let mut db = Database::default();
-        db.quests.push(rust2d_engine::quest::QuestDef { id: "pest_control".into(), title: "Pest Control".into(), ..Default::default() });
+        db.quests.push(rustpg2d_engine::quest::QuestDef { id: "pest_control".into(), title: "Pest Control".into(), ..Default::default() });
         let maps = vec!["village".to_string(), "forest".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("forest".to_string(), vec!["west".to_string(), "cave".to_string()])].into();
         let none: Vec<String> = Vec::new();

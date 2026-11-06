@@ -277,7 +277,7 @@ impl Game {
     pub fn new(project: Project, start: StartOptions) -> Result<Game> {
         if project.config.tile_size != crate::project::TILE_SIZE {
             anyhow::bail!(
-                "this project uses {}px tiles; open it once in the rust2d editor to convert it to {}px tiles",
+                "this project uses {}px tiles; open it once in the R(ust)PG2D editor to convert it to {}px tiles",
                 project.config.tile_size,
                 crate::project::TILE_SIZE
             );

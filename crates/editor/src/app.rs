@@ -5,18 +5,18 @@ use std::path::PathBuf;
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Sense, Stroke, StrokeKind};
 use macroquad::prelude::{get_time, Vec2};
-use rust2d_engine::entity::{EntityInstance, EntityKind, Facing};
-use rust2d_engine::map::{Edge, EdgeLink, Map, Respawn, Tile, Zone, ZoneKind, MAX_MAP_SIZE};
-use rust2d_engine::audio::Audio;
-use rust2d_engine::defs::{ContainerSpec, LockSpec, ShopSpec, SpriteRef};
-use rust2d_engine::entity::{PatrolMode, PatrolRoute, ScheduleStop};
+use rustpg2d_engine::entity::{EntityInstance, EntityKind, Facing};
+use rustpg2d_engine::map::{Edge, EdgeLink, Map, Respawn, Tile, Zone, ZoneKind, MAX_MAP_SIZE};
+use rustpg2d_engine::audio::Audio;
+use rustpg2d_engine::defs::{ContainerSpec, LockSpec, ShopSpec, SpriteRef};
+use rustpg2d_engine::entity::{PatrolMode, PatrolRoute, ScheduleStop};
 
 /// Definitions remembered in the entity palette's "Recent" row.
 const RECENT_MAX: usize = 10;
-use rust2d_engine::project::Project;
-use rust2d_engine::refactor::{self, RefKind};
-use rust2d_engine::render::Assets;
-use rust2d_engine::script::ScriptHost;
+use rustpg2d_engine::project::Project;
+use rustpg2d_engine::refactor::{self, RefKind};
+use rustpg2d_engine::render::Assets;
+use rustpg2d_engine::script::ScriptHost;
 
 use crate::database::DbState;
 use crate::files;
@@ -263,7 +263,7 @@ pub struct Editor {
     /// Terrain tool: the armed terrain (tileset id, index into its terrains).
     pub terrain: Option<(String, usize)>,
     /// Copied region / entity (Ctrl+C / Ctrl+X), pasted with Ctrl+V; kept across maps.
-    pub clipboard: Option<rust2d_engine::defs::StructureDef>,
+    pub clipboard: Option<rustpg2d_engine::defs::StructureDef>,
     /// Ctrl+V armed the clipboard: the Select tool shows it at the mouse, clicks paste it.
     pub pasting: bool,
     /// Recently placed / picked definitions, newest first.
@@ -277,14 +277,14 @@ pub struct Editor {
     pub defs_dirty: bool,
     /// Definitions and project settings as last loaded / saved: `defs_dirty` is cleared again
     /// when the edits are reverted (e.g. undone in a text field, a checkbox toggled back).
-    pub(crate) defs_saved: Box<(rust2d_engine::defs::Database, rust2d_engine::project::ProjectConfig)>,
+    pub(crate) defs_saved: Box<(rustpg2d_engine::defs::Database, rustpg2d_engine::project::ProjectConfig)>,
     /// This editor is the Asset Library window (`--library`): `project` is the library.
     pub library_mode: bool,
     /// Lighting preview: renderer and the map's tile lights (refreshed twice a second).
-    pub light_pass: Option<rust2d_engine::render::lighting::LightPass>,
+    pub light_pass: Option<rustpg2d_engine::render::lighting::LightPass>,
     /// Weather preview particles.
-    pub weather_fx: rust2d_engine::render::weather::WeatherFx,
-    pub light_cache: (f64, String, Vec<rust2d_engine::render::lighting::Light>),
+    pub weather_fx: rustpg2d_engine::render::weather::WeatherFx,
+    pub light_cache: (f64, String, Vec<rustpg2d_engine::render::lighting::Light>),
     /// Main editor: the Asset Library window it started.
     pub lib_window: crate::library_window::LibWindow,
     /// Library mode: modification time of the library's definitions as last loaded / saved,
@@ -322,9 +322,9 @@ impl Editor {
         // Projects from before tiles were fixed at 32 px are converted first (with a backup),
         // restoring library art that was shrunken for them.
         let mut converted = None;
-        if rust2d_engine::migrate::stored_tile_size(&root)? != rust2d_engine::project::TILE_SIZE {
-            let lib = rust2d_engine::library::open_library(&rust2d_engine::library::library_dir(), Some(crate::library_ui::STARTER)).ok();
-            converted = rust2d_engine::migrate::upgrade(&root, lib.as_ref())?;
+        if rustpg2d_engine::migrate::stored_tile_size(&root)? != rustpg2d_engine::project::TILE_SIZE {
+            let lib = rustpg2d_engine::library::open_library(&rustpg2d_engine::library::library_dir(), Some(crate::library_ui::STARTER)).ok();
+            converted = rustpg2d_engine::migrate::upgrade(&root, lib.as_ref())?;
         }
         let project = Project::load(&root)?;
         let mut ed = Self::with_project(project, true);
@@ -350,7 +350,7 @@ impl Editor {
 
     /// The welcome screen: no project open.
     pub fn empty() -> Self {
-        let project = Project { root: PathBuf::new(), config: rust2d_engine::project::ProjectConfig::new(""), db: Default::default() };
+        let project = Project { root: PathBuf::new(), config: rustpg2d_engine::project::ProjectConfig::new(""), db: Default::default() };
         Self::with_project(project, false)
     }
 
@@ -672,7 +672,7 @@ impl Editor {
                 e.state = new.to_string();
             }
             if let Some(l) = &mut e.lock {
-                if let rust2d_engine::defs::OnUnlock::ToState { state } = &mut l.on_unlock {
+                if let rustpg2d_engine::defs::OnUnlock::ToState { state } = &mut l.on_unlock {
                     if state == old {
                         *state = new.to_string();
                     }
@@ -831,9 +831,9 @@ impl Editor {
             // The open file's editor text may have unsaved edits: rename in it as well.
             let open = self.db.script_file.as_ref() == Some(&f);
             let Ok(disk) = std::fs::read_to_string(&f) else { continue };
-            let (text, lines) = rust2d_engine::script_refs::rename_in_script(&disk, kind, old, new);
+            let (text, lines) = rustpg2d_engine::script_refs::rename_in_script(&disk, kind, old, new);
             if open {
-                let (buf, _) = rust2d_engine::script_refs::rename_in_script(&self.db.script_text, kind, old, new);
+                let (buf, _) = rustpg2d_engine::script_refs::rename_in_script(&self.db.script_text, kind, old, new);
                 self.db.script_text = buf;
                 self.db.script_dirty = self.db.script_text != self.db.script_saved;
             }
@@ -870,9 +870,9 @@ impl Editor {
 
     fn play_with(&mut self, here: bool, cutscene: Option<&str>) {
         self.save_all();
-        let exe = std::env::current_exe().ok().map(|p| p.with_file_name("rust2d-game"));
+        let exe = std::env::current_exe().ok().map(|p| p.with_file_name("rustpg2d-game"));
         let Some(exe) = exe.filter(|p| p.exists()) else {
-            self.set_status("rust2d-game not found next to the editor; run `cargo build -p rust2d-game`");
+            self.set_status("rustpg2d-game not found next to the editor; run `cargo build -p rustpg2d-game`");
             return;
         };
         let mut cmd = std::process::Command::new(exe);
@@ -899,16 +899,16 @@ impl Editor {
             }
         }
         // A game built from a different engine may not understand this editor's map data
-        // (e.g. `cargo run -p rust2d-editor` does not rebuild rust2d-game).
+        // (e.g. `cargo run -p rustpg2d-editor` does not rebuild rustpg2d-game).
         let game_build = std::process::Command::new(cmd.get_program())
             .arg("--engine-build")
             .output()
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-        let stale = game_build.as_deref() != Some(rust2d_engine::ENGINE_BUILD);
+        let stale = game_build.as_deref() != Some(rustpg2d_engine::ENGINE_BUILD);
         match cmd.spawn() {
             Ok(_) if stale => self.set_status(
-                "Play-test started, but rust2d-game was built from a different engine version; if it fails, run `cargo build -p rust2d-game` (or `cargo build --workspace`)",
+                "Play-test started, but rustpg2d-game was built from a different engine version; if it fails, run `cargo build -p rustpg2d-game` (or `cargo build --workspace`)",
             ),
             Ok(_) if cutscene.is_some() => self.set_status(format!("Playing cut-scene {}()", cutscene.unwrap_or_default())),
             Ok(_) => self.set_status("Play-test started"),
@@ -922,7 +922,7 @@ impl Editor {
     pub fn switch_project(&mut self, root: PathBuf) {
         // (Callers go through `request`, so unsaved changes were saved or discarded.)
         if !root.join("project.ron").exists() {
-            self.set_status(format!("{} is not a rust2d project (no project.ron)", root.display()));
+            self.set_status(format!("{} is not an R(ust)PG2D project (no project.ron)", root.display()));
             return;
         }
         match Editor::new(root.clone()) {
@@ -1061,7 +1061,7 @@ impl Editor {
 
     /// Sprite of an entity definition (props / items; characters use their idle frame, layered
     /// ones a `@char:` marker that `widgets::paint_sprite` paints from their layers).
-    pub fn def_sprite(&self, kind: EntityKind, def: &str) -> Option<rust2d_engine::defs::SpriteRef> {
+    pub fn def_sprite(&self, kind: EntityKind, def: &str) -> Option<rustpg2d_engine::defs::SpriteRef> {
         let db = &self.project.db;
         match kind {
             EntityKind::Prop => db.prop(def).map(|d| d.sprite.clone()),
@@ -1071,14 +1071,14 @@ impl Editor {
     }
 
     /// Layers of a character definition, or of a placed character with its own look / items.
-    pub fn char_layers(&self, def: &str, inst: Option<&rust2d_engine::entity::EntityInstance>, facing: rust2d_engine::entity::Facing, col: u32) -> Vec<rust2d_engine::render::character::Layer> {
-        use rust2d_engine::render::character;
+    pub fn char_layers(&self, def: &str, inst: Option<&rustpg2d_engine::entity::EntityInstance>, facing: rustpg2d_engine::entity::Facing, col: u32) -> Vec<rustpg2d_engine::render::character::Layer> {
+        use rustpg2d_engine::render::character;
         let Some(d) = self.project.db.character(def) else { return Vec::new() };
         character::layers(&self.project.db, character::appearance_of(d, inst), character::equipment_of(d, inst), facing, col, false)
     }
 
     /// Draws character layers with the bottom-center at `feet` (map view, macroquad).
-    pub fn draw_char_layers(&self, layers: &[rust2d_engine::render::character::Layer], feet: Vec2, tint: macroquad::color::Color) -> bool {
+    pub fn draw_char_layers(&self, layers: &[rustpg2d_engine::render::character::Layer], feet: Vec2, tint: macroquad::color::Color) -> bool {
         let mut any = false;
         for l in layers {
             any |= self.assets.draw_frame_colored(&l.sheet, l.frame, feet, tint, l.skin, l.hair);
@@ -1302,7 +1302,7 @@ impl Editor {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(80.0);
-                ui.heading(egui::RichText::new("rust2d editor").size(34.0));
+                ui.heading(egui::RichText::new("R(ust)PG2D editor").size(34.0));
                 ui.label("Maps, characters, props, items and events for top-down RPGs.");
                 ui.add_space(24.0);
                 if ui.add_sized([260.0, 36.0], egui::Button::new("\u{E6A2} New project…")).on_hover_text("Choose an empty folder for the project").clicked() {
@@ -1312,12 +1312,12 @@ impl Editor {
                 if ui.add_sized([260.0, 36.0], egui::Button::new("\u{E256} Open project…")).on_hover_text("Choose a folder containing project.ron").clicked() {
                     self.open_file_dialog(files::Purpose::OpenProject);
                 }
-                // Packaged rust2d (AppImage / Flatpak): the example game, copied out to be editable.
+                // Packaged R(ust)PG2D (AppImage / Flatpak): the example game, copied out to be editable.
                 if files::bundled_example().is_some() {
                     ui.add_space(6.0);
                     if ui
                         .add_sized([260.0, 36.0], egui::Button::new(ui::t(ph::GAME_CONTROLLER, "Example project")))
-                        .on_hover_text("Opens the example game; the first time it is copied to ~/rust2d/example_project")
+                        .on_hover_text("Opens the example game; the first time it is copied to ~/rustpg2d/example_project")
                         .clicked()
                     {
                         self.open_example();
@@ -1583,7 +1583,7 @@ impl Editor {
                     ui::toggle(ui, &mut self.view.minimap, ph::MAP_TRIFOLD, "Minimap", "", "Overview in the corner of the map");
                     ui::toggle(ui, &mut self.view.lighting, ph::LIGHTBULB, "Lighting preview", "", "Shows the map's darkness and its lights as in the game (outdoor maps at the hour chosen next to it)");
                     ui::toggle(ui, &mut self.view.weather, ph::CLOUD_RAIN, "Weather preview", "", "Shows the map's rain, snow or fog as in the game (set it in the map's settings: nothing selected)");
-                    let outdoor = self.doc.as_ref().is_some_and(|d| d.map.lighting.mode == rust2d_engine::map::LightMode::Outdoor);
+                    let outdoor = self.doc.as_ref().is_some_and(|d| d.map.lighting.mode == rustpg2d_engine::map::LightMode::Outdoor);
                     if self.view.lighting && outdoor {
                         let mut h = self.view.hour;
                         let label = format!("{:02}:{:02}", h as u32, (h.fract() * 60.0) as u32);
@@ -1952,7 +1952,7 @@ impl Editor {
     fn palette(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Tileset");
-            self.add_from_library_button(ui, Some(rust2d_engine::refactor::RefKind::Tileset));
+            self.add_from_library_button(ui, Some(rustpg2d_engine::refactor::RefKind::Tileset));
         });
         let mut ids: Vec<String> = self.project.db.tilesets.iter().map(|t| t.id.clone()).collect();
         ids.sort();
@@ -2020,9 +2020,9 @@ impl Editor {
         ui.horizontal(|ui| {
             ui.heading("Place");
             let kind = self.place_tab.map(|k| match k {
-                EntityKind::Prop => rust2d_engine::refactor::RefKind::Prop,
-                EntityKind::Character => rust2d_engine::refactor::RefKind::Character,
-                EntityKind::Item => rust2d_engine::refactor::RefKind::Item,
+                EntityKind::Prop => rustpg2d_engine::refactor::RefKind::Prop,
+                EntityKind::Character => rustpg2d_engine::refactor::RefKind::Character,
+                EntityKind::Item => rustpg2d_engine::refactor::RefKind::Item,
             });
             self.add_from_library_button(ui, kind);
             if !self.place_def.is_empty() && ui.button("\u{E4F6} Stop placing").on_hover_text("Right-click or Esc on the map").clicked() {
@@ -2272,7 +2272,7 @@ impl Editor {
                     ui.separator();
                     let own = e.appearance.is_some() || e.equipment.is_some() || e.inventory.is_some();
                     egui::CollapsingHeader::new(ui::t(ph::USER, "Look & equipment")).default_open(true).show(ui, |ui| {
-                        use rust2d_engine::render::character;
+                        use rustpg2d_engine::render::character;
                         widgets::character_preview(ui, &self.tex, &self.assets, db, character::appearance_of(d, Some(e)), character::equipment_of(d, Some(e)));
                         let mut what = Vec::new();
                         if e.appearance.is_some() {
@@ -2338,7 +2338,7 @@ impl Editor {
                         ui.separator();
                         ui.heading("Loot");
                         let def_loot = db.character(&e.def).map(|d| d.loot.clone()).unwrap_or_default();
-                        let mut set: Option<Option<Vec<rust2d_engine::defs::LootEntry>>> = None;
+                        let mut set: Option<Option<Vec<rustpg2d_engine::defs::LootEntry>>> = None;
                         match &mut e.loot {
                             Some(table) => {
                                 widgets::loot_ui(ui, &format!("loot{uid}"), table, refs, &self.tex, &self.assets, db);
@@ -2443,7 +2443,7 @@ impl Editor {
                                     egui::DragValue::new(&mut s.hour)
                                         .range(0.0..=23.75)
                                         .speed(0.05)
-                                        .custom_formatter(|h, _| rust2d_engine::entity::hour_text(h as f32))
+                                        .custom_formatter(|h, _| rustpg2d_engine::entity::hour_text(h as f32))
                                         .custom_parser(|t| match t.split_once(':') {
                                             Some((h, m)) => Some(h.trim().parse::<f64>().ok()? + m.trim().parse::<f64>().ok()? / 60.0),
                                             None => t.trim().parse().ok(),
@@ -2559,9 +2559,9 @@ impl Editor {
                     ui.weak(format!("+ {n_def} trigger(s) from the definition (Database)."));
                 }
                 let owner = match e.kind {
-                    EntityKind::Character => rust2d_engine::events::TriggerOwner::Character,
-                    EntityKind::Prop => rust2d_engine::events::TriggerOwner::Prop,
-                    EntityKind::Item => rust2d_engine::events::TriggerOwner::Pickup,
+                    EntityKind::Character => rustpg2d_engine::events::TriggerOwner::Character,
+                    EntityKind::Prop => rustpg2d_engine::events::TriggerOwner::Prop,
+                    EntityKind::Item => rustpg2d_engine::events::TriggerOwner::Pickup,
                 };
                 widgets::triggers_ui(ui, &format!("e{uid}"), &mut e.triggers, refs, owner);
             }
@@ -2584,7 +2584,7 @@ impl Editor {
                     let def_loot = db.character(character).map(|d| d.loot.clone()).unwrap_or_default();
                     ui.separator();
                     ui.heading("Loot of spawned characters");
-                    let mut set: Option<Option<Vec<rust2d_engine::defs::LootEntry>>> = None;
+                    let mut set: Option<Option<Vec<rustpg2d_engine::defs::LootEntry>>> = None;
                     match &mut z.loot {
                         Some(table) => {
                             widgets::loot_ui(ui, &format!("zloot{uid}"), table, refs, &self.tex, &self.assets, db);
@@ -2610,7 +2610,7 @@ impl Editor {
                 ui.separator();
                 ui.heading("Triggers");
                 ui.weak("Zones react to Enter, Leave and Interact (pressing E while inside).");
-                widgets::triggers_ui(ui, &format!("z{uid}"), &mut z.triggers, refs, rust2d_engine::events::TriggerOwner::Zone);
+                widgets::triggers_ui(ui, &format!("z{uid}"), &mut z.triggers, refs, rustpg2d_engine::events::TriggerOwner::Zone);
             }
             Selection::Region(r) => region_req = crate::clipboard::region_inspector(ui, &doc.map, r, self.clipboard.as_ref()),
             Selection::None => {
@@ -2655,7 +2655,7 @@ impl Editor {
                 ui.separator();
                 ui.heading("Lighting");
                 {
-                    use rust2d_engine::map::LightMode;
+                    use rustpg2d_engine::map::LightMode;
                     let l = &mut map.lighting;
                     ui.horizontal_wrapped(|ui| {
                         ui.radio_value(&mut l.mode, LightMode::Bright, "Always bright").on_hover_text("No darkness; lights are not drawn");
@@ -2676,7 +2676,7 @@ impl Editor {
                 ui.separator();
                 ui.heading("Weather");
                 {
-                    use rust2d_engine::map::WeatherKind;
+                    use rustpg2d_engine::map::WeatherKind;
                     let w = &mut map.weather;
                     ui.horizontal_wrapped(|ui| {
                         for k in WeatherKind::ALL {
@@ -2732,7 +2732,7 @@ impl Editor {
                 ui.separator();
                 ui.heading("Map triggers");
                 ui.weak("Map enter and custom events.");
-                widgets::triggers_ui(ui, "map", &mut map.triggers, refs, rust2d_engine::events::TriggerOwner::Map);
+                widgets::triggers_ui(ui, "map", &mut map.triggers, refs, rustpg2d_engine::events::TriggerOwner::Map);
                 ui.separator();
                 ui.collapsing(format!("Entities ({})", map.entities.len()), |ui| {
                     for e in &map.entities {
@@ -2970,7 +2970,7 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
 }
 
 /// "Uses …: Coin 50% (1-3), Apple 10%" for a loot table that isn't customized here.
-fn loot_summary(table: &[rust2d_engine::defs::LootEntry], db: &rust2d_engine::defs::Database, prefix: &str) -> String {
+fn loot_summary(table: &[rustpg2d_engine::defs::LootEntry], db: &rustpg2d_engine::defs::Database, prefix: &str) -> String {
     if table.is_empty() {
         return format!("{prefix}: nothing.");
     }
@@ -2996,8 +2996,8 @@ fn valid_name(s: &str) -> bool {
 
 /// Flag names used anywhere on a map (for suggestions).
 /// Flag and variable names used by triggers (conditions and actions, also nested in "If").
-pub fn collect_names(ts: &[rust2d_engine::events::Trigger], flags: &mut Vec<String>, vars: &mut Vec<String>) {
-    use rust2d_engine::events::{Action, Cond, Condition};
+pub fn collect_names(ts: &[rustpg2d_engine::events::Trigger], flags: &mut Vec<String>, vars: &mut Vec<String>) {
+    use rustpg2d_engine::events::{Action, Cond, Condition};
     fn conds(cs: &[Condition], flags: &mut Vec<String>, vars: &mut Vec<String>) {
         for c in cs {
             match &c.cond {
@@ -3046,8 +3046,8 @@ fn collect_map_names(map: &Map, flags: &mut Vec<String>, vars: &mut Vec<String>)
 
 /// Dialog speakers to offer for a map: placeholders, the characters on it (definition
 /// names and named instances) and speakers its dialogs already use.
-pub fn speakers_of(map: &Map, db: &rust2d_engine::defs::Database) -> Vec<(String, String)> {
-    use rust2d_engine::events::{Action, Trigger};
+pub fn speakers_of(map: &Map, db: &rustpg2d_engine::defs::Database) -> Vec<(String, String)> {
+    use rustpg2d_engine::events::{Action, Trigger};
     let mut out: Vec<(String, String)> = vec![("{self}".into(), "name of the trigger's owner".into()), ("{player}".into(), "the player's name".into())];
     let mut add = |v: String, hint: String| {
         if !v.trim().is_empty() && !out.iter().any(|(o, _)| *o == v) {

@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn hot_reload_keeps_working_scripts_on_errors() {
-        let dir = std::env::temp_dir().join(format!("rust2d_reload_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rustpg2d_reload_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.rhai"), "fn greet() { set_var(\"n\", 1); }").unwrap();

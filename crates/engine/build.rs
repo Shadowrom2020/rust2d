@@ -28,5 +28,5 @@ fn main() {
             h = h.wrapping_mul(0x0100_0000_01b3);
         }
     }
-    println!("cargo:rustc-env=RUST2D_ENGINE_BUILD={h:016x}");
+    println!("cargo:rustc-env=RUSTPG2D_ENGINE_BUILD={h:016x}");
 }

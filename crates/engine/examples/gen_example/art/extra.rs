@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use rust2d_engine::defs::*;
-use rust2d_engine::entity::Facing;
-use rust2d_engine::imageio::Rgba;
+use rustpg2d_engine::defs::*;
+use rustpg2d_engine::entity::Facing;
+use rustpg2d_engine::imageio::Rgba;
 
 use super::*;
 
@@ -167,7 +167,7 @@ fn sheet(rows: u32, tiles: &mut dyn FnMut(&mut Canvas, u32)) -> Canvas {
     c
 }
 
-type Tileset = (&'static str, Canvas, Vec<u32>, Vec<TileAnim>, Vec<rust2d_engine::autotile::Terrain>);
+type Tileset = (&'static str, Canvas, Vec<u32>, Vec<TileAnim>, Vec<rustpg2d_engine::autotile::Terrain>);
 
 // ------------------------------------------------------------------ auto-tiling terrains
 
@@ -186,8 +186,8 @@ struct TerrainSpec<'a> {
 /// Appends the terrains' 4×4 edge blocks below a sheet of `rows` rows (two blocks per band of
 /// four rows; the existing tiles keep their pixels and indices) and returns the grown sheet,
 /// the terrains and their solid tiles.
-fn add_terrains(c: Canvas, rows: u32, specs: &[TerrainSpec]) -> (Canvas, Vec<rust2d_engine::autotile::Terrain>, Vec<u32>) {
-    use rust2d_engine::autotile::Terrain;
+fn add_terrains(c: Canvas, rows: u32, specs: &[TerrainSpec]) -> (Canvas, Vec<rustpg2d_engine::autotile::Terrain>, Vec<u32>) {
+    use rustpg2d_engine::autotile::Terrain;
     let bands = (specs.len() as u32).div_ceil(2);
     let mut big = Canvas::new(8 * TS, (rows + bands * 4) * TS);
     for y in 0..c.img.height as u32 {
@@ -1672,7 +1672,7 @@ fn characters(x: &mut Extras) {
             "skeleton" | "skeleton_f" => {
                 // A skeleton's cold touch slows for a few seconds.
                 let mut d = foe(ch(id, name, 70.0, Behavior::chase(5.0)), 3, 2, 20);
-                d.touch_effect = Some(rust2d_engine::effects::EffectSpec::new(rust2d_engine::effects::EffectKind::Slow, 40.0, 3.0));
+                d.touch_effect = Some(rustpg2d_engine::effects::EffectSpec::new(rustpg2d_engine::effects::EffectKind::Slow, 40.0, 3.0));
                 d
             }
             "goblin_f" => {
@@ -1693,9 +1693,9 @@ fn characters(x: &mut Extras) {
         let mut d = d;
         if let Some((_, _, look)) = layered.iter().find(|p| p.0 == *id) {
             d.appearance = appearance_of(look);
-            *d.equipment.slot_mut(EquipSlot::Clothing) = Some(rust2d_engine::inventory::ItemStack::new(&format!("outfit_{id}"), 1));
+            *d.equipment.slot_mut(EquipSlot::Clothing) = Some(rustpg2d_engine::inventory::ItemStack::new(&format!("outfit_{id}"), 1));
             if matches!(look.hat, Hat::Helmet) {
-                *d.equipment.slot_mut(EquipSlot::Head) = Some(rust2d_engine::inventory::ItemStack::new("iron_helmet", 1));
+                *d.equipment.slot_mut(EquipSlot::Head) = Some(rustpg2d_engine::inventory::ItemStack::new("iron_helmet", 1));
             }
         }
         x.db.characters.push(d);

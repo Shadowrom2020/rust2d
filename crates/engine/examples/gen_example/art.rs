@@ -6,11 +6,11 @@
 use std::path::Path;
 
 use macroquad::prelude::{Color, Image};
-use rust2d_engine::defs::{Armor, EquipSlot, ItemDef, SpriteRef};
-use rust2d_engine::entity::Facing;
+use rustpg2d_engine::defs::{Armor, EquipSlot, ItemDef, SpriteRef};
+use rustpg2d_engine::entity::Facing;
 
 /// Tile size in pixels.
-pub const TS: u32 = rust2d_engine::project::TILE_SIZE;
+pub const TS: u32 = rustpg2d_engine::project::TILE_SIZE;
 /// Scale of the art relative to the classic 16px grid (hitboxes and speeds are given in
 /// 16px units and multiplied by this).
 pub const R: f32 = TS as f32 / 16.0;
@@ -859,7 +859,7 @@ impl EdgeArt<'_> {
     /// band along every open side (whose neighbour isn't the terrain), with rounded corners. The
     /// wobble repeats every 32 px, so the bands of neighbouring tiles join up.
     fn outside_at(&self, mask: usize, x: i32, y: i32) -> bool {
-        use rust2d_engine::autotile::{EAST, NORTH, SOUTH, WEST};
+        use rustpg2d_engine::autotile::{EAST, NORTH, SOUTH, WEST};
         let natural = self.natural;
         let wob = |p: i32| {
             if !natural {
@@ -894,7 +894,7 @@ impl EdgeArt<'_> {
 pub fn edge_block(c: &mut Canvas, first: u32, cols: u32, art: &EdgeArt) {
     let n = TS as i32;
     for k in 0..16usize {
-        let i = rust2d_engine::autotile::Terrain::block_tile(first, cols, k);
+        let i = rustpg2d_engine::autotile::Terrain::block_tile(first, cols, k);
         c.at(i % cols * TS, i / cols * TS);
         (art.inside)(c, k);
         let mut g = Canvas::new(TS, TS);
@@ -948,12 +948,12 @@ pub fn terrain_index(name: &str) -> usize {
 }
 
 /// The terrain tileset's auto-tiling terrains.
-pub fn terrains() -> Vec<rust2d_engine::autotile::Terrain> {
+pub fn terrains() -> Vec<rustpg2d_engine::autotile::Terrain> {
     TERRAINS
         .iter()
         .enumerate()
         .map(|(b, &(name, inside, base, joins))| {
-            let mut tr = rust2d_engine::autotile::Terrain { name: name.into(), base: Some(base), joins: joins.iter().map(|j| j.to_string()).collect(), ..Default::default() };
+            let mut tr = rustpg2d_engine::autotile::Terrain { name: name.into(), base: Some(base), joins: joins.iter().map(|j| j.to_string()).collect(), ..Default::default() };
             tr.fill_from_block(block_start(5, b as u32), 8);
             if let Some(i) = inside {
                 tr.tiles[15] = Some(i);
@@ -965,12 +965,12 @@ pub fn terrains() -> Vec<rust2d_engine::autotile::Terrain> {
 
 /// Animations of the terrain tileset: the water, and the insides of the water terrains with
 /// their own tiles (Shore, Stream) cycling through the same frames.
-pub fn terrain_anims() -> Vec<rust2d_engine::defs::TileAnim> {
+pub fn terrain_anims() -> Vec<rustpg2d_engine::defs::TileAnim> {
     let frames = vec![t::WATER, t::WATER_2, t::WATER_3, t::WATER_2];
-    let mut v = vec![rust2d_engine::defs::TileAnim { tile: t::WATER, frames: frames.clone(), fps: 3.0 }];
+    let mut v = vec![rustpg2d_engine::defs::TileAnim { tile: t::WATER, frames: frames.clone(), fps: 3.0 }];
     for name in ["Shore", "Stream"] {
-        let inside = rust2d_engine::autotile::Terrain::block_tile(block_start(5, terrain_index(name) as u32), 8, 15);
-        v.push(rust2d_engine::defs::TileAnim { tile: inside, frames: frames.clone(), fps: 3.0 });
+        let inside = rustpg2d_engine::autotile::Terrain::block_tile(block_start(5, terrain_index(name) as u32), 8, 15);
+        v.push(rustpg2d_engine::defs::TileAnim { tile: inside, frames: frames.clone(), fps: 3.0 });
     }
     v
 }
@@ -981,7 +981,7 @@ pub fn terrain_solid() -> Vec<u32> {
     let water = ["Pond", "Shore", "Stream"].map(terrain_index);
     let mut v: Vec<u32> = SOLID.to_vec();
     for b in water {
-        v.extend((0..16).map(|k| rust2d_engine::autotile::Terrain::block_tile(block_start(5, b as u32), 8, k)));
+        v.extend((0..16).map(|k| rustpg2d_engine::autotile::Terrain::block_tile(block_start(5, b as u32), 8, k)));
     }
     v
 }
@@ -1715,13 +1715,13 @@ fn rgb(v: u32) -> [u8; 3] {
 }
 
 /// The layered model of a look: body, skin, hair style, beard.
-pub fn appearance_of(look: &Look) -> rust2d_engine::defs::Appearance {
-    rust2d_engine::defs::Appearance { body: body_id(look).into(), skin: rgb(look.skin), hair: hair_id(look).into(), hair_color: rgb(look.hair), beard: beard_id(look).into() }
+pub fn appearance_of(look: &Look) -> rustpg2d_engine::defs::Appearance {
+    rustpg2d_engine::defs::Appearance { body: body_id(look).into(), skin: rgb(look.skin), hair: hair_id(look).into(), hair_color: rgb(look.hair), beard: beard_id(look).into() }
 }
 
 /// The shared layer sheets of layered characters: (sheet id, canvas, kind, female body).
-pub fn shared_layers() -> Vec<(String, Canvas, rust2d_engine::defs::SheetKind, bool)> {
-    use rust2d_engine::defs::SheetKind as K;
+pub fn shared_layers() -> Vec<(String, Canvas, rustpg2d_engine::defs::SheetKind, bool)> {
+    use rustpg2d_engine::defs::SheetKind as K;
     let hair = |s: HairStyle| Look { hair_style: s, ..Default::default() };
     let beard = |s: BeardStyle| Look { beard: true, beard_style: s, ..Default::default() };
     let mut v = vec![

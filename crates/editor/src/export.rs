@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use egui_macroquad::egui::{self, Color32};
-use rust2d_engine::release;
+use rustpg2d_engine::release;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -51,20 +51,20 @@ fn glibc_note(bin: &std::path::Path) -> Option<(String, bool)> {
     let text = if wide {
         format!("Runs on Linux with glibc {maj}.{min} or newer (Debian 12, Ubuntu 22.04, Fedora 35, RHEL 9 and later), and in Flatpak.")
     } else {
-        format!("This game executable needs glibc {maj}.{min}: older distributions (and Flatpak runtimes with an older glibc) can't start it. Rebuild rust2d-game from this rust2d version.")
+        format!("This game executable needs glibc {maj}.{min}: older distributions (and Flatpak runtimes with an older glibc) can't start it. Rebuild rustpg2d-game from this R(ust)PG2D version.")
     };
     Some((text, wide))
 }
 
-/// The rust2d-game executable to ship: a release build if there is one, else the one next to
+/// The rustpg2d-game executable to ship: a release build if there is one, else the one next to
 /// the editor. Returns (path, is a debug build).
 pub fn game_binary() -> Option<(PathBuf, bool)> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    let next_to = dir.join("rust2d-game");
+    let next_to = dir.join("rustpg2d-game");
     // Inside a cargo target folder, prefer target/release over target/debug.
     if dir.file_name().is_some_and(|n| n == "debug") {
-        let rel = dir.parent()?.join("release/rust2d-game");
+        let rel = dir.parent()?.join("release/rustpg2d-game");
         if rel.is_file() {
             return Some((rel, false));
         }
@@ -89,7 +89,7 @@ impl Editor {
             return Err("Unsaved changes could not be saved; nothing was exported.".into());
         }
         let Some((bin, debug)) = game_binary() else {
-            return Err("rust2d-game was not found next to the editor. Build it with `cargo build --release -p rust2d-game`.".into());
+            return Err("rustpg2d-game was not found next to the editor. Build it with `cargo build --release -p rustpg2d-game`.".into());
         };
         let out_dir = std::path::Path::new(out);
         let r = release::export(&self.project, name, &bin, out_dir, opts.zip).map_err(|e| format!("{e:#}"))?;
@@ -119,7 +119,7 @@ impl Editor {
             }
         }
         if debug {
-            msg += "\nNote: this used a debug build of the game. For full speed run `cargo build --release -p rust2d-game` and export again.";
+            msg += "\nNote: this used a debug build of the game. For full speed run `cargo build --release -p rustpg2d-game` and export again.";
         }
         for w in r.warnings {
             msg += &format!("\nWarning: {w}");
@@ -134,7 +134,7 @@ impl Editor {
         let (_, check) = release::check(&self.project);
         egui::Window::new("Export game").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
             ui.label("Creates a standalone copy of the game that runs without the editor: the game executable plus the project's data (maps, definitions, scripts and the images and sounds in use; never save games).");
-            ui.weak("rust2d-LICENSE.txt (the MIT license of the rust2d engine in the game executable) is included in every export and package. Your game's own license is up to you.");
+            ui.weak("rustpg2d-LICENSE.txt (the MIT license of the R(ust)PG2D engine in the game executable) is included in every export and package. Your game's own license is up to you.");
             egui::Grid::new("export").num_columns(2).show(ui, |ui| {
                 ui.label("Game name");
                 ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(260.0));
@@ -216,8 +216,8 @@ impl Editor {
             }
             match game_binary() {
                 Some((p, false)) => ui.weak(format!("Game executable: {}", p.display())),
-                Some((p, true)) => ui.colored_label(Color32::YELLOW, format!("Only a debug build of the game was found ({}). It works but runs slower; `cargo build --release -p rust2d-game` gives a fast one.", p.display())),
-                None => ui.colored_label(Color32::LIGHT_RED, "rust2d-game not found next to the editor; build it with `cargo build --release -p rust2d-game`."),
+                Some((p, true)) => ui.colored_label(Color32::YELLOW, format!("Only a debug build of the game was found ({}). It works but runs slower; `cargo build --release -p rustpg2d-game` gives a fast one.", p.display())),
+                None => ui.colored_label(Color32::LIGHT_RED, "rustpg2d-game not found next to the editor; build it with `cargo build --release -p rustpg2d-game`."),
             };
             for e in &check.errors {
                 ui.colored_label(Color32::LIGHT_RED, format!("\u{E4F6} {e}"));

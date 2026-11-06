@@ -3,12 +3,12 @@
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Sense, Stroke, StrokeKind};
 
 use crate::ui::{self, ph};
-use rust2d_engine::audio::Audio;
-use rust2d_engine::defs::*;
-use rust2d_engine::events::TriggerOn;
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::refactor::RefKind;
-use rust2d_engine::render::Assets;
+use rustpg2d_engine::audio::Audio;
+use rustpg2d_engine::defs::*;
+use rustpg2d_engine::events::TriggerOn;
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::refactor::RefKind;
+use rustpg2d_engine::render::Assets;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -223,7 +223,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         // The selected asset of this tab, for the library / package buttons.
         let i = ed.db.sel;
         let db = &ed.project.db;
-        let current: Option<rust2d_engine::library::AssetRef> = match ed.db.tab {
+        let current: Option<rustpg2d_engine::library::AssetRef> = match ed.db.tab {
             Tab::Items => db.items.get(i).map(|d| (RefKind::Item, d.id.clone())),
             Tab::Props => db.props.get(i).map(|d| (RefKind::Prop, d.id.clone())),
             Tab::Characters => db.characters.get(i).map(|d| (RefKind::Character, d.id.clone())),
@@ -384,7 +384,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.skills,
                     sel,
                     |d| format!("{}  ({})", d.name, d.id),
-                    |ids| rust2d_engine::skills::SkillDef::new(&unique("skill", ids), "New skill", "", SpriteRef::default(), 5, rust2d_engine::skills::SkillEffect::None),
+                    |ids| rustpg2d_engine::skills::SkillDef::new(&unique("skill", ids), "New skill", "", SpriteRef::default(), 5, rustpg2d_engine::skills::SkillEffect::None),
                     |d| &mut d.id,
                 ),
                 Tab::Spells => list_ui(
@@ -392,7 +392,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.spells,
                     sel,
                     |d| format!("{}  ({})", d.name, d.id),
-                    |ids| rust2d_engine::skills::SpellDef::new(&unique("spell", ids), "New spell", "", SpriteRef::default(), 5, 1.0, rust2d_engine::skills::SpellEffect::Heal { amount: 4 }),
+                    |ids| rustpg2d_engine::skills::SpellDef::new(&unique("spell", ids), "New spell", "", SpriteRef::default(), 5, 1.0, rustpg2d_engine::skills::SpellEffect::Heal { amount: 4 }),
                     |d| &mut d.id,
                 ),
                 Tab::Recipes => {
@@ -407,7 +407,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                             let at = if d.station.is_empty() { String::new() } else { format!(" @ {}", d.station) };
                             format!("{made}{at}  ({})", d.id)
                         },
-                        |ids| rust2d_engine::crafting::RecipeDef::new(&unique("recipe", ids), "", 1, Vec::new(), ""),
+                        |ids| rustpg2d_engine::crafting::RecipeDef::new(&unique("recipe", ids), "", 1, Vec::new(), ""),
                         |d| &mut d.id,
                     )
                 }
@@ -416,7 +416,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.achievements,
                     sel,
                     |d| format!("{}{}  ({})", d.name, if d.hidden { " (hidden)" } else { "" }, d.id),
-                    |ids| rust2d_engine::achievements::AchievementDef::new(&unique("achievement", ids), "New achievement", "", SpriteRef::default(), Vec::new()),
+                    |ids| rustpg2d_engine::achievements::AchievementDef::new(&unique("achievement", ids), "New achievement", "", SpriteRef::default(), Vec::new()),
                     |d| &mut d.id,
                 ),
                 Tab::Quests => list_ui(
@@ -424,7 +424,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.quests,
                     sel,
                     |d| format!("{}  ({})", d.title, d.id),
-                    |ids| rust2d_engine::quest::QuestDef { id: unique("quest", ids), title: "New quest".into(), description: String::new(), stages: vec!["First objective".into()], xp: 0 },
+                    |ids| rustpg2d_engine::quest::QuestDef { id: unique("quest", ids), title: "New quest".into(), description: String::new(), stages: vec!["First objective".into()], xp: 0 },
                     |d| &mut d.id,
                 ),
                 _ => false,
@@ -848,7 +848,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     if matches!(d.equip_slot(), Some(EquipSlot::Weapon | EquipSlot::Offhand | EquipSlot::Tool)) {
         ui.horizontal(|ui| {
             ui.label("Held sprite");
-            let held: Vec<String> = cx.db.sheets.iter().filter(|s| s.kind == rust2d_engine::defs::SheetKind::Held).map(|s| s.id.clone()).collect();
+            let held: Vec<String> = cx.db.sheets.iter().filter(|s| s.kind == rustpg2d_engine::defs::SheetKind::Held).map(|s| s.id.clone()).collect();
             widgets::suggest(ui, "item_held", &mut d.held, &held, 140.0);
             ui.weak("(sheet in the character layout: how it looks in a character's hand; empty = not visible)");
         });
@@ -878,7 +878,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     ui.separator();
     ui.heading("On use");
     ui.weak("Runs when the item is used from the inventory and the entity in front of the player didn't react to it.");
-    widgets::triggers_ui(ui, &format!("item/{}", d.id), &mut d.on_use, cx.refs, rust2d_engine::events::TriggerOwner::ItemUse);
+    widgets::triggers_ui(ui, &format!("item/{}", d.id), &mut d.on_use, cx.refs, rustpg2d_engine::events::TriggerOwner::ItemUse);
     for t in &mut d.on_use {
         if !matches!(t.on, TriggerOn::UseItem { .. }) {
             t.on = TriggerOn::UseItem { item: String::new() };
@@ -930,12 +930,12 @@ fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     ui.separator();
     ui.heading("Default triggers");
     ui.weak("Run for every placed instance, in addition to the instance's own triggers.");
-    widgets::triggers_ui(ui, &format!("prop/{}", d.id), &mut d.triggers, cx.refs, rust2d_engine::events::TriggerOwner::Prop);
+    widgets::triggers_ui(ui, &format!("prop/{}", d.id), &mut d.triggers, cx.refs, rustpg2d_engine::events::TriggerOwner::Prop);
 }
 
 /// Furniture: where and how the player uses the prop (sits, lies, stands at it).
 fn use_spot_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
-    use rust2d_engine::defs::{Pose, UseSpot};
+    use rustpg2d_engine::defs::{Pose, UseSpot};
     ui.heading("Furniture");
     let mut on = d.use_spot.is_some();
     if ui.checkbox(&mut on, "The player can use it (sit, sleep, stand at it)").changed() {
@@ -951,7 +951,7 @@ fn use_spot_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
         }
     });
     if s.pose != before && s.pose == Pose::Lie {
-        s.facing = rust2d_engine::entity::Facing::Up; // a new bed: the head at the top
+        s.facing = rustpg2d_engine::entity::Facing::Up; // a new bed: the head at the top
     }
     egui::Grid::new("use_spot").num_columns(2).show(ui, |ui| {
         ui.label("Spot (px)");
@@ -964,23 +964,23 @@ fn use_spot_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
         ui.end_row();
         // In a bed the facing is the side the head lies on.
         let lie = s.pose == Pose::Lie;
-        let name = |f: rust2d_engine::entity::Facing| match (lie, f) {
-            (true, rust2d_engine::entity::Facing::Up) => "Top (upright bed)",
-            (true, rust2d_engine::entity::Facing::Left) => "Left (sideways bed)",
-            (true, rust2d_engine::entity::Facing::Right) => "Right (sideways bed)",
-            (true, rust2d_engine::entity::Facing::Down) => "Bottom",
+        let name = |f: rustpg2d_engine::entity::Facing| match (lie, f) {
+            (true, rustpg2d_engine::entity::Facing::Up) => "Top (upright bed)",
+            (true, rustpg2d_engine::entity::Facing::Left) => "Left (sideways bed)",
+            (true, rustpg2d_engine::entity::Facing::Right) => "Right (sideways bed)",
+            (true, rustpg2d_engine::entity::Facing::Down) => "Bottom",
             (false, f) => f.label(),
         };
         ui.label(if lie { "Head at" } else { "Facing" });
         egui::ComboBox::from_id_salt("use_spot_facing").selected_text(name(s.facing)).width(150.0).show_ui(ui, |ui| {
-            for f in rust2d_engine::entity::Facing::ALL {
+            for f in rustpg2d_engine::entity::Facing::ALL {
                 ui.selectable_value(&mut s.facing, f, name(f));
             }
         });
         ui.end_row();
         if s.pose == Pose::Lie {
             ui.label("Sleep until");
-            ui.add(egui::DragValue::new(&mut s.sleep_until).range(0.0..=23.75).speed(0.25).custom_formatter(|h, _| rust2d_engine::entity::hour_text(h as f32)));
+            ui.add(egui::DragValue::new(&mut s.sleep_until).range(0.0..=23.75).speed(0.25).custom_formatter(|h, _| rustpg2d_engine::entity::hour_text(h as f32)));
             ui.end_row();
         }
     });
@@ -1176,8 +1176,8 @@ fn all_names_except(d: &PropDef, i: usize) -> Vec<String> {
 }
 
 /// Renames a prop state in "Set prop state" actions and "Prop state" conditions aimed at "self".
-pub fn rename_state_in_triggers(ts: &mut [rust2d_engine::events::Trigger], old: &str, new: &str) {
-    use rust2d_engine::events::{Action, Cond};
+pub fn rename_state_in_triggers(ts: &mut [rustpg2d_engine::events::Trigger], old: &str, new: &str) {
+    use rustpg2d_engine::events::{Action, Cond};
     fn actions(acts: &mut [Action], old: &str, new: &str) {
         for a in acts {
             match a {
@@ -1191,7 +1191,7 @@ pub fn rename_state_in_triggers(ts: &mut [rust2d_engine::events::Trigger], old: 
             }
         }
     }
-    fn conds(cs: &mut [rust2d_engine::events::Condition], old: &str, new: &str) {
+    fn conds(cs: &mut [rustpg2d_engine::events::Condition], old: &str, new: &str) {
         for c in cs {
             if let Cond::PropState { target, state } = &mut c.cond {
                 if (target == "self" || target.is_empty()) && state == old {
@@ -1348,10 +1348,10 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     }
     ui.separator();
     ui.heading("Default triggers");
-    widgets::triggers_ui(ui, &format!("chr/{}", d.id), &mut d.triggers, cx.refs, rust2d_engine::events::TriggerOwner::Character);
+    widgets::triggers_ui(ui, &format!("chr/{}", d.id), &mut d.triggers, cx.refs, rustpg2d_engine::events::TriggerOwner::Character);
 }
 
-fn quest_form(ui: &mut egui::Ui, d: &mut rust2d_engine::quest::QuestDef, _cx: &mut Cx) {
+fn quest_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::quest::QuestDef, _cx: &mut Cx) {
     ui.heading("Quest");
     egui::Grid::new("quest").num_columns(2).show(ui, |ui| {
         ui.label("Id");
@@ -1573,7 +1573,7 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
                             Some(k) => {
                                 d.lights.remove(k);
                             }
-                            None => d.lights.push(rust2d_engine::defs::TileLight { tile: i, light: rust2d_engine::defs::LightSpec::torch(4.0) }),
+                            None => d.lights.push(rustpg2d_engine::defs::TileLight { tile: i, light: rustpg2d_engine::defs::LightSpec::torch(4.0) }),
                         },
                         None => {
                             if let Some(k) = d.solid.iter().position(|&s| s == i) {
@@ -1605,7 +1605,7 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
         egui::ComboBox::from_id_salt("sheet_kind")
             .selected_text(d.kind.label())
             .show_ui(ui, |ui| {
-                for k in rust2d_engine::defs::SheetKind::ALL {
+                for k in rustpg2d_engine::defs::SheetKind::ALL {
                     ui.selectable_value(&mut d.kind, k, k.label());
                 }
             })
@@ -1660,7 +1660,7 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
             d.tags.remove(k);
         }
         if ui.button(ui::t(ui::ph::PLUS, "Animation")).on_hover_text("A named frame range, offered by the Effect / Fly actions and effect(…, #{ tag: \"name\" })").clicked() {
-            d.tags.push(rust2d_engine::defs::SheetTag { name: format!("anim_{}", d.tags.len() + 1), first: 0, last: 0, fps: 10.0 });
+            d.tags.push(rustpg2d_engine::defs::SheetTag { name: format!("anim_{}", d.tags.len() + 1), first: 0, last: 0, fps: 10.0 });
         }
     });
     // Who uses this sheet.
@@ -1780,7 +1780,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         ui.text_edit_singleline(&mut c.name);
         ui.end_row();
         ui.label("Tile size");
-        ui.weak(format!("{} px (fixed)", rust2d_engine::project::TILE_SIZE));
+        ui.weak(format!("{} px (fixed)", rustpg2d_engine::project::TILE_SIZE));
         ui.end_row();
         ui.label("Start map");
         widgets::suggest(ui, "start_map", &mut c.start_map, &ed.refs.maps, 140.0);
@@ -1887,12 +1887,12 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("Player character's sex");
         egui::ComboBox::from_id_salt("creation_sex").selected_text(cc.sex.label()).show_ui(ui, |ui| {
-            for v in rust2d_engine::project::SexChoice::ALL {
+            for v in rustpg2d_engine::project::SexChoice::ALL {
                 ui.selectable_value(&mut cc.sex, v, v.label());
             }
         });
         ui.weak(match cc.sex {
-            rust2d_engine::project::SexChoice::Both => "chosen in the character creator (male when it is off)",
+            rustpg2d_engine::project::SexChoice::Both => "chosen in the character creator (male when it is off)",
             _ => "fixed by the game; the creator uses this sex's body",
         });
     });
@@ -1955,7 +1955,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
             let picked = crate::builder::cards(ui, egui::vec2(52.0, 72.0), &entries, None, &|ui, id, r| {
                 let mut a = shown.clone();
                 apply(&mut a, id);
-                widgets::paint_character(ui, &ed.tex, &ed.assets, &rust2d_engine::render::character::layers(&ed.project.db, &a, &player.1, rust2d_engine::entity::Facing::Down, 0, false), r)
+                widgets::paint_character(ui, &ed.tex, &ed.assets, &rustpg2d_engine::render::character::layers(&ed.project.db, &a, &player.1, rustpg2d_engine::entity::Facing::Down, 0, false), r)
             });
             if let Some(p) = picked {
                 match list.iter().position(|x| *x == p) {
@@ -2073,7 +2073,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let issues: Vec<(std::path::PathBuf, usize, String, String)> = texts
         .iter()
         .flat_map(|(f, text)| {
-            rust2d_engine::script_refs::check_script(text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
+            rustpg2d_engine::script_refs::check_script(text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
                 .into_iter()
                 .map(move |i| (f.clone(), i.line, i.message, text.clone()))
         })
@@ -2157,7 +2157,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     for (_, text) in &texts {
         functions.extend(crate::script_editor::defined_functions(text));
         signatures.extend(crate::script_editor::defined_signatures(text));
-        for a in rust2d_engine::script_refs::string_args(text) {
+        for a in rustpg2d_engine::script_refs::string_args(text) {
             match (a.func.as_str(), a.arg) {
                 ("flag" | "set_flag", 0) => flags.push(a.value),
                 ("get_var" | "set_var" | "add_var" | "queue_set_var", 0) | ("choice", 2) => vars.push(a.value),
@@ -2171,7 +2171,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     }
     let mut targets = vec!["self".to_string(), "player".to_string()];
     targets.extend(ed.refs.entity_names.iter().cloned());
-    let problem_spans: Vec<(usize, usize)> = rust2d_engine::script_refs::check_script(&ed.db.script_text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
+    let problem_spans: Vec<(usize, usize)> = rustpg2d_engine::script_refs::check_script(&ed.db.script_text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
         .into_iter()
         .map(|i| i.span)
         .collect();
@@ -2253,7 +2253,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
         ed.db.script_dirty = true;
         ed.save_script_if_dirty();
         if !ed.db.script_dirty {
-            let mut host = rust2d_engine::script::ScriptHost::new();
+            let mut host = rustpg2d_engine::script::ScriptHost::new();
             host.load_dir(&dir);
             ed.refresh_refs();
             let unknown = if issues.is_empty() { String::new() } else { format!("; {} unknown id(s), see Problems", issues.len()) };
@@ -2340,7 +2340,7 @@ impl Editor {
         }
         let id = if tab == Tab::Items { "icons" } else { "prop_art" };
         if self.project.db.sheet(id).is_none() {
-            let ts = rust2d_engine::project::TILE_SIZE;
+            let ts = rustpg2d_engine::project::TILE_SIZE;
             let rel = format!("sprites/{id}.png");
             let path = self.project.root.join(&rel);
             std::fs::create_dir_all(path.parent().unwrap())?;
@@ -2391,8 +2391,8 @@ impl Editor {
     }
 }
 
-fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &mut Cx) {
-    use rust2d_engine::skills::SkillEffect;
+fn skill_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::skills::SkillDef, cx: &mut Cx) {
+    use rustpg2d_engine::skills::SkillEffect;
     ui.heading("Skill");
     rename_row(ui, RefKind::Skill, &d.id, cx.rename);
     name_row(ui, &mut d.name);
@@ -2450,7 +2450,7 @@ fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &m
     widgets::sprite_field(ui, "skill_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
 }
 
-fn achievement_form(ui: &mut egui::Ui, d: &mut rust2d_engine::achievements::AchievementDef, cx: &mut Cx) {
+fn achievement_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::achievements::AchievementDef, cx: &mut Cx) {
     ui.heading("Achievement");
     egui::Grid::new("achievement").num_columns(2).show(ui, |ui| {
         ui.label("Id");
@@ -2476,7 +2476,7 @@ fn achievement_form(ui: &mut egui::Ui, d: &mut rust2d_engine::achievements::Achi
     ui.weak("Unlocks belong to the player, not to a save game: they are kept in achievements.ron next to the game's settings (play-tests use the same file; Reset achievements in the game's menu clears it).");
 }
 
-fn recipe_form(ui: &mut egui::Ui, d: &mut rust2d_engine::crafting::RecipeDef, cx: &mut Cx) {
+fn recipe_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::crafting::RecipeDef, cx: &mut Cx) {
     ui.heading("Recipe");
     rename_row(ui, RefKind::Recipe, &d.id, cx.rename);
     ui.horizontal(|ui| {
@@ -2523,8 +2523,8 @@ fn recipe_form(ui: &mut egui::Ui, d: &mut rust2d_engine::crafting::RecipeDef, cx
     ui.weak("Players make it in the crafting window: give a prop (a workbench, an anvil, an alchemy table) an Interact trigger with the 'Open crafting' action for this station. Scripts: open_crafting(station[, title]), can_craft(recipe).");
 }
 
-fn spell_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SpellDef, cx: &mut Cx) {
-    use rust2d_engine::skills::SpellEffect;
+fn spell_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::skills::SpellDef, cx: &mut Cx) {
+    use rustpg2d_engine::skills::SpellEffect;
     ui.heading("Spell");
     rename_row(ui, RefKind::Spell, &d.id, cx.rename);
     name_row(ui, &mut d.name);
