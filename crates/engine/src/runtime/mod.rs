@@ -23,6 +23,7 @@ mod menu;
 pub mod input;
 mod mouse;
 mod spawner;
+mod thumbs;
 mod ui;
 mod worldmap;
 
@@ -185,6 +186,9 @@ pub struct Game {
     combat: PlayerCombat,
     /// Screen shake and the hurt flash.
     juice: juice::Juice,
+    /// A save waits for its thumbnail (captured while drawing), and what waits for that.
+    thumb_request: Option<String>,
+    after_thumb: Option<thumbs::AfterThumb>,
     /// Seconds since the player was defeated.
     game_over: Option<f32>,
     /// Short-lived visual effects: (position, age).
@@ -273,6 +277,8 @@ impl Game {
             autosave_pending: false,
             settings: crate::settings::Settings::default(),
             juice: Default::default(),
+            thumb_request: None,
+            after_thumb: None,
             fullscreen: None,
             loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![], tile_lights: vec![] },
             project,
@@ -847,6 +853,7 @@ impl Game {
 
     pub fn update(&mut self, dt: f32) {
         self.update_juice(dt);
+        self.after_thumbnail();
         self.sync_script_player();
         // Esc opens the pause menu (unless a window or dialog uses Esc); it pauses everything.
         // (While a bolt spell is being aimed, Esc cancels the spell instead.)
@@ -1445,6 +1452,7 @@ impl Game {
         let dir = self.project.saves_dir();
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join(format!("{slot}.ron")), self.world.to_ron()?)?;
+        self.request_thumbnail(slot);
         Ok(())
     }
 
@@ -1596,6 +1604,8 @@ impl Game {
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(&cam, ambient, &lights, ts, get_time());
             set_camera(&cam);
         }
+        // A save's thumbnail: the world as it is now, before overlays, HUD and menus.
+        self.capture_thumbnail();
 
         if self.debug {
             self.draw_debug(view);

@@ -64,7 +64,13 @@ struct SaveInfo {
     /// Seconds since the epoch when saved (file time for old saves).
     saved: u64,
     play_time: f64,
+    /// The picture saved with it (`<slot>.png`; none for older saves).
+    thumb: Option<Texture2D>,
 }
+
+/// Rows of the Save and Load pages: taller, with the thumbnail at the left.
+const SAVE_ROW_H: f32 = 60.0;
+const SAVE_ROWS: usize = 7;
 
 pub(super) struct Menu {
     open: bool,
@@ -133,7 +139,7 @@ fn sanitize(name: &str) -> String {
     s.trim().to_string()
 }
 
-fn display_name(slot: &str) -> String {
+pub(super) fn display_name(slot: &str) -> String {
     match slot {
         "quick" => "Quicksave".to_string(),
         super::AUTOSAVE => "Autosave".to_string(),
@@ -173,7 +179,15 @@ impl Game {
                 Some(w) => (w.current_map.clone(), if w.saved_at > 0 { w.saved_at } else { file_time }, w.play_time),
                 None => ("(unreadable)".into(), file_time, 0.0),
             };
-            out.push(SaveInfo { slot, map, saved, play_time: play });
+            // A damaged picture just isn't shown (Texture2D::from_file_with_format would panic).
+            let thumb = std::fs::read(p.with_extension("png"))
+                .ok()
+                .and_then(|b| Image::from_file_with_format(&b, Some(ImageFormat::Png)).ok())
+                .map(|img| Texture2D::from_image(&img));
+            if let Some(t) = &thumb {
+                t.set_filter(FilterMode::Linear);
+            }
+            out.push(SaveInfo { slot, map, saved, play_time: play, thumb });
         }
         out.sort_by_key(|s| std::cmp::Reverse(s.saved));
         self.menu.saves = out;
@@ -278,16 +292,39 @@ impl Game {
         }
     }
 
+    /// The Save and Load pages list saves with their thumbnails.
+    fn save_page(&self) -> bool {
+        matches!(self.menu.page, Page::Save | Page::Load)
+    }
+
+    fn row_h(&self) -> f32 {
+        if self.save_page() {
+            SAVE_ROW_H
+        } else {
+            ROW_H
+        }
+    }
+
+    /// How many rows the page shows at once (more scroll).
+    fn max_rows(&self) -> usize {
+        if self.save_page() {
+            SAVE_ROWS
+        } else {
+            MAX_ROWS
+        }
+    }
+
     /// Panel rect and the screen rects of the visible rows.
     fn menu_layout(&self, n: usize) -> (Rect, Vec<Rect>) {
         let (sw, sh) = (screen_width(), screen_height());
-        let rows = n.clamp(1, MAX_ROWS) as f32;
+        let (row_h, max_rows) = (self.row_h(), self.max_rows());
+        let rows = n.clamp(1, max_rows) as f32;
         // The title page has no heading (the game name is drawn above the panel).
         let head = if self.menu.page == Page::Title { 20.0 } else { 64.0 };
-        let h = head + 6.0 + rows * ROW_H + 50.0 + if self.menu.page == Page::Name { 60.0 } else { 0.0 };
+        let h = head + 6.0 + rows * row_h + 50.0 + if self.menu.page == Page::Name { 60.0 } else { 0.0 };
         let p = Rect::new(((sw - W) / 2.0).round(), ((sh - h) / 2.0).round() + if self.menu.title { 40.0 } else { 0.0 }, W, h);
         let top = p.y + head + if self.menu.page == Page::Name { 60.0 } else { 0.0 };
-        let rects = (0..n.min(MAX_ROWS)).map(|k| Rect::new(p.x + 16.0, top + k as f32 * ROW_H, W - 32.0, ROW_H - 4.0)).collect();
+        let rects = (0..n.min(max_rows)).map(|k| Rect::new(p.x + 16.0, top + k as f32 * row_h, W - 32.0, row_h - 4.0)).collect();
         (p, rects)
     }
 
@@ -345,7 +382,7 @@ impl Game {
     }
 
     /// Leaves the running game for the title screen, with a fresh game behind it.
-    fn quit_to_title(&mut self) {
+    pub(super) fn quit_to_title(&mut self) {
         self.reset_world();
         let (map, spawn) = (self.project.config.start_map.clone(), self.project.config.start_spawn.clone());
         self.finish_transition(map, Arrival::Spawn(spawn));
@@ -403,10 +440,8 @@ impl Game {
             (_, Row::SaveQuit) => {
                 let slot = self.save_quit_slot();
                 match self.save_game(&slot) {
-                    Ok(()) => {
-                        self.quit_to_title();
-                        self.ui.toast(format!("Saved \"{}\"", display_name(&slot)));
-                    }
+                    // The title screen comes once the thumbnail shows this game's world.
+                    Ok(()) => self.after_thumb = Some(super::thumbs::AfterThumb::ToTitle(slot)),
                     Err(_) if self.runner.busy() => self.menu.message = Some("You can't save in the middle of an event.".into()),
                     Err(e) => self.menu.message = Some(format!("Save failed: {e}")),
                 }
@@ -450,6 +485,7 @@ impl Game {
             (Page::ConfirmOverwrite(s), Row::Yes) => self.do_save(&s),
             (Page::ConfirmDelete(s), Row::Yes) => {
                 let _ = std::fs::remove_file(self.project.saves_dir().join(format!("{s}.ron")));
+                let _ = std::fs::remove_file(self.project.saves_dir().join(format!("{s}.png")));
                 self.go(Page::Load);
             }
             (_, Row::No) => self.back(),
@@ -726,12 +762,13 @@ impl Game {
             // Keep the selection visible.
             if self.menu.sel < self.menu.scroll {
                 self.menu.scroll = self.menu.sel;
-            } else if self.menu.sel >= self.menu.scroll + MAX_ROWS {
-                self.menu.scroll = self.menu.sel + 1 - MAX_ROWS;
+            } else if self.menu.sel >= self.menu.scroll + self.max_rows() {
+                self.menu.scroll = self.menu.sel + 1 - self.max_rows();
             }
             let wheel = input::wheel();
-            if wheel != 0.0 && panel_rect.contains(m) && n > MAX_ROWS {
-                self.menu.scroll = if wheel < 0.0 { (self.menu.scroll + 1).min(n - MAX_ROWS) } else { self.menu.scroll.saturating_sub(1) };
+            let max_rows = self.max_rows();
+            if wheel != 0.0 && panel_rect.contains(m) && n > max_rows {
+                self.menu.scroll = if wheel < 0.0 { (self.menu.scroll + 1).min(n - max_rows) } else { self.menu.scroll.saturating_sub(1) };
             }
             let hovered = rects.iter().position(|r| r.contains(m)).map(|k| k + self.menu.scroll).filter(|k| *k < n);
             if let Some(k) = hovered {
@@ -883,15 +920,32 @@ impl Game {
                 };
                 let tw = measure_text(&text, None, 20, 1.0).width;
                 draw_text(&text, r.x + r.w - 14.0 - tw, r.y + 25.0, 20.0, col);
+            } else if let (true, Row::Slot(slot)) = (self.save_page(), &rows[idx].0) {
+                // A save: its thumbnail (or a placeholder), then name and details.
+                let th = r.h - 10.0;
+                let t = Rect::new(r.x + 6.0, r.y + 5.0, th * 16.0 / 9.0, th);
+                match self.menu.saves.iter().find(|s| &s.slot == slot).and_then(|s| s.thumb.as_ref()) {
+                    Some(tex) => draw_texture_ex(tex, t.x, t.y, WHITE, DrawTextureParams { dest_size: Some(vec2(t.w, t.h)), ..Default::default() }),
+                    None => {
+                        draw_rectangle(t.x, t.y, t.w, t.h, Color::new(0.0, 0.0, 0.0, 0.45));
+                        let q = measure_text("?", None, 26, 1.0);
+                        draw_text("?", t.x + (t.w - q.width) / 2.0, t.y + (t.h + q.height) / 2.0, 26.0, DARKGRAY);
+                    }
+                }
+                draw_rectangle_lines(t.x, t.y, t.w, t.h, 1.0, Color::new(0.85, 0.72, 0.38, if selected { 1.0 } else { 0.5 }));
+                let tx = t.right() + 12.0;
+                draw_text(label, tx, r.y + 24.0, 22.0, c);
+                draw_text(detail, tx, r.y + 44.0, 16.0, LIGHTGRAY);
             } else if detail.is_empty() {
-                draw_text(label, r.x + 14.0, r.y + 26.0, 26.0, c);
+                // Centered in the row (the Save page's rows are taller).
+                draw_text(label, r.x + 14.0, r.y + r.h / 2.0 + 8.0, 26.0, c);
             } else {
                 draw_text(label, r.x + 14.0, r.y + 17.0, 22.0, c);
                 draw_text(detail, r.x + 14.0, r.y + 33.0, 16.0, LIGHTGRAY);
             }
         }
-        if rows.len() > MAX_ROWS {
-            draw_text(format!("{}-{} of {}", self.menu.scroll + 1, (self.menu.scroll + MAX_ROWS).min(rows.len()), rows.len()), p.x + p.w - 110.0, p.y + 42.0, 16.0, GRAY);
+        if rows.len() > self.max_rows() {
+            draw_text(format!("{}-{} of {}", self.menu.scroll + 1, (self.menu.scroll + self.max_rows()).min(rows.len()), rows.len()), p.x + p.w - 110.0, p.y + 42.0, 16.0, GRAY);
         }
         let hint = match self.menu.page {
             Page::Title => "Up/Down + Enter or click",

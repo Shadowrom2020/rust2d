@@ -302,7 +302,7 @@ offered for *Effect*, not *Fly*). Poison and burning don't shake or flash (they 
 **Verify.** Two screenshots 50 ms apart after a hit differ in camera offset; flash visible;
 `opt` turns shake off and the offset stays 0.
 
-### [ ] Save thumbnails — `feature/save-thumbnails`
+### [x] Save thumbnails — `feature/save-thumbnails`
 
 **Goal.** The Load page shows a small screenshot, map name, play time and date per slot.
 
@@ -310,6 +310,13 @@ offered for *Effect*, not *Fly*). Poison and burning don't shake or flash (they 
 `imageio`, taken before the menu is drawn); `menu.rs` save rows get a 56 px layout with the
 thumbnail at the left (`MAX_ROWS` adapts); deleting a slot deletes the PNG; slots without one
 show a placeholder. Play time and date are already stored.
+
+**Decided while building.** A save only requests the picture; `Game::draw` grabs the screen right
+after the world and the light pass (`get_screen_data` flushes first), so the HUD, dialogs and the
+pause menu are never in it. *Save and quit* waits a frame for it (`thumbs::AfterThumb`), else the
+title screen's fresh world would be pictured. 192×108, the middle 16:9 part of the screen averaged
+down (`runtime/thumbs.rs`). Save / Load rows are 60 px, seven per page. A damaged PNG is skipped
+(decoded through `Image`, as `Texture2D::from_file_with_format` panics).
 
 **Verify.** Save, open Load, screenshot shows the thumbnail; delete removes both files.
 

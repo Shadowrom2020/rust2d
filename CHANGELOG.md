@@ -50,6 +50,10 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   explosions shake the screen (`shake` option of `effect()` and the *Effect* action; the example's
   Fireball uses it); scenes shake it with `shake(seconds[, strength])` or the new *Shake the
   screen* action. *Options › Shake & flash* switches both off (accessibility).
+- **Save thumbnails**: every save (also quick saves, autosaves and *Save and quit*) stores a
+  small picture of the world next to the save file (`<slot>.png`, without HUD, dialogs and menus);
+  the Load and Save pages show it beside the map, play time and age. Older saves show a
+  placeholder; deleting a save deletes its picture.
 
 ### Fixes
 - Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage
