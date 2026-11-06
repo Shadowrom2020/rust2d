@@ -21,6 +21,7 @@ mod progression;
 mod paperdoll;
 mod npc_items;
 mod shop_ui;
+mod crafting_ui;
 mod locks;
 mod menu;
 pub mod input;
@@ -222,6 +223,7 @@ pub struct Game {
     mouse: mouse::MouseState,
     inv: inventory_ui::InvUi,
     shop: shop_ui::ShopUi,
+    crafting: crafting_ui::CraftingUi,
     journal: journal::Journal,
     worldmap: worldmap::WorldMap,
     creator: Option<creator::Creator>,
@@ -316,6 +318,7 @@ impl Game {
             mouse: Default::default(),
             inv: Default::default(),
             shop: Default::default(),
+            crafting: Default::default(),
             journal: Default::default(),
             worldmap: Default::default(),
             creator: None,
@@ -340,6 +343,7 @@ impl Game {
             (None, None) if start.map.is_some() => Arrival::Spawn(String::new()),
             _ => Arrival::Spawn(game.project.config.start_spawn.clone()),
         };
+        game.scripts.set_recipes(game.project.db.recipes.clone());
         game.settings = crate::settings::Settings::load(&game.project.config.name);
         game.apply_settings();
         game.world.player_hp = Some(game.combat.max_hp);
@@ -994,6 +998,9 @@ impl Game {
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
         let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
+        // The crafting window works like the trade window (they never are open together).
+        let (craft_key, craft_mouse) = self.update_crafting_ui(allow_windows && !self.shop.is_open());
+        let (shop_key, shop_mouse) = (shop_key || craft_key, shop_mouse || craft_mouse);
         // The character window's tabs (C / I, K, L, Tab, tab clicks) before the tabs' contents.
         let (win_key, win_mouse) = self.update_window_tabs(allow_windows && !input.consumed, input.consumed || shop_key);
         let (shop_key, shop_mouse) = (shop_key || win_key, shop_mouse || win_mouse);
@@ -1457,7 +1464,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1492,6 +1499,7 @@ impl Game {
             self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
             self.shop_status(),
+            self.crafting_status(),
             self.loaded.map.name,
             p.x.floor(),
             p.y.floor(),
@@ -1713,7 +1721,9 @@ impl Game {
                 self.draw_hud();
                 self.draw_clock();
             }
-            if self.shop_open() {
+            if self.crafting_open() {
+                self.draw_crafting_ui();
+            } else if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
@@ -2074,6 +2084,10 @@ impl ActionHost for Game {
                     Some(w) => self.world.weather.insert(map, crate::map::Weather::new(w.kind, w.intensity)),
                     None => self.world.weather.remove(&map),
                 };
+                Step::Continue
+            }
+            Action::OpenCrafting { station, title } => {
+                self.open_crafting(station, title);
                 Step::Continue
             }
             Action::OpenShop { target } => {

@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod autotile;
+pub mod crafting;
 pub mod defs;
 pub mod effects;
 pub mod entity;

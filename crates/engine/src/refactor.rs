@@ -21,6 +21,8 @@ pub enum RefKind {
     Structure,
     Skill,
     Spell,
+    /// Crafting recipe (`crafting::RecipeDef`).
+    Recipe,
 }
 
 struct Renamer<'a> {
@@ -88,6 +90,14 @@ impl Renamer<'_> {
         if let crate::skills::SpellEffect::Bolt { projectile, .. } = &mut d.effect {
             self.fix(RefKind::Sheet, &mut projectile.sheet);
         }
+    }
+
+    fn recipe(&mut self, d: &mut crate::crafting::RecipeDef) {
+        self.fix(RefKind::Item, &mut d.result);
+        for s in &mut d.ingredients {
+            self.fix(RefKind::Item, &mut s.item);
+        }
+        self.fix(RefKind::Skill, &mut d.skill);
     }
 
     fn structure(&mut self, d: &mut crate::defs::StructureDef) {
@@ -229,6 +239,9 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
     for d in &mut db.spells {
         r.spell(d);
     }
+    for d in &mut db.recipes {
+        r.recipe(d);
+    }
     r.fix(RefKind::Character, &mut config.player);
     let cc = &mut config.creation;
     for s in [&mut cc.body_male, &mut cc.body_female].into_iter().chain(&mut cc.hair_styles).chain(&mut cc.beards) {
@@ -305,6 +318,14 @@ pub fn refs_of_spell(d: &crate::skills::SpellDef) -> Vec<(RefKind, String)> {
     let mut d = d.clone();
     let mut r = collector();
     r.spell(&mut d);
+    r.found.unwrap_or_default()
+}
+
+/// The result and ingredient items and the skill of a recipe.
+pub fn refs_of_recipe(d: &crate::crafting::RecipeDef) -> Vec<(RefKind, String)> {
+    let mut d = d.clone();
+    let mut r = collector();
+    r.recipe(&mut d);
     r.found.unwrap_or_default()
 }
 

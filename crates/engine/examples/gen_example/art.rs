@@ -2036,6 +2036,9 @@ pub mod p {
     /// The forest shrine (3x2): a monolith with a crystal between two lamp pillars on a
     /// stepped dais; glowing state at +3.
     pub const GRAND_SHRINE: u32 = 56;
+    /// An alchemy table (crafting station), on row 9 (added below the older rows so existing
+    /// libraries take the larger sheet: their pixels stay the same).
+    pub const ALCHEMY: u32 = 72;
 }
 
 /// The forest shrine, 96 x 64: a stepped dais, two lamp pillars and a rune-carved monolith with
@@ -2267,8 +2270,9 @@ fn big_props(c: &mut Canvas) {
 }
 
 pub fn props(out: &Path) {
-    // 9 rows: rows 7-8 (the grand shrine) were added later, below the older cells.
-    let mut c = Canvas::new(TS * 8, TS * 9);
+    // 10 rows: rows 7-8 (the grand shrine) and 9 (the alchemy table) were added later, below
+    // the older cells.
+    let mut c = Canvas::new(TS * 8, TS * 10);
     let n = TS as i32;
     for i in 0..8u32 {
         let (x, y) = cell(i);
@@ -2403,6 +2407,33 @@ pub fn props(out: &Path) {
     }
     c.auto_outline(n, n, OUTLINE);
     c.shadow(16.0, 30.5, 14.0, 1.5);
+    // The alchemy table: a small workbench with a flask over a burner, bottles and a mortar.
+    let (x, y) = cell(p::ALCHEMY);
+    c.at(x, y);
+    c.shade_box(3, 16, 26, 5, WOOD); // table top
+    c.hline(3, 16, 26, hex(WOOD[3]));
+    for lx in [4, 25] {
+        c.shade_box(lx, 21, 3, 10, WOOD); // legs
+    }
+    c.hline(6, 26, 20, hex(WOOD[0])); // shelf
+    c.shade_box(8, 24, 4, 3, [0x5d4037, 0x795548, 0x8d6e63, 0xa1887f]); // a jar on the shelf
+    c.shade_box(19, 24, 3, 3, [0x33691e, 0x558b2f, 0x7cb342, 0xaed581]);
+    // A round flask with green brew over a small burner.
+    c.shade_box(9, 13, 6, 3, IRON);
+    c.px(12, 12, hex(0xffb300));
+    c.px(11, 12, hex(0xff6f00));
+    c.shade_disc(12.0, 8.0, 4.5, [0x7fa8c8, 0xa8cbe8, 0xcfe8ff, 0xffffff]);
+    c.shade_disc(12.0, 9.0, 3.2, [0x1b5e20, 0x2e7d32, 0x43a047, 0xa5d6a7]);
+    c.rect(11, 1, 2, 4, hex(0xcfe8ff));
+    c.px(14, 6, hex(0xffffff));
+    // Two bottles and a mortar.
+    c.shade_box(18, 8, 3, 8, [0x7a1010, 0xb71c1c, 0xe53935, 0xff8a80]);
+    c.rect(18, 6, 3, 2, hex(WOOD[2]));
+    c.shade_box(22, 10, 3, 6, [0x1a237e, 0x283593, 0x3f51b5, 0x7986cb]);
+    c.rect(22, 8, 3, 2, hex(WOOD[2]));
+    c.shade_box(25, 12, 3, 4, STONE);
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.5, 13.0, 1.5);
     big_props(&mut c);
     c.save(&out.join("sprites/props.png"));
 }
@@ -2450,8 +2481,11 @@ pub mod it {
     pub const ANTIDOTE: u32 = 32;
     pub const ELIXIR: u32 = 33;
     pub const SWIFTNESS: u32 = 34;
+    /// Crafting ingredients: a healing herb and a red-capped mushroom.
+    pub const HERB: u32 = 35;
+    pub const MUSHROOM: u32 = 36;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 35;
+    pub const COUNT: u32 = 37;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -2762,6 +2796,28 @@ pub fn items(out: &Path) {
                     c.vline(x, 6, 21, hex(WOOD[0]));
                 }
                 c.shade_disc(16.0, 16.0, 3.5, [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6]);
+            }
+            it::HERB => {
+                // A sprig with three pairs of leaves and a tied stem.
+                let leaf = [0x1b5e20, 0x2e7d32, 0x43a047, 0x81c784];
+                c.stroke(16.0, 28.0, 16.0, 6.0, 1.4, hex(0x33691e));
+                for (k, y) in [9.0f32, 15.0, 21.0].into_iter().enumerate() {
+                    let w = 6.5 - k as f32;
+                    c.shade_disc(16.0 - w * 0.8, y, w * 0.6, leaf);
+                    c.shade_disc(16.0 + w * 0.8, y + 1.5, w * 0.6, leaf);
+                }
+                c.shade_disc(16.0, 5.5, 2.5, leaf);
+                c.rect(14, 24, 5, 2, hex(0xd7ccc8)); // string
+            }
+            it::MUSHROOM => {
+                // A red cap with white spots on a pale stem.
+                c.shade_disc(16.0, 16.0, 11.0, [0x7a1010, 0xb71c1c, 0xe53935, 0xff8a80]);
+                c.rect(4, 16, 24, 12, CLEAR); // a dome: only the upper half
+                c.shade_box(13, 15, 6, 13, [0xbcaaa4, 0xd7ccc8, 0xefebe9, 0xffffff]);
+                c.hline(6, 15, 20, hex(0x7a1010));
+                for (sx, sy) in [(11, 9), (18, 7), (21, 12), (14, 13)] {
+                    c.rect(sx, sy, 2, 2, hex(0xffffff));
+                }
             }
             _ => {}
         }

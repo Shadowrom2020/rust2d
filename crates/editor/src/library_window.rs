@@ -127,6 +127,7 @@ impl Editor {
             RefKind::Structure => (Tab::Structures, db.structures.iter().position(|d| d.id == a.1)),
             RefKind::Skill => (Tab::Skills, db.skills.iter().position(|d| d.id == a.1)),
             RefKind::Spell => (Tab::Spells, db.spells.iter().position(|d| d.id == a.1)),
+            RefKind::Recipe => (Tab::Recipes, db.recipes.iter().position(|d| d.id == a.1)),
             _ => return,
         };
         let Some(i) = index else { return };

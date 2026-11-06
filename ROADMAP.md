@@ -197,7 +197,7 @@ village he patrols again from his post; `call guard_talk` as companion, "Yes, th
 dismissed on his own map, patrol resumes. Not checked by script: a companion with a ranged
 weapon (the example has none), the editor's Companion action fields (compile-checked).
 
-### [ ] Crafting — `feature/crafting`
+### [x] Crafting — `feature/crafting`
 
 **Design.** New definitions file `recipes.ron` (`RecipeDef { id, result, count, ingredients:
 Vec<ItemStack>, station }`; `project.rs` DEFS, `release.rs`, `library.rs`), `Action::OpenCrafting
@@ -205,7 +205,30 @@ Vec<ItemStack>, station }`; `project.rs` DEFS, `release.rs`, `library.rs`), `Act
 = recipes, greyed when ingredients are missing). Editor: Database tab *Recipes*; `refactor.rs`
 renames and `refs_of_*` for library export.
 
-**Verify.** Autoplay opens the window at a bench prop, crafts, `status` inventory changed.
+**Decided while building.** `crafting.rs`: `RecipeDef` also has `skill` / `level` (like spells),
+`missing()` (items short or skill too low), `craft()`, `fits()` (the result must fit once the
+ingredients are gone). `Action::OpenCrafting { station, title }` (appended; "" title =
+"Crafting"), `open_crafting(station[, title])`, `can_craft(recipe)` (the script host gets the
+recipes via `set_recipes`; `IdKind::Recipe` in `API_IDS`). Recipes are a full asset kind
+(`RefKind::Recipe`, appended): library export carries the result / ingredient items and the
+skill, the library's Browse view shows them with the result's icon. `runtime/crafting_ui.rs`:
+one list (icon, name x count, ingredient icons with have / need, *Make* button), Shift makes up
+to ten, the footer shows the result's description and the last message; it shares the trade
+window's slot (`shop_open()` covers both). Editor: *Recipes* tab (result + count with icon,
+ingredients list, station with suggestions, skill + level), *Open crafting* action fields, API
+table entries with recipe / station completion. Example art: Healing Herb and Red Cap icons
+(appended to `items.png`), the alchemy table on a new row of `props.png` (both only grow, so
+existing libraries take the new images).
+
+**Verify (done).** Autoplay on a scratch copy: with 3 herbs and 1 mushroom, right-click the
+alchemy table in the shop → `crafting=Some("alchemy [brew_potion brew_antidote brew_mana(missing)
+brew_swiftness(missing)] …")` (screenshot); `craft 0`, `craft 1` → inventory potion 1, antidote
+1, herbs and mushroom used up (screenshot); `craft 0` again → "Missing: Healing Herb 0/2";
+`craft 3` → "Needs Arcana 1"; Esc closes (`crafting=None`). Editor: `tab recipes brew_antidote`
+(screenshot of the form); a fresh asset library gets the four recipes from the starter pack
+(`libfilter recipe`, screenshot); `forest` has the herbs and mushrooms (`dump`). Unit tests:
+crafting, RON defaults, the script API, library export and item renames into recipes. Not
+checked by script: typing into the Recipes form (compile-checked) and Shift-crafting ten.
 
 ### [ ] Achievements — `feature/achievements`
 
@@ -541,6 +564,100 @@ Options row *Language*; the editor exports a translation template. Large but mec
     *Passive* the guard doesn't attack a slime next to him; *Defend* ignores a slime that hasn't
     noticed the player; *Stay* keeps him put while the player walks off; save / load keeps the
     orders.
+- **Companion inventory** (improves *Companions*; pairs well with *Healing companions*): the
+  player equips companions with gear and hands them items they use on their own.
+  - *Groundwork that exists*: NPCs already wear equipment and carry items (`RtEntity.equipment`
+    / `inventory`, `npc_equip` / `npc_unequip` / `give_item_to`, saved per placed character in
+    `WorldState.npc_items`, which companions already use with their home map / uid), and their
+    weapon and defense follow their gear (`npc_items::apply_gear`).
+  - *Window*: a *Companion* tab in the character window (Tab cycles; one tab per companion, or a
+    companion picker in the tab) showing the companion's paperdoll with its equipment slots
+    and its carried items next to the player's inventory grid, like the container window: drag
+    or click items across (`slotdrag` / `slot` autoplay commands extend to it). Talking to a
+    companion can offer "Let me see your gear" (script `open_companion("guard")`). Gear that
+    doesn't fit the companion's body sheet still works (the paperdoll draws what its layers
+    allow, as for NPCs today). Some definitions may refuse gear (`CharacterDef.gear_locked`,
+    serde default false: a wolf companion wears nothing).
+  - *Using items on their own*: consumables in a companion's bag are used when they help —
+    `Heal` potions below 40 % HP (one at a time, a cooldown), antidotes / cures when poisoned or
+    burning (`CureEffect`), buff potions at the start of a fight (Strength, Haste: a hostile
+    hunts within 5 tiles), heal scrolls like potions. Which item does what comes from its
+    `on_use` actions (heal amount, effect cured or applied), evaluated for the companion instead
+    of the player (`execute` with the companion as target: `Action::Heal` gains a target as in
+    *Healing companions*). A toast or floating text shows it ("Guard drinks a Red Potion").
+  - *Ammo*: ranged companions use ammo from their bag (`Ranged.ammo`, as the player does) and
+    stop shooting (closing in to melee, or staying back with *Passive*) when out of it; the
+    HUD portrait of *Healing companions* shows low ammo.
+  - *Spells*: optional, later: companions with *Magic* learn spells from scrolls / books given
+    to them (`Companion.spells`, mana pool from the definition) and cast heal / bolt spells by
+    the same rules as items.
+  - *Rules*: given items belong to the companion; dismissed companions keep their gear
+    (they come back with it), knocked-out ones too (no drop); a project setting could make
+    companions return lent gear when dismissed.
+  - *Verify*: give the guard a potion and arrows via the window (autoplay `slot` / `slotdrag`
+    into the companion tab), poison him below 40 % → he drinks it (`companions=` HP rises,
+    inventory shrinks, toast); equip a bow on him → he shoots and his arrows run down; save /
+    load keeps his bag; screenshot of the tab.
+- **Gathering and trades** (four ideas building on *Crafting*; suggested order: mining →
+  blacksmithing, farming → cooking). Shared groundwork, done with the first of them:
+  - *Tools*: `ItemDef.tool: String` (serde default; "pickaxe", "hammer", "hoe", "knife", …)
+    and `RecipeDef.tools: Vec<String>` (needed, not used up: in the inventory or held). The
+    crafting window shows missing tools like missing ingredients (`Missing::Tool`).
+  - *Timed prop states*: `PropDef.regrow: Option<Regrow { from: state, to: state, hours: f32 }>`
+    and a world clock that counts days (`WorldState.day: u32`, serde default, advanced when the
+    hour wraps; `total_hours()`), so a prop state can change after in-game time passes, also
+    while the player is on another map (the state change is computed when the map is entered:
+    `EntityState.changed_at`). Used for depleted ore veins and growing crops.
+  - *Gathering nodes*: a prop's *Interact* (or a hit with the right tool) gives items from a
+    loot table and switches it to a state ("depleted", "harvested"); `PropDef.gather:
+    Option<Gather { tool, hits, loot, then_state, skill }>` with a progress bar over the prop
+    while hitting.
+- **Mining**: ore veins (copper, iron, silver; gem veins rarely) as gathering-node props that
+  need a *pickaxe* (a new item, also a weak weapon). A few hits (fewer with the *Mining* skill:
+  `SkillEffect::Gather { tool: "pickaxe", percent }`) break off ore and maybe stone or a gem,
+  the vein turns *depleted* and regrows after some in-game days. Ore and gems sell at merchants
+  and feed *Blacksmithing*. Example: veins in the old mine (the dark corridors, so a torch
+  helps), a pickaxe in the mine's entrance chest, a *Miner* skill in the example's skill list.
+  Verify: autoplay with a pickaxe hits a vein three times → `inv` has iron ore, the prop state
+  is `depleted`; `settime` past the regrow time (or a new day) and re-entering the map → full
+  again; without a pickaxe a toast says what is needed.
+- **Blacksmithing**: two stations: a *forge* smelts ore into ingots (copper / iron / silver ore
+  plus coal → ingot), an *anvil* forges ingots and leather into weapons, armor, arrowheads and
+  tools; anvil recipes need a *hammer* (`RecipeDef.tools`). A *Smithing* skill unlocks better
+  recipes (recipe `skill` / `level`) and could raise the made item's stats: an optional
+  `RecipeDef.quality_skill` that adds a "+1" variant (`ItemDef.upgrade_of`, a separate item id
+  per quality, so items stay plain definitions). Optional idea: *upgrading* an equipped weapon at
+  the anvil (sword + 2 iron ingots → fine sword). Example: a smithy next to Tilda's shop with a
+  blacksmith NPC (Daily schedule: works the anvil by day), forge and anvil props (the forge's
+  "lit" state glows: a light source), recipes for an iron sword, iron helmet, chainmail, arrows
+  (iron ingot + wood) and the pickaxe itself. Verify: smelt and forge in autoplay, `status`
+  inventory; the forge's light at night (screenshot).
+- **Cooking**: a *cooking fire* or *stove* station (a campfire prop; recipes may require the
+  station's prop to be in a state: `RecipeDef.station_state`, e.g. "lit"). Raw food (meat from
+  animals' loot, fish from *Minigames: fishing*, mushrooms, apples, crops from *Farming*)
+  becomes cooked food that heals more and gives timed buffs through the existing effects
+  (*Regen*, *Strength*, *Haste*): stew = Regen for a minute, roasted fish = heal 3 hearts. A
+  *Cooking* skill unlocks recipes and could make food heal more (`SkillEffect::FoodBonus
+  { percent }` applied in `Action::Heal` from consumables). Optional: a *Hunger* system
+  (project setting, off by default) where an empty stomach slowly stops HP regeneration — only
+  if a game wants survival elements. Example: a campfire in the Wilds and a stove in the
+  elder's house, four recipes, raw meat from the Wilds' animals. Verify: cook a stew at the
+  campfire, eat it → `effects=` shows Regen; the "lit" requirement refuses an unlit fire.
+- **Farming**: tilled soil plots (a prop with states *empty* → *planted* → *growing* → *ripe*)
+  where the player plants seeds (using a seed item on the plot: the existing "use item on the
+  prop in front" path, `TriggerOn::UseItem` on props, or a plot-specific rule `PropDef.crop:
+  Option<CropSpec { seeds: Vec<(seed item, crop id)> }>`), crops grow over in-game days (timed
+  prop states; rain on the map counts as watering and speeds it up, an optional *watering can*
+  tool does the same by hand), and ripe plots are harvested for the crop (and sometimes seeds
+  back) with a *hoe* or by hand, returning to *empty*. Crops: `CropDef { id, name, seed, stages:
+  Vec<(sprite, hours)>, harvest: loot }` in a new `defs/crops.ron` (or a section of
+  `recipes.ron`) so one plot prop grows any crop; the plot draws the crop's stage sprite on top
+  of the soil. Saves keep the planting time per plot (`EntityState.planted: Option<(crop,
+  total_hours)>`). Example: the fenced garden behind Tilda's shop becomes six plots, seeds
+  (wheat, carrots, pumpkins) at Tilda's, crops sell to her and feed *Cooking*. Verify: plant,
+  `settime` forward by days (`settime` gains a `+H` form that also advances `day`), re-enter,
+  `status` shows the plot ripe, harvest → inventory; a rainy map grows faster; save / load
+  keeps the growth.
 - **The player uses furniture** (builds on the `UseSpot` of the idea above; either can come
   first): sit on chairs and benches, sleep in beds.
   - *Using*: interacting with a prop that has a use spot (E / right-click, nothing else on the

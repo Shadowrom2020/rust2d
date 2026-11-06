@@ -22,6 +22,8 @@ struct Ctx {
     owner: Option<u32>,
     /// Characters on the current map that can be hurt: (uid, name, HP).
     characters: Vec<(u32, String, i32)>,
+    /// The project's crafting recipes (`can_craft`).
+    recipes: Vec<crate::crafting::RecipeDef>,
 }
 
 /// What scripts can read about the player besides the world state (the game updates it every
@@ -65,6 +67,11 @@ impl ScriptHost {
         });
         register_api(&mut engine, &ctx);
         ScriptHost { engine, ast: AST::empty(), ctx, errors: Vec::new(), printed }
+    }
+
+    /// The project's crafting recipes, for `can_craft(id)`.
+    pub fn set_recipes(&mut self, recipes: Vec<crate::crafting::RecipeDef>) {
+        self.ctx.borrow_mut().recipes = recipes;
     }
 
     pub fn set_player(&mut self, info: PlayerInfo) {
@@ -421,6 +428,9 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         c.actions.push(Action::Patrol { target: t.into(), active: true, points })
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
+    engine.register_fn("can_craft", with!(ctx, |c, id: &str| c.recipes.iter().find(|r| r.id == id).is_some_and(|r| r.missing(&c.world).is_none())));
+    engine.register_fn("open_crafting", with!(ctx, |c, station: &str| c.actions.push(Action::OpenCrafting { station: station.into(), title: String::new() })));
+    engine.register_fn("open_crafting", with!(ctx, |c, station: &str, title: &str| c.actions.push(Action::OpenCrafting { station: station.into(), title: title.into() })));
     engine.register_fn("follow", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: true })));
     engine.register_fn("stop_following", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: false })));
     engine.register_fn("is_companion", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name)));
@@ -823,6 +833,17 @@ mod tests {
         let mut w = WorldState::default();
         w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
         assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
+    }
+
+    #[test]
+    fn crafting_api() {
+        let mut host = ScriptHost::new();
+        host.set_recipes(vec![crate::crafting::RecipeDef::new("brew", "potion", 1, vec![crate::inventory::ItemStack::new("herb", 2)], "alchemy")]);
+        host.load_source(r#"fn table() { if can_craft("brew") { open_crafting("alchemy", "Alchemy table"); } else { open_crafting("alchemy"); } }"#).unwrap();
+        let mut w = WorldState::default();
+        assert_eq!(host.call(&mut w, "table", None), vec![Action::OpenCrafting { station: "alchemy".into(), title: String::new() }]);
+        w.give_item("herb", 2);
+        assert_eq!(host.call(&mut w, "table", None), vec![Action::OpenCrafting { station: "alchemy".into(), title: "Alchemy table".into() }]);
     }
 
     #[test]

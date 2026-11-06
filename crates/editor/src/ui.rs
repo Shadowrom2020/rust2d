@@ -77,6 +77,7 @@ pub fn kind_icon(k: rust2d_engine::refactor::RefKind) -> &'static str {
         RefKind::Structure => ph::HOUSE,
         RefKind::Skill => ph::STAR,
         RefKind::Spell => ph::MAGIC_WAND,
+        RefKind::Recipe => ph::HAMMER,
         RefKind::Map => ph::MAP_TRIFOLD,
     }
 }

@@ -646,6 +646,12 @@ impl Editor {
             quest_stages: self.project.db.quests.iter().map(|q| (q.id.clone(), q.stages.clone())).collect(),
             skills: self.project.db.skills.iter().map(|q| q.id.clone()).collect(),
             spells: self.project.db.spells.iter().map(|q| q.id.clone()).collect(),
+            stations: {
+                let mut v: Vec<String> = self.project.db.recipes.iter().map(|r| r.station.clone()).filter(|s| !s.is_empty()).collect();
+                v.sort();
+                v.dedup();
+                v
+            },
             sheets: self.project.db.sheets.iter().map(|q| q.id.clone()).collect(),
             sheet_tags: self.project.db.sheets.iter().filter(|q| !q.tags.is_empty()).map(|q| (q.id.clone(), q.tags.clone())).collect(),
         };
@@ -723,6 +729,7 @@ impl Editor {
             RefKind::Structure => db.structures.iter().any(|d| d.id == new),
             RefKind::Skill => db.skills.iter().any(|d| d.id == new),
             RefKind::Spell => db.spells.iter().any(|d| d.id == new),
+            RefKind::Recipe => db.recipes.iter().any(|d| d.id == new),
         };
         if taken {
             self.set_status(format!("'{new}' is already used"));
@@ -746,6 +753,7 @@ impl Editor {
             RefKind::Structure => rename_def!(db.structures),
             RefKind::Skill => rename_def!(db.skills),
             RefKind::Spell => rename_def!(db.spells),
+            RefKind::Recipe => rename_def!(db.recipes),
             RefKind::Map => {
                 if let Err(e) = self.project.rename_map_file(old, new) {
                     self.set_status(format!("Rename failed: {e:#}"));

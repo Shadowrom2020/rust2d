@@ -313,6 +313,15 @@ impl Autoplay {
                     click(&mut self.mouse_frames, p, MouseButton::Left);
                     return true;
                 }
+                // craft K: click the Make button of recipe row K in the crafting window
+                "craft" => {
+                    let Some(p) = game.crafting_button_pos(secs(1) as usize) else {
+                        println!("[autoplay] craft: no recipe row {}", arg(1));
+                        continue;
+                    };
+                    click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
                 // mapbtn close|zoomin|zoomout|center: click a button of the open map screen
                 "mapbtn" => {
                     let Some(p) = game.world_map_button_pos(arg(1)) else {

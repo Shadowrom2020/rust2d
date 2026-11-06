@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use rust2d_engine::defs::*;
 use rust2d_engine::effects::{EffectKind, EffectSpec};
+use rust2d_engine::crafting::RecipeDef;
 use rust2d_engine::entity::{EntityInstance, EntityKind, Facing, ScheduleStop};
 use rust2d_engine::events::*;
 use rust2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
@@ -224,6 +225,18 @@ fn skills() -> Vec<SkillDef> {
         SkillDef::new("arcana", "Arcana", "Understanding of magic. Each level adds 10 mana, and harder spells need it to be learned.", icon(it::STAR), 5, E::Mana { points: 10 }),
         SkillDef::new("spellcraft", "Spellcraft", "Focus and precision: every level adds 15% to the damage of Spark and Fire Burst.", icon(it::SPELL_SPARK), 4, E::SpellDamage { percent: 15.0 }),
         SkillDef::new("scavenging", "Scavenging", "An eye for what others leave behind: defeated slimes drop an extra coin per level (a scripted skill: see scavenging() in main.rhai).", icon(it::APPLE), 3, E::Script { function: "scavenging".into() }),
+    ]
+}
+
+/// The example's crafting recipes, all brewed at the alchemy table ("alchemy" station).
+fn recipes() -> Vec<RecipeDef> {
+    let i = ItemStack::new;
+    vec![
+        RecipeDef::new("brew_potion", "potion", 1, vec![i("herb", 2)], "alchemy"),
+        RecipeDef::new("brew_antidote", "antidote", 1, vec![i("herb", 1), i("mushroom", 1)], "alchemy"),
+        RecipeDef::new("brew_mana", "mana_potion", 1, vec![i("mushroom", 2), i("apple", 1)], "alchemy"),
+        // Harder brews need some knowledge of magic.
+        RecipeDef { skill: "arcana".into(), level: 1, ..RecipeDef::new("brew_swiftness", "swiftness", 1, vec![i("herb", 2), i("mushroom", 2)], "alchemy") },
     ]
 }
 
@@ -567,6 +580,7 @@ fn shop() -> Map {
         currency: "coin".into(),
         items: vec![
             ShopEntry { unlimited: true, ..ShopEntry::new("apple", 0, 4) },
+            ShopEntry { unlimited: true, ..ShopEntry::new("herb", 0, 3) },
             ShopEntry::new("potion", 5, 0),
             ShopEntry { unlimited: true, ..ShopEntry::new("arrows", 0, 2) },
             ShopEntry::new("bolts", 20, 0),
@@ -647,6 +661,8 @@ fn shop() -> Map {
     barrel.container = Some(ContainerSpec { size: 4, items: vec![ItemStack::new("apple", 1)], ..Default::default() });
     b.entity(EntityKind::Prop, "barrel", 10, 6);
     b.entity(EntityKind::Prop, "barrel", 10, 8);
+    // An alchemy table for the customers (crafting: Database › Recipes, station "alchemy").
+    b.entity(EntityKind::Prop, "alchemy_table", 1, 8);
     b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
     autotile_terrain(&mut b.m, |m, x, y| (ground(m, x, y)? == t::RUG).then_some("Rug"), |_, _, _, _| false);
@@ -870,6 +886,12 @@ fn forest() -> Map {
     for y in 16..30 {
         if b.get(0, 39, y) == Some(t::PATH) {
             b.fill(0, 40, y, 2, 1, t::PATH);
+        }
+    }
+    // Herbs and mushrooms along the path (alchemy ingredients).
+    for (k, x) in [5, 11, 17, 24, 31, 37].into_iter().enumerate() {
+        if let Some(y) = (16..32).find(|&y| b.get(0, x, y) == Some(t::PATH) && b.free(x, y)) {
+            b.entity(EntityKind::Item, if k % 2 == 0 { "herb" } else { "mushroom" }, x, y);
         }
     }
     autotile_terrain(
@@ -1258,6 +1280,9 @@ fn database() -> Database {
                 item("swiftness", "Swiftness Potion", "You move 30% faster for half a minute.", it::SWIFTNESS, true, use_trig(vec![Action::ApplyEffect { target: "player".into(), effect: EffectSpec::new(EffectKind::Haste, 30.0, 30.0) }])),
                 10,
             ),
+            // Crafting ingredients (Database › Recipes: brewed at the alchemy table in Tilda's shop).
+            stack(item("herb", "Healing Herb", "A fragrant herb. Brewed into potions at an alchemy table.", it::HERB, false, vec![]), 20),
+            stack(item("mushroom", "Red Cap", "A red forest mushroom. Useful in brews, not for dinner.", it::MUSHROOM, false, vec![]), 20),
             stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new(), overlay_f: String::new() }), 1),
             stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
         ],
@@ -1296,6 +1321,11 @@ fn database() -> Database {
                 ..prop("shrine", "Shrine", p::GRAND_SHRINE, true, [40.0, 7.0])
             },
             prop("well", "Well", p::WELL, true, [14.0, 8.0]),
+            // A crafting station: its definition's Interact trigger opens the "alchemy" recipes.
+            PropDef {
+                triggers: vec![trig(TriggerOn::Interact, vec![], vec![Action::OpenCrafting { station: "alchemy".into(), title: "Alchemy Table".into() }])],
+                ..prop("alchemy_table", "Alchemy Table", p::ALCHEMY, true, [26.0, 10.0])
+            },
             // Multi-tile props.
             PropDef {
                 sprite: SpriteRef::block("props", p::DOUBLE_GATE, 2, 2),
@@ -1356,6 +1386,7 @@ fn database() -> Database {
         ],
         skills: skills(),
         spells: spells(),
+        recipes: recipes(),
     };
     layered_characters(&mut db);
     // Trade values (merchants use them unless their stock sets a price).

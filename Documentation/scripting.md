@@ -317,6 +317,9 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `stop_schedule(target)` | The character stops following its daily schedule (set in the editor) and stays where it is. Saved. *(queued)* |
+| `open_crafting(station)` | Opens the crafting window with the recipes of a station (*Database › Recipes*), e.g. `open_crafting("alchemy")` on an alchemy table's trigger. *(queued)* |
+| `open_crafting(station, title)` | The same with a window title, e.g. `open_crafting("anvil", "Smithy")`. *(queued)* |
+| `can_craft(recipe)` | Whether the player has the ingredients (and the skill level) to make a recipe once. |
 | `follow(target)` | The character joins the player as a companion: it follows from map to map and fights hostile characters near the player. Only placed, friendly characters can. Saved. *(queued)* |
 | `stop_following(target)` | The companion leaves: on its own map it stays where it is, elsewhere it goes back to where it is placed. *(queued)* |
 | `is_companion(name)` | Whether the character with that name follows the player. |

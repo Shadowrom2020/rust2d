@@ -210,6 +210,8 @@ impl LibState {
             RefKind::Sheet => Some(SpriteRef::new(&a.1, 0)),
             RefKind::Skill => db.skill(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
             RefKind::Spell => db.spell(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
+            // A recipe shows what it makes.
+            RefKind::Recipe => db.recipe(&a.1).and_then(|r| db.item(&r.result)).map(|d| d.icon.clone()),
             _ => None,
         };
         let drawn = match (a.0, sprite) {
@@ -273,6 +275,7 @@ fn name_of(db: &Database, a: &AssetRef) -> String {
         RefKind::Character => db.character(&a.1).map(|d| d.name.clone()),
         RefKind::Skill => db.skill(&a.1).map(|d| d.name.clone()),
         RefKind::Spell => db.spell(&a.1).map(|d| d.name.clone()),
+        RefKind::Recipe => db.recipe(&a.1).and_then(|r| db.item(&r.result)).map(|d| format!("{} (recipe)", d.name)),
         _ => None,
     }
     .unwrap_or_else(|| a.1.clone())
@@ -305,6 +308,7 @@ pub fn parse_kind(s: &str) -> Option<RefKind> {
         "structure" => RefKind::Structure,
         "skill" => RefKind::Skill,
         "spell" => RefKind::Spell,
+        "recipe" => RefKind::Recipe,
         _ => return None,
     })
 }

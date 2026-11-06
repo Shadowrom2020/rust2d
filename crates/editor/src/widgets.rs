@@ -624,6 +624,8 @@ pub struct Refs {
     pub quest_stages: HashMap<String, Vec<String>>,
     pub skills: Vec<String>,
     pub spells: Vec<String>,
+    /// Crafting stations named by recipes.
+    pub stations: Vec<String>,
     /// Sprite sheet ids (effects).
     pub sheets: Vec<String>,
     /// Named animations of sprite sheets (Aseprite tags).
@@ -1352,6 +1354,13 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 }
             });
             ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
+        }
+        Action::OpenCrafting { station, title } => {
+            labeled(ui, "station", |ui| suggest(ui, &format!("{id}/station"), station, &refs.stations, 120.0));
+            labeled(ui, "title", |ui| {
+                ui.add(egui::TextEdit::singleline(title).desired_width(140.0).hint_text("Crafting"));
+            });
+            ui.weak("shows the recipes of this station (Database \u{203A} Recipes); empty station = recipes without one");
         }
         Action::Companion { target, join } => {
             target_field(ui, id, target, refs);
