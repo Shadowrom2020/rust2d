@@ -703,7 +703,7 @@ impl Editor {
                 ui.colored_label(if r.starts_with("Error") { Color32::LIGHT_RED } else { Color32::LIGHT_GREEN }, r);
             }
             ui.separator();
-            let (clicked, double) = egui::ScrollArea::vertical().id_salt("lib_grid").show(ui, |ui| self.lib.grid(ui, db, &shown, &self.lib.selected, &|_| None)).inner;
+            let (clicked, double) = egui::ScrollArea::vertical().id_salt("lib_grid").auto_shrink(false).show(ui, |ui| self.lib.grid(ui, db, &shown, &self.lib.selected, &|_| None)).inner;
             if let Some(a) = clicked {
                 if !self.lib.selected.remove(&a) {
                     self.lib.selected.insert(a);

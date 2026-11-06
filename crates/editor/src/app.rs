@@ -32,6 +32,8 @@ pub enum Mode {
     Library,
     /// The pixel editor.
     Pixel,
+    /// The open map's events as a graph.
+    Events,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -50,16 +52,19 @@ pub enum Tool {
     Link,
     /// Place multi-tile structures (houses, walls, rooms…) with one click.
     Structure,
+    /// Paint an auto-tiling terrain: edge tiles follow the neighbours.
+    Terrain,
 }
 
 impl Tool {
-    pub const ALL: [(Tool, &'static str, &'static str); 11] = [
+    pub const ALL: [(Tool, &'static str, &'static str); 12] = [
         (Tool::Select, "Select", "V"),
         (Tool::Brush, "Brush", "B"),
         (Tool::Rect, "Rect", "R"),
         (Tool::Fill, "Fill", "F"),
         (Tool::Erase, "Erase", "E"),
         (Tool::Pick, "Pick", "I"),
+        (Tool::Terrain, "Terrain", "A"),
         (Tool::Collision, "Collision", "C"),
         (Tool::Entity, "Entities", "N"),
         (Tool::Zone, "Zones", "Z"),
@@ -83,6 +88,7 @@ impl Tool {
             Tool::Zone => ph::BOUNDING_BOX,
             Tool::Link => ph::SIGNPOST,
             Tool::Structure => ph::HOUSE,
+            Tool::Terrain => ph::MOUNTAINS,
         }
     }
     pub fn name(self) -> &'static str {
@@ -94,7 +100,7 @@ impl Tool {
     /// One line on how to use the tool (tooltips and the status bar).
     pub fn help(self) -> &'static str {
         match self {
-            Tool::Select => "Click selects an entity or zone, drag moves it, click again cycles through stacked objects; empty space or right-click deselects",
+            Tool::Select => "Click selects an entity or zone, drag moves it, click again cycles through stacked objects; drag on empty space (or Shift+drag) selects a region to copy (Ctrl+C), cut (Ctrl+X) and paste (Ctrl+V); right-click deselects",
             Tool::Brush => "Click or drag paints the stamp on the active layer; right-click picks the tile under the cursor",
             Tool::Rect => "Drag a rectangle to fill it with the stamp; Shift+drag erases",
             Tool::Fill => "Click fills the connected area of identical tiles with the stamp",
@@ -105,6 +111,7 @@ impl Tool {
             Tool::Zone => "Drag to draw a zone (spawn, portal, trigger, spawner); click selects one, drag moves it",
             Tool::Link => "Drag over the exit area, choose the target map, then drag the arrival area on that map",
             Tool::Structure => "Pick a structure in the panel and click the map to place it; New from map area captures a rectangle as a structure",
+            Tool::Terrain => "Pick a terrain in the panel, then click or drag: edge tiles follow the neighbours; Shift erases, right-click picks the terrain under the cursor",
         }
     }
 }
@@ -124,6 +131,8 @@ pub enum Selection {
     None,
     Entity(u32),
     Zone(u32),
+    /// A rectangle of tiles `(x, y, w, h)` dragged with the Select tool (copy / cut / delete).
+    Region((u32, u32, u32, u32)),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -235,6 +244,17 @@ pub struct Editor {
     pub place_structure: String,
     pub structure_filter: String,
     pub capture: crate::structures::CaptureState,
+    /// File › Import… window and the last import's result (ok, text).
+    pub import: Option<crate::import::ImportDialog>,
+    pub import_report: Option<(bool, String)>,
+    /// Events mode: layout, scope and editing state of the graph.
+    pub graph: crate::graph::GraphState,
+    /// Terrain tool: the armed terrain (tileset id, index into its terrains).
+    pub terrain: Option<(String, usize)>,
+    /// Copied region / entity (Ctrl+C / Ctrl+X), pasted with Ctrl+V; kept across maps.
+    pub clipboard: Option<rust2d_engine::defs::StructureDef>,
+    /// Ctrl+V armed the clipboard: the Select tool shows it at the mouse, clicks paste it.
+    pub pasting: bool,
     /// Recently placed / picked definitions, newest first.
     pub place_recent: Vec<(EntityKind, String)>,
     pub zone_template: ZoneTemplate,
@@ -355,6 +375,12 @@ impl Editor {
             place_tab: None,
             place_filter: String::new(),
             place_structure: String::new(),
+            clipboard: None,
+            terrain: None,
+            graph: Default::default(),
+            import: None,
+            import_report: None,
+            pasting: false,
             structure_filter: String::new(),
             capture: Default::default(),
             place_recent: Vec::new(),
@@ -606,6 +632,7 @@ impl Editor {
             skills: self.project.db.skills.iter().map(|q| q.id.clone()).collect(),
             spells: self.project.db.spells.iter().map(|q| q.id.clone()).collect(),
             sheets: self.project.db.sheets.iter().map(|q| q.id.clone()).collect(),
+            sheet_tags: self.project.db.sheets.iter().filter(|q| !q.tags.is_empty()).map(|q| (q.id.clone(), q.tags.clone())).collect(),
         };
     }
 
@@ -826,6 +853,8 @@ impl Editor {
         };
         let mut cmd = std::process::Command::new(exe);
         cmd.arg(&self.project.root);
+        // Developer play-test: scripts reload when saved, F4 opens the console.
+        cmd.arg("--dev");
         if !here || cutscene.is_some() {
             cmd.arg("--no-title");
         }
@@ -925,6 +954,7 @@ impl Editor {
                     d.opts.icon = path.display().to_string();
                 }
             }
+            P::Import(kind) => self.import_and_report(kind, &path),
             P::OpenProject => self.request(Pending::OpenProject(path)),
             P::NewProject => self.request(Pending::NewProject(path)),
             P::NewProjectParent => {
@@ -1118,6 +1148,8 @@ impl Editor {
         match self.sel {
             Selection::Entity(uid) => doc.map.entities.retain(|e| e.uid != uid),
             Selection::Zone(uid) => doc.map.zones.retain(|z| z.uid != uid),
+            // A region is emptied and stays selected (its own undo step).
+            Selection::Region(r) => return doc.clear_region(r, &self.assets),
             Selection::None => return,
         }
         doc.record_objects(before, "delete");
@@ -1147,7 +1179,7 @@ impl Editor {
                 self.sel = Selection::Zone(z.uid);
                 doc.map.zones.push(z);
             }
-            Selection::None => return,
+            Selection::Region(_) | Selection::None => return,
         }
         doc.record_objects(before, "duplicate");
     }
@@ -1195,10 +1227,10 @@ impl Editor {
         match self.mode {
             Mode::Map => {
                 egui::SidePanel::left("left").resizable(true).default_width(290.0).show(ctx, |ui| {
-                    egui::ScrollArea::vertical().id_salt("left_scroll").show(ui, |ui| self.left_panel(ui));
+                    egui::ScrollArea::vertical().id_salt("left_scroll").auto_shrink(false).show(ui, |ui| self.left_panel(ui));
                 });
                 egui::SidePanel::right("right").resizable(true).default_width(340.0).show(ctx, |ui| {
-                    egui::ScrollArea::vertical().id_salt("right_scroll").show(ui, |ui| self.inspector(ui));
+                    egui::ScrollArea::vertical().id_salt("right_scroll").auto_shrink(false).show(ui, |ui| self.inspector(ui));
                 });
             }
             Mode::Database => {
@@ -1206,6 +1238,7 @@ impl Editor {
             }
             Mode::Library => self.library_ui(ctx),
             Mode::Pixel => self.pixel_ui(ctx),
+            Mode::Events => self.events_ui(ctx),
         }
         self.wizard_window(ctx);
         self.builder_window(ctx);
@@ -1222,6 +1255,7 @@ impl Editor {
         }
         self.export_window(ctx);
         self.capture_window(ctx);
+        self.import_window(ctx);
         self.confirm_remove_dialog(ctx);
         self.script_pick_dialog(ctx);
         self.add_from_library_dialog(ctx);
@@ -1328,6 +1362,10 @@ impl Editor {
                         ui.close_menu();
                     }
                     ui.separator();
+                    if ui.button(ui::t(ph::DOWNLOAD_SIMPLE, "Import…")).on_hover_text("A Tiled map (.tmx / .tmj), an LPC character sheet or an Aseprite sprite sheet").clicked() {
+                        self.import = Some(Default::default());
+                        ui.close_menu();
+                    }
                     if ui.button(ui::t(ph::PACKAGE, "Export game (standalone)…")).clicked() {
                         self.open_export();
                         ui.close_menu();
@@ -1353,7 +1391,22 @@ impl Editor {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.add_enabled(self.sel != Selection::None, egui::Button::new(ui::t(ph::COPY, "Duplicate   Ctrl+D"))).clicked() {
+                    let copyable = matches!(self.sel, Selection::Region(_) | Selection::Entity(_));
+                    if ui.add_enabled(copyable, egui::Button::new(ui::t(ph::SCISSORS, "Cut   Ctrl+X"))).on_hover_text("A region dragged with the Select tool, or the selected entity").clicked() {
+                        self.cut_selection();
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(copyable, egui::Button::new(ui::t(ph::COPY, "Copy   Ctrl+C"))).on_hover_text("A region dragged with the Select tool, or the selected entity").clicked() {
+                        self.copy_selection();
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(self.clipboard.is_some() && self.doc.is_some(), egui::Button::new(ui::t(ph::CLIPBOARD_TEXT, "Paste   Ctrl+V"))).clicked() {
+                        self.start_paste();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    let dup = matches!(self.sel, Selection::Entity(_) | Selection::Zone(_));
+                    if ui.add_enabled(dup, egui::Button::new(ui::t(ph::COPY_SIMPLE, "Duplicate   Ctrl+D"))).clicked() {
                         self.duplicate_selection();
                         ui.close_menu();
                     }
@@ -1434,6 +1487,7 @@ impl Editor {
                 });
                 ui.separator();
                 ui::tab(ui, self.mode == Mode::Map, ph::MAP_TRIFOLD, "Map").on_hover_text("Maps: tiles, entities, zones, transitions").clicked().then(|| self.mode = Mode::Map);
+                ui::tab(ui, self.mode == Mode::Events, ph::GRAPH, "Events").on_hover_text("The open map's events as a graph: triggers, dialogs and choices, the scripts they run, events, flags and variables, where they lead").clicked().then(|| self.mode = Mode::Events);
                 ui::tab(ui, self.mode == Mode::Database, ph::DATABASE, "Database").on_hover_text("Definitions: items, props, characters, tilesets, sprite sheets, sounds, structures, quests, project settings, scripts").clicked().then(|| self.mode = Mode::Database);
                 let px_label = if self.px.is_dirty() { "Pixel editor •" } else { "Pixel editor" };
                 ui::tab(ui, self.mode == Mode::Pixel, ph::IMAGE, px_label).on_hover_text("Draw and edit the project's images").clicked().then(|| self.mode = Mode::Pixel);
@@ -1472,7 +1526,7 @@ impl Editor {
                 });
                 let groups: [(&str, &[Tool]); 4] = [
                     ("Select", &[Tool::Select]),
-                    ("Paint", &[Tool::Brush, Tool::Rect, Tool::Fill, Tool::Erase, Tool::Pick]),
+                    ("Paint", &[Tool::Brush, Tool::Rect, Tool::Fill, Tool::Erase, Tool::Pick, Tool::Terrain]),
                     ("Collision", &[Tool::Collision]),
                     ("Objects", &[Tool::Entity, Tool::Zone, Tool::Link, Tool::Structure]),
                 ];
@@ -1833,10 +1887,12 @@ impl Editor {
             Tool::Select => {
                 ui.heading("Select");
                 ui.label("Click an entity or zone to select it, drag to move it. Click again to cycle through objects on the same spot. Clicking empty space or right-click deselects.");
+                ui.label("Drag on empty space (Shift+drag anywhere) to select a region of tiles: Ctrl+C copies it (all layers, collision, entities), Ctrl+X cuts it, Del clears it. Ctrl+V pastes: the copy follows the mouse, each click places it, Esc stops. The clipboard is kept when you open another map.");
                 ui.weak("Nothing is painted with this tool. Pick a tile below (or press B / R / F) to paint; Esc returns here.");
                 ui.separator();
                 self.palette(ui);
             }
+            Tool::Terrain => self.terrain_palette(ui),
             t if t.paints_tiles() => self.palette(ui),
             Tool::Collision => {
                 ui.heading("Collision");
@@ -2091,6 +2147,7 @@ impl Editor {
         let mut customize: Option<u32> = None;
         let mut arm: Option<(EntityKind, String)> = None;
         let mut rename_map: Option<(String, String)> = None;
+        let mut region_req: Option<crate::clipboard::RegionReq> = None;
         match self.sel {
             Selection::Entity(uid) => {
                 let db = &self.project.db;
@@ -2453,6 +2510,7 @@ impl Editor {
                 ui.weak("Zones react to Enter, Leave and Interact (pressing E while inside).");
                 widgets::triggers_ui(ui, &format!("z{uid}"), &mut z.triggers, refs, rust2d_engine::events::TriggerOwner::Zone);
             }
+            Selection::Region(r) => region_req = crate::clipboard::region_inspector(ui, &doc.map, r, self.clipboard.as_ref()),
             Selection::None => {
                 let map = &mut doc.map;
                 ui.heading(format!("Map: {}", map.name));
@@ -2579,6 +2637,9 @@ impl Editor {
                 self.save_map();
             }
             self.rename_id(RefKind::Map, &old, &new);
+        }
+        if let Some(req) = region_req {
+            self.region_request(req);
         }
         if duplicate {
             self.duplicate_selection();

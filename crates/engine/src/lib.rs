@@ -1,6 +1,7 @@
 //! rust2d engine: tile maps, entities, events, scripting, rendering and the game runtime.
 
 pub mod audio;
+pub mod autotile;
 pub mod defs;
 pub mod effects;
 pub mod entity;

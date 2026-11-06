@@ -65,6 +65,10 @@ pub struct DbState {
     pub art_focus: Option<(String, u32)>,
     /// Tilesets tab: clicks on the tile grid toggle light tiles.
     pub tile_light_pick: bool,
+    /// Editor script `dbscroll Y`: scroll the definition form there once.
+    pub form_scroll: Option<f32>,
+    /// Tilesets tab: the terrain whose tiles clicks into the grid assign.
+    pub terrain_pick: Option<crate::terrain::TerrainPick>,
     /// The structure editor (Structures tab).
     pub st_edit: crate::structures::StructEdit,
 }
@@ -92,6 +96,7 @@ struct Cx<'a> {
     art: &'a mut Option<ArtAction>,
     st_edit: &'a mut crate::structures::StructEdit,
     tile_light_pick: &'a mut bool,
+    terrain_pick: &'a mut Option<crate::terrain::TerrainPick>,
 }
 
 /// An id not yet used in `ids`, based on `prefix`.
@@ -157,7 +162,7 @@ fn list_ui<T: Clone>(
         }
     });
     ui.separator();
-    egui::ScrollArea::vertical().id_salt("db_list").show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("db_list").auto_shrink(false).show(ui, |ui| {
         for (i, it) in items.iter().enumerate() {
             if ui.selectable_label(*sel == i, label(it)).clicked() {
                 *sel = i;
@@ -198,6 +203,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 ed.db.sel = 0;
                 ed.db.rename = RenameUi::default();
                 ed.db.anim_target = None;
+                ed.db.terrain_pick = None;
             }
         }
         ui.separator();
@@ -336,7 +342,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.tilesets,
                     sel,
                     |d| d.id.clone(),
-                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![], lights: vec![] },
+                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![], lights: vec![], terrains: vec![] },
                     |d| &mut d.id,
                 ),
                 Tab::Sheets => list_ui(
@@ -393,6 +399,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         if ed.db.sel != sel_before {
             ed.db.rename = RenameUi::default();
             ed.db.anim_target = None;
+            ed.db.terrain_pick = None;
         }
         let db_snapshot = ed.project.db.clone();
         let mut embed: Option<(String, (u32, u32), bool)> = None;
@@ -406,7 +413,11 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             } else {
                 f32::INFINITY
             };
-            egui::ScrollArea::vertical().id_salt("db_form").max_height(form_height).show(ui, |ui| {
+            let mut form_area = egui::ScrollArea::vertical().id_salt("db_form").max_height(form_height);
+            if let Some(y) = ed.db.form_scroll.take() {
+                form_area = form_area.vertical_scroll_offset(y);
+            }
+            form_area.show(ui, |ui| {
                 let mut cx = Cx {
                     tex: &ed.tex,
                     assets: &mut ed.assets,
@@ -424,6 +435,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     art: &mut art,
                     st_edit: &mut ed.db.st_edit,
                     tile_light_pick: &mut ed.db.tile_light_pick,
+                    terrain_pick: &mut ed.db.terrain_pick,
                 };
                 let i = ed.db.sel;
                 let db = &mut ed.project.db;
@@ -1335,11 +1347,32 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
     if ui.selectable_label(*cx.tile_light_pick, ui::t(ui::ph::LIGHTBULB, "Pick light tiles in the grid")).on_hover_text("While on, clicking a tile below adds or removes its light").clicked() {
         *cx.tile_light_pick = !*cx.tile_light_pick;
         *cx.anim_target = None;
+        *cx.terrain_pick = None;
+    }
+
+    // ---- terrains
+    ui.separator();
+    let before = *cx.terrain_pick;
+    crate::terrain::terrains_form(ui, d, t.id(), ts, tile, cx.terrain_pick);
+    if cx.terrain_pick.is_some() && before.is_none() {
+        *cx.anim_target = None;
+        *cx.tile_light_pick = false;
     }
 
     // ---- tile grid
     ui.separator();
+    let editing_terrain = cx.terrain_pick.and_then(|p| d.terrains.get(p.terrain).map(|t| (p, t.name.clone())));
     match (*cx.anim_target, *cx.tile_light_pick) {
+        _ if editing_terrain.is_some() => {
+            let (p, name) = editing_terrain.clone().unwrap();
+            ui.label(if p.block {
+                format!("Click the top-left tile of a 4×4 block for terrain {name}.")
+            } else if p.slot == crate::terrain::BASE_SLOT {
+                format!("Click the tile that erasing {name} leaves.")
+            } else {
+                format!("Click the tile for slot {} of terrain {name} (cyan outline = its tiles).", p.slot + 1)
+            })
+        }
         (Some(k), _) => ui.label(format!("Click tiles to append frames to animation #{} (the first click also sets its base tile).", k + 1)),
         (None, true) => ui.label("Click tiles to add or remove their light (yellow bulb = gives light)."),
         (None, false) => ui.label("Click tiles to toggle solidity (red = blocks movement)."),
@@ -1347,7 +1380,10 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
     let scale = 3.0;
     let size = vec2(ts.image.width as f32 * scale, ts.image.height as f32 * scale);
     let cell = tile * scale;
-    egui::ScrollArea::both().id_salt("ts_solid").show(ui, |ui| {
+    // Only sideways (very wide images): vertically the grid is part of the form, so the form's
+    // scrollbar reaches its last row. (A scroll area of its own got just the space left below
+    // the sections above, often a 64 px strip.)
+    egui::ScrollArea::horizontal().id_salt("ts_solid").show(ui, |ui| {
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 0.0, Color32::from_gray(30));
@@ -1362,6 +1398,9 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
             if animated.contains(&i) {
                 p.rect_stroke(r, 0.0, Stroke::new(2.0_f32, Color32::LIGHT_BLUE), StrokeKind::Inside);
             }
+            if editing_terrain.as_ref().is_some_and(|(p, _)| d.terrains[p.terrain].contains(i) || d.terrains[p.terrain].base == Some(i)) {
+                p.rect_stroke(r.shrink(2.0), 0.0, Stroke::new(2.0_f32, Color32::from_rgb(90, 220, 255)), StrokeKind::Inside);
+            }
             if d.lights.iter().any(|l| l.tile == i) {
                 p.text(r.right_top() + vec2(-3.0, 2.0), egui::Align2::RIGHT_TOP, ui::ph::LIGHTBULB, egui::FontId::proportional(16.0), Color32::YELLOW);
             }
@@ -1371,7 +1410,8 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
             if let Some(pos) = resp.interact_pointer_pos() {
                 let rel = pos - rect.min;
                 let i = (rel.y / cell) as u32 * ts.columns + (rel.x / cell) as u32;
-                if i < ts.count {
+                let terrain_click = i < ts.count && cx.terrain_pick.as_mut().is_some_and(|p| crate::terrain::grid_click(d, ts, p, i));
+                if i < ts.count && !terrain_click {
                     match cx.anim_target.and_then(|k| d.animations.get_mut(k)) {
                         Some(a) => {
                             if a.frames.is_empty() {
@@ -1448,6 +1488,30 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
             ui.add(egui::DragValue::new(&mut d.frame_h).range(1..=512));
         });
         ui.end_row();
+    });
+    // Named animations (from Aseprite tags, or added here): Effect / Fly actions and
+    // effect(…, #{ tag }) play them by name.
+    egui::CollapsingHeader::new(format!("Animations ({})", d.tags.len())).id_salt(("sheet_tags", &d.id)).default_open(!d.tags.is_empty()).show(ui, |ui| {
+        let mut remove = None;
+        for (k, t) in d.tags.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut t.name).desired_width(110.0).hint_text("name"));
+                ui.label("frames");
+                ui.add(egui::DragValue::new(&mut t.first).range(0..=9999));
+                ui.label("to");
+                ui.add(egui::DragValue::new(&mut t.last).range(t.first..=9999));
+                ui.add(egui::DragValue::new(&mut t.fps).range(0.1..=60.0).speed(0.2).suffix(" fps"));
+                if ui.small_button(ui::ph::TRASH).clicked() {
+                    remove = Some(k);
+                }
+            });
+        }
+        if let Some(k) = remove {
+            d.tags.remove(k);
+        }
+        if ui.button(ui::t(ui::ph::PLUS, "Animation")).on_hover_text("A named frame range, offered by the Effect / Fly actions and effect(…, #{ tag: \"name\" })").clicked() {
+            d.tags.push(rust2d_engine::defs::SheetTag { name: format!("anim_{}", d.tags.len() + 1), first: 0, last: 0, fps: 10.0 });
+        }
     });
     // Who uses this sheet.
     let db = cx.db;
@@ -1555,7 +1619,7 @@ fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {
 }
 
 fn project_ui(ed: &mut Editor, ui: &mut egui::Ui) {
-    egui::ScrollArea::vertical().id_salt("project_scroll").show(ui, |ui| project_form(ed, ui));
+    egui::ScrollArea::vertical().id_salt("project_scroll").auto_shrink(false).show(ui, |ui| project_form(ed, ui));
 }
 
 fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
@@ -1780,7 +1844,7 @@ fn {name}() {{
 }
 
 /// `fn name(` definitions in a script, with the character index where each starts.
-fn script_functions(text: &str) -> Vec<(String, usize)> {
+pub(crate) fn script_functions(text: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
     let mut chars = 0;
     for line in text.split_inclusive('\n') {
@@ -1863,7 +1927,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     egui::SidePanel::left("scripts_left").default_width(220.0).show_inside(ui, |ui| {
         let st = &mut ed.db;
         ui.weak("Click a file or one of its functions to edit it.");
-        egui::ScrollArea::vertical().id_salt("script_files").max_height(ui.available_height() - 40.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("script_files").auto_shrink(false).max_height(ui.available_height() - 40.0).show(ui, |ui| {
             for f in &files {
                 let name = f.file_name().unwrap().to_string_lossy().to_string();
                 let current = st.script_file.as_ref() == Some(f);

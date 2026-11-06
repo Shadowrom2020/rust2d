@@ -523,6 +523,33 @@ impl Bundle {
                 }
             }
         }
+        // Tilesets the newer set gives auto-tiling terrains get them (with the solid flags and
+        // animations of the terrain tiles) when they have none yet and use the same (or an
+        // upgraded) image.
+        for n in self.db.tilesets.iter().filter(|n| !n.terrains.is_empty()) {
+            let Some(o) = db.tilesets.iter_mut().find(|o| o.id == n.id && o.terrains.is_empty()) else { continue };
+            let key = (RefKind::Tileset, n.id.clone());
+            let same_image = upgraded.contains(&key) || (safe_rel(&o.image) && std::fs::read(root.join(&o.image)).ok().as_ref() == self.files.get(&n.image));
+            if !same_image {
+                continue;
+            }
+            o.terrains = n.terrains.clone();
+            for &t in n.solid.iter().filter(|&&t| n.terrains.iter().any(|tr| tr.contains(t))) {
+                if !o.solid.contains(&t) {
+                    o.solid.push(t);
+                }
+            }
+            o.solid.sort();
+            // Animated terrain tiles (water insides cycling through the water frames).
+            for a in n.animations.iter().filter(|a| n.terrains.iter().any(|tr| tr.contains(a.tile))) {
+                if !o.animations.iter().any(|x| x.tile == a.tile) {
+                    o.animations.push(a.clone());
+                }
+            }
+            if !upgraded.contains(&key) {
+                upgraded.push(key);
+            }
+        }
         let new = |k: RefKind, id: &str| !exists(db, &(k, id.to_string()));
         self.db.tilesets.retain(|d| new(RefKind::Tileset, &d.id));
         self.db.sheets.retain(|d| new(RefKind::Sheet, &d.id));
@@ -779,8 +806,8 @@ pub fn open_library(dir: &Path, starter: Option<&[u8]>) -> Result<Project> {
 /// File in the library recording which starter set was last applied.
 const STARTER_STAMP: &str = "starter.stamp";
 /// Version of the rules for applying starter sets (2: images that only grew are upgraded;
-/// 4: bodies get the playable flag).
-const STARTER_RULES: u32 = 4;
+/// 4: bodies get the playable flag; 5: tilesets get their auto-tiling terrains).
+const STARTER_RULES: u32 = 5;
 
 /// 64-bit FNV-1a hash (a cheap fingerprint of the starter pack).
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -836,7 +863,7 @@ mod tests {
         let mut bow = item("bow");
         bow.weapon = Some(Weapon::ranged(1, 0.5, Ranged { projectile: SpriteRef::new("items", 1), speed: 100.0, range: 6.0, ammo: "arrows".into() }));
         let db = Database {
-            sheets: vec![SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false }],
+            sheets: vec![SheetDef { id: "items".into(), image: "sprites/items.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false, tags: vec![] }],
             items: vec![item("arrows"), bow],
             ..Default::default()
         };
@@ -887,7 +914,7 @@ mod tests {
         use crate::skills::{SpellDef, SpellEffect};
         let (root, mut db) = source("scripts");
         std::fs::write(root.join("sprites/boom.png"), png(16, 16, [9, 9, 9, 255])).unwrap();
-        db.sheets.push(SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false });
+        db.sheets.push(SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false, tags: vec![] });
         db.spells.push(SpellDef::new("fireball", "Fireball", "", SpriteRef::new("items", 0), 5, 1.0, SpellEffect::Script { function: "cast_fireball".into() }));
         std::fs::create_dir_all(root.join("scripts")).unwrap();
         let src = "// Fireball: aim first.\n// (two comment lines)\nfn cast_fireball() {\n    aim(\"fireball_at\");\n}\n\nfn fireball_at(x, y) { if x > 0 { helper(); } effect(\"boom\", x, y); }\n\n// unrelated\nfn helper() { say(\"hi\"); }\n\nfn shop_talk() { say(\"{ not a brace }\"); }\n";
@@ -930,7 +957,7 @@ mod tests {
         let other = tmp("scripts_other");
         std::fs::create_dir_all(other.join("sprites")).unwrap();
         std::fs::write(other.join("sprites/boom.png"), png(8, 8, [1, 1, 1, 255])).unwrap();
-        let mut odb = Database { sheets: vec![SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 8, frame_h: 8, kind: Default::default(), female: false, playable: false }], ..Default::default() };
+        let mut odb = Database { sheets: vec![SheetDef { id: "boom".into(), image: "sprites/boom.png".into(), frame_w: 8, frame_h: 8, kind: Default::default(), female: false, playable: false, tags: vec![] }], ..Default::default() };
         again.merge_into(&mut odb, &other).unwrap();
         let merged = std::fs::read_to_string(other.join("scripts").join(LIBRARY_SCRIPT)).unwrap();
         assert!(merged.contains("effect(\"boom_2\", x, y)"), "{merged}");
@@ -969,6 +996,36 @@ mod tests {
     }
 
     #[test]
+    fn newer_sets_add_terrains_to_existing_tilesets() {
+        let src = tmp("terrain_src");
+        let dst = tmp("terrain_dst");
+        for d in [&src, &dst] {
+            let _ = std::fs::remove_dir_all(d);
+            std::fs::create_dir_all(d.join("tilesets")).unwrap();
+            std::fs::write(d.join("tilesets/t.png"), png(64, 64, [10, 200, 10, 255])).unwrap();
+        }
+        let mut pond = crate::autotile::Terrain { name: "Pond".into(), base: Some(0), ..Default::default() };
+        pond.fill_from_block(0, 4);
+        let ts = |solid: Vec<u32>, terrains| TilesetDef { id: "t".into(), image: "tilesets/t.png".into(), solid, animations: vec![], lights: vec![], terrains };
+        let mut newer = Database { tilesets: vec![ts(vec![3, 5, 99], vec![pond.clone()])], ..Default::default() };
+        newer.tilesets[0].animations = vec![TileAnim { tile: 15, frames: vec![15, 16], fps: 2.0 }, TileAnim { tile: 40, frames: vec![40, 41], fps: 2.0 }];
+        let pack = Bundle::collect(&newer, &src, 32, "starter", &all_assets(&newer)).unwrap();
+        let mut db = Database { tilesets: vec![ts(vec![3], vec![])], ..Default::default() };
+        let report = pack.add_missing(&mut db, &dst).unwrap();
+        assert_eq!(db.tilesets[0].terrains, vec![pond.clone()]);
+        assert_eq!(db.tilesets[0].solid, vec![3, 5], "solid flags of terrain tiles only");
+        assert_eq!(db.tilesets[0].animations.iter().map(|a| a.tile).collect::<Vec<_>>(), vec![15], "animations of terrain tiles only");
+        assert_eq!(report.upgraded, vec![(RefKind::Tileset, "t".to_string())]);
+        // A user's own image (different pixels) keeps its definition as it is.
+        std::fs::write(dst.join("tilesets/t.png"), png(64, 64, [1, 2, 3, 255])).unwrap();
+        let mut db = Database { tilesets: vec![ts(vec![], vec![])], ..Default::default() };
+        let pack = Bundle::collect(&newer, &src, 32, "starter", &all_assets(&newer)).unwrap();
+        pack.add_missing(&mut db, &dst).unwrap();
+        assert!(db.tilesets[0].terrains.is_empty());
+        let _ = (std::fs::remove_dir_all(src), std::fs::remove_dir_all(dst));
+    }
+
+    #[test]
     fn library_and_removal() {
         let (root, db) = source("lib");
         let pack = Bundle::collect(&db, &root, 16, "starter", &all_assets(&db)).unwrap().to_pack().unwrap();
@@ -984,7 +1041,7 @@ mod tests {
         // A newer starter set: only assets with new ids are added, existing ones stay as they are.
         let mut db2 = db.clone();
         db2.items[0].name = "Changed arrows".into();
-        db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false });
+        db2.sheets.push(SheetDef { id: "extra".into(), image: "sprites/extra.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false, tags: vec![] });
         std::fs::write(root.join("sprites/extra.png"), png(16, 16, [1, 2, 3, 255])).unwrap();
         let pack2 = Bundle::collect(&db2, &root, 16, "starter", &all_assets(&db2)).unwrap().to_pack().unwrap();
         let lib = open_library(&dir, Some(&pack2)).unwrap();

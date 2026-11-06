@@ -40,6 +40,8 @@ pub struct ScriptHost {
     ast: AST,
     ctx: Rc<RefCell<Ctx>>,
     pub errors: Vec<String>,
+    /// Text printed by scripts since the last `take_printed` (the dev console shows it).
+    printed: Rc<RefCell<Vec<String>>>,
 }
 
 impl ScriptHost {
@@ -48,9 +50,19 @@ impl ScriptHost {
         let mut engine = Engine::new();
         engine.set_max_operations(2_000_000);
         engine.set_max_call_levels(64);
-        engine.on_print(|s| println!("[script] {s}"));
+        let printed: Rc<RefCell<Vec<String>>> = Rc::default();
+        let sink = printed.clone();
+        engine.on_print(move |s| {
+            println!("[script] {s}");
+            let mut p = sink.borrow_mut();
+            // Only the dev console drains it: keep the newest lines.
+            if p.len() >= 200 {
+                p.remove(0);
+            }
+            p.push(s.to_string());
+        });
         register_api(&mut engine, &ctx);
-        ScriptHost { engine, ast: AST::empty(), ctx, errors: Vec::new() }
+        ScriptHost { engine, ast: AST::empty(), ctx, errors: Vec::new(), printed }
     }
 
     pub fn set_player(&mut self, info: PlayerInfo) {
@@ -62,25 +74,74 @@ impl ScriptHost {
         self.ctx.borrow_mut().characters = characters;
     }
 
-    /// Compiles every `*.rhai` file in `dir` into one module (functions are global).
+    /// Compiles every `*.rhai` file in `dir` into one module (functions are global). Files
+    /// that don't compile are reported in `errors` and left out.
     pub fn load_dir(&mut self, dir: &Path) {
-        self.ast = AST::empty();
         self.errors.clear();
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
-        let mut files: Vec<_> = rd
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "rhai"))
-            .collect();
+        let (ast, errors) = self.compile_dir(dir);
+        self.ast = ast;
+        for e in errors {
+            self.report(e);
+        }
+    }
+
+    /// Hot reload (dev play-tests): compiles the scripts again and uses them if every file
+    /// compiles; otherwise the previous scripts stay loaded and the errors are returned.
+    /// `Ok` carries the number of script functions.
+    pub fn reload_dir(&mut self, dir: &Path) -> Result<usize, Vec<String>> {
+        let (ast, errors) = self.compile_dir(dir);
+        if !errors.is_empty() {
+            for e in &errors {
+                eprintln!("[script] error: {e}");
+            }
+            return Err(errors);
+        }
+        self.ast = ast;
+        self.errors.clear();
+        Ok(self.function_names().len())
+    }
+
+    fn compile_dir(&self, dir: &Path) -> (AST, Vec<String>) {
+        let mut ast = AST::empty();
+        let mut errors = Vec::new();
+        let Ok(rd) = std::fs::read_dir(dir) else { return (ast, errors) };
+        let mut files: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "rhai")).collect();
         files.sort();
         for f in files {
-            match std::fs::read_to_string(&f).map_err(|e| e.to_string()).and_then(|src| {
-                self.engine.compile(&src).map_err(|e| e.to_string())
-            }) {
-                Ok(ast) => self.ast = self.ast.merge(&ast),
-                Err(e) => self.report(format!("{}: {e}", f.display())),
+            match std::fs::read_to_string(&f).map_err(|e| e.to_string()).and_then(|src| self.engine.compile(&src).map_err(|e| e.to_string())) {
+                Ok(a) => ast = ast.merge(&a),
+                Err(e) => errors.push(format!("{}: {e}", f.file_name().map_or_else(|| f.display().to_string(), |n| n.to_string_lossy().into_owned()))),
             }
         }
+        (ast, errors)
+    }
+
+    /// Runs a piece of Rhai (the dev console's input) with the project's script functions
+    /// available. Returns the value as text ("" for none) or the error, and the world actions
+    /// it queued.
+    pub fn eval(&mut self, world: &mut WorldState, src: &str) -> (Result<String, String>, Vec<Action>) {
+        let snippet = match self.engine.compile(src) {
+            Ok(a) => a,
+            Err(e) => return (Err(e.to_string()), Vec::new()),
+        };
+        let ast = self.ast.clone_functions_only().merge(&snippet);
+        {
+            let mut c = self.ctx.borrow_mut();
+            c.world = std::mem::take(world);
+            c.actions.clear();
+            c.owner = None;
+        }
+        let mut scope = Scope::new();
+        scope.push_constant("SELF", -1_i64);
+        let res = self.engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast);
+        *world = std::mem::take(&mut self.ctx.borrow_mut().world);
+        let actions = std::mem::take(&mut self.ctx.borrow_mut().actions);
+        (res.map(|v| if v.is_unit() { String::new() } else { v.to_string() }).map_err(|e| e.to_string()), actions)
+    }
+
+    /// Lines printed by scripts (`print`) since the last call.
+    pub fn take_printed(&mut self) -> Vec<String> {
+        std::mem::take(&mut *self.printed.borrow_mut())
     }
 
     pub fn load_source(&mut self, src: &str) -> Result<(), String> {
@@ -430,8 +491,9 @@ fn num(d: &Dynamic) -> f32 {
     d.as_float().map(|f| f as f32).or_else(|_| d.as_int().map(|i| i as f32)).unwrap_or(0.0)
 }
 
-/// The sprite of `fly` / `effect` from the sheet and the options map: `frames: [first, last]`,
-/// `fps`, `scale`, `light`, `color: [r, g, b]` (of the light).
+/// The sprite of `fly` / `effect` from the sheet and the options map: `frames: [first, last]`
+/// or `tag: "name"` (a named animation of the sheet), `fps`, `scale`, `light`, `color: [r, g, b]`
+/// (of the light).
 fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
     let opt = |k: &str| o.get(k).map(num);
     let mut s = FxSprite { sheet: sheet.into(), ..Default::default() };
@@ -440,6 +502,9 @@ fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
         s.last = f.get(1).map_or(s.first as f32, num).max(s.first as f32) as u32;
     } else if let Some(f) = opt("frame") {
         (s.first, s.last) = (f.max(0.0) as u32, f.max(0.0) as u32);
+    }
+    if let Some(t) = o.get("tag").and_then(|t| t.clone().into_string().ok()) {
+        s.tag = t;
     }
     s.fps = opt("fps").unwrap_or(s.fps).max(0.1);
     s.scale = opt("scale").unwrap_or(s.scale).max(0.05);
@@ -480,6 +545,57 @@ fn fly(sheet: &str, x: &Dynamic, y: &Dynamic, function: &str, o: &Map) -> Action
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_tag_option() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn boom() { effect("boom", 2, 3, #{ tag: "explode", scale: 2 }); }"#).unwrap();
+        let mut w = WorldState::default();
+        let a = host.call(&mut w, "boom", None);
+        let Some(Action::Effect { sprite, .. }) = a.first() else { panic!("{a:?}") };
+        assert_eq!((sprite.sheet.as_str(), sprite.tag.as_str(), sprite.scale), ("boom", "explode", 2.0));
+    }
+
+    #[test]
+    fn hot_reload_keeps_working_scripts_on_errors() {
+        let dir = std::env::temp_dir().join(format!("rust2d_reload_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.rhai"), "fn greet() { set_var(\"n\", 1); }").unwrap();
+        let mut host = ScriptHost::new();
+        host.load_dir(&dir);
+        let mut w = WorldState::default();
+        host.call(&mut w, "greet", None);
+        assert_eq!(w.var("n"), 1);
+        // A broken edit: the old function stays.
+        std::fs::write(dir.join("a.rhai"), "fn greet() { set_var(\"n\", 2) ").unwrap();
+        let errs = host.reload_dir(&dir).unwrap_err();
+        assert!(errs[0].starts_with("a.rhai:"), "{errs:?}");
+        host.call(&mut w, "greet", None);
+        assert_eq!(w.var("n"), 1);
+        // Fixed, plus a new file.
+        std::fs::write(dir.join("a.rhai"), "fn greet() { set_var(\"n\", 2); }").unwrap();
+        std::fs::write(dir.join("b.rhai"), "fn extra() { 5 }").unwrap();
+        assert_eq!(host.reload_dir(&dir), Ok(2));
+        host.call(&mut w, "greet", None);
+        assert_eq!(w.var("n"), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn console_eval_uses_script_functions() {
+        let mut host = ScriptHost::new();
+        host.load_source("fn double(x) { x * 2 } fn hi() { print(\"hi\"); give_item(\"coin\", 1); }").unwrap();
+        let mut w = WorldState::default();
+        assert_eq!(host.eval(&mut w, "double(21)").0, Ok("42".into()));
+        let (r, actions) = host.eval(&mut w, "set_flag(\"x\", true); hi()");
+        assert!(r.is_ok());
+        assert_eq!(host.eval(&mut w, "let a = 1;").0, Ok(String::new()));
+        assert!(w.flag("x") && w.item_count("coin") == 1 && actions.is_empty());
+        assert_eq!(host.take_printed(), vec!["hi".to_string()]);
+        assert!(host.eval(&mut w, "nope(").0.is_err());
+        assert!(host.eval(&mut w, "missing()").0.is_err());
+    }
 
     #[test]
     fn hp_of_characters() {

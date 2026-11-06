@@ -286,10 +286,16 @@ impl Editor {
 
     /// Canvas: semi-transparent ghost of the armed structure at its would-be position.
     pub fn draw_structure_ghost(&self, hover: (i32, i32)) {
-        use macroquad::prelude::{draw_rectangle_lines, draw_texture_ex, vec2 as mvec2, Color, DrawTextureParams, YELLOW};
         let Some(d) = self.project.db.structure(&self.place_structure) else { return };
+        self.draw_structure_def_ghost(d, self.structure_origin(d, hover));
+    }
+
+    /// Canvas: semi-transparent ghost of a structure with its top-left corner at tile `origin`
+    /// (also the clipboard while pasting).
+    pub fn draw_structure_def_ghost(&self, d: &StructureDef, origin: (i32, i32)) {
+        use macroquad::prelude::{draw_rectangle_lines, draw_texture_ex, vec2 as mvec2, Color, DrawTextureParams, YELLOW};
         let ts = self.ts();
-        let (ox, oy) = self.structure_origin(d, hover);
+        let (ox, oy) = origin;
         let tint = Color::new(1.0, 1.0, 1.0, 0.6);
         let draw_layer = |layer: &Vec<u32>| {
             for (i, &v) in layer.iter().enumerate() {
@@ -303,8 +309,11 @@ impl Editor {
             draw_layer(l);
         }
         for e in &d.entities {
-            if let Some(s) = entity_sprite(&self.project.db, e) {
-                self.assets.draw_sprite(&s, 0, mvec2(ox as f32 * ts + e.x, oy as f32 * ts + e.y), tint);
+            let feet = mvec2(ox as f32 * ts + e.x, oy as f32 * ts + e.y);
+            if e.kind == EntityKind::Character {
+                self.draw_char_layers(&self.char_layers(&e.def, Some(e), e.facing, 0), feet, tint);
+            } else if let Some(s) = entity_sprite(&self.project.db, e) {
+                self.assets.draw_sprite(&s, 0, feet, tint);
             }
         }
         for l in d.layers.iter().skip(2) {

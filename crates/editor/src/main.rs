@@ -6,11 +6,14 @@
 mod app;
 mod builder;
 mod canvas;
+mod clipboard;
 mod database;
 mod doc;
 mod export;
 mod package;
 mod files;
+mod graph;
+mod import;
 mod library_ui;
 mod library_window;
 mod maps;
@@ -19,6 +22,7 @@ mod new_project;
 mod pixel;
 mod script_editor;
 mod structures;
+mod terrain;
 mod ui;
 mod wizard;
 mod widgets;
@@ -212,6 +216,71 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 _ => app::ZoneTemplate::Spawn,
             }
         }
+        // Clipboard: region X Y W H (select tiles) · copy · cut · paste X Y (top-left corner)
+        // · paste (arm it: the ghost follows `hover`, clicks paste) · unpaste
+        "region" => {
+            if let Some(r) = ed.doc.as_ref().and_then(|d| clipboard::clip_rect(&d.map, (num(1) as i32, num(2) as i32), (num(1) as i32 + num(3) as i32 - 1, num(2) as i32 + num(4) as i32 - 1))) {
+                ed.sel = Selection::Region(r);
+            }
+        }
+        "copy" => {
+            ed.copy_selection();
+            println!("[script] {}", ed.status.0);
+        }
+        "cut" => {
+            ed.cut_selection();
+            println!("[script] {}", ed.status.0);
+        }
+        "paste" if cmd.len() >= 3 => {
+            ed.paste_at((num(1) as i32, num(2) as i32));
+            println!("[script] {}", ed.status.0);
+        }
+        "paste" => ed.start_paste(),
+        "unpaste" => ed.stop_paste(),
+        // terrain NAME: arms a terrain (any tileset) and the Terrain tool
+        "terrain" => {
+            if !ed.select_terrain_named(&cmd[1..].join(" ")) {
+                println!("[script] terrain: no terrain named '{}'", cmd[1..].join(" "));
+            }
+        }
+        // terrainpaint X Y [erase]: one Terrain-tool click (erase = Shift+click), one undo step
+        "terrainpaint" => {
+            if let Some(d) = &mut ed.doc {
+                d.begin_stroke(ed.layer, false);
+            }
+            ed.paint_terrain_at((num(1) as i32, num(2) as i32), arg(3) == "erase");
+            if let Some(d) = &mut ed.doc {
+                d.end_stroke();
+            }
+        }
+        // terrainedit K [block]: Database › Tilesets: edit terrain K of the selected tileset
+        "terrainedit" => ed.db.terrain_pick = Some(terrain::TerrainPick { terrain: num(1) as usize, slot: 0, block: arg(2) == "block" }),
+        // Events mode: graph scope map|selection · graph functions map|all · graphnode N
+        // (select node N, -1 = none) · graphedit N (toggle its editors) · graphtext N K TEXT
+        // (text of action K of trigger node N) · graphdump (nodes with summaries)
+        "graph" => match (arg(1), arg(2)) {
+            ("scope", s) => ed.graph.focus_selection = s == "selection",
+            ("functions", f) => ed.graph.all_functions = f == "all",
+            _ => println!("[script] graph scope map|selection · graph functions map|all"),
+        },
+        "graphview" => ed.graph_view_node(num(1) as usize),
+        "graphnode" => ed.graph.selected = arg(1).parse::<usize>().ok().and_then(|i| ed.graph.order.get(i).cloned()),
+        "graphedit" => {
+            if let Some(k) = arg(1).parse::<usize>().ok().and_then(|i| ed.graph.order.get(i).cloned()) {
+                if !ed.graph.editing.remove(&k) {
+                    ed.graph.editing.insert(k);
+                }
+            }
+        }
+        "graphtext" => {
+            let ok = ed.graph_set_text(num(1) as usize, num(2) as usize, &cmd[3..].join(" "));
+            println!("[script] graphtext: {ok}");
+        }
+        "graphdump" => {
+            for l in ed.graph_dump() {
+                println!("[graph] {l}");
+            }
+        }
         "undo" => {
             if let Some(d) = &mut ed.doc {
                 d.undo(&ed.assets);
@@ -223,7 +292,34 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "save" => ed.save_all(),
+        // play [start]: F5 (from the camera / selected spawn) or F6 (project start); the game
+        // inherits the environment, so RUST2D_AUTOPLAY can drive the play-test
+        "play" => ed.play(arg(1) != "start"),
         // Same code paths as the file dialogs, without the dialog.
+        // import tiled FILE [NAME] · import lpc FILE [ID] [body|hair|beard|outfit|armor|held] ·
+        // import aseprite FILE [ID]: the File › Import… imports (result printed and shown)
+        "import" if matches!(arg(1), "tiled" | "lpc" | "aseprite") => {
+            use import::ImportKind;
+            use rust2d_engine::defs::SheetKind;
+            let kind = match arg(1) {
+                "tiled" => ImportKind::Tiled,
+                "lpc" => ImportKind::Lpc,
+                _ => ImportKind::Aseprite,
+            };
+            let sheet_kind = match arg(4) {
+                "hair" => SheetKind::Hair,
+                "beard" => SheetKind::Beard,
+                "outfit" => SheetKind::Outfit,
+                "armor" => SheetKind::Armor,
+                "held" => SheetKind::Held,
+                _ => SheetKind::Body,
+            };
+            ed.import = Some(import::ImportDialog { kind, id: arg(3).to_string(), sheet_kind, female: false });
+            ed.import_and_report(kind, std::path::Path::new(arg(2)));
+            println!("[import] {}", ed.import_report.as_ref().map_or(String::new(), |r| r.1.clone()));
+        }
+        // importdialog: opens File › Import…
+        "importdialog" => ed.import = Some(Default::default()),
         "import" => {
             let purpose = match arg(1) {
                 "tileset" => files::Purpose::TilesetImage(arg(2).into()),
@@ -368,7 +464,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} clipboard={} pasting={} graph={},{} msg={}",
             ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
@@ -382,6 +478,11 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.builder_status(),
             ed.audio.previewing(),
             ed.audio.current_music(),
+            ed.sel,
+            ed.clipboard.as_ref().map_or("empty".to_string(), |c| format!("{}x{},{}ents", c.w, c.h, c.entities.len())),
+            ed.pasting,
+            ed.graph.counts.0,
+            ed.graph.counts.1,
             ed.status.0
         ),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),
@@ -431,6 +532,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "db" => Mode::Database,
                 "library" | "browse" => Mode::Library,
                 "pixel" => Mode::Pixel,
+                "events" => Mode::Events,
                 _ => Mode::Map,
             }
         }
@@ -703,6 +805,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         // pxframe N: select frame N · pxclip copy|cut|paste|mirror (Ctrl+C / X / V)
         "pxframe" => ed.px.sel_frame = num(1) as u32,
         "pxclip" => ed.frame_clipboard(arg(1)),
+        // dbscroll Y: scrolls the Database form to Y px (a large number = the end)
+        "dbscroll" => ed.db.form_scroll = Some(num(1)),
         "tab" => {
             use database::Tab;
             ed.db.tab = match arg(1) {
@@ -719,7 +823,17 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "spells" => Tab::Spells,
                 _ => Tab::Items,
             };
-            ed.db.sel = num(2) as usize;
+            // tab KIND N, or tab KIND ID (sheets, tilesets, items, props, characters).
+            let db = &ed.project.db;
+            let by_id = match ed.db.tab {
+                Tab::Sheets => db.sheets.iter().position(|d| d.id == arg(2)),
+                Tab::Tilesets => db.tilesets.iter().position(|d| d.id == arg(2)),
+                Tab::Items => db.items.iter().position(|d| d.id == arg(2)),
+                Tab::Props => db.props.iter().position(|d| d.id == arg(2)),
+                Tab::Characters => db.characters.iter().position(|d| d.id == arg(2)),
+                _ => None,
+            };
+            ed.db.sel = by_id.unwrap_or(num(2) as usize);
         }
         // sndplay / sndstop [ID]: the Sounds form's Play / Stop (default: the selected sound).
         "sndplay" | "sndstop" => {
@@ -740,6 +854,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "fill" => Tool::Fill,
                 "erase" => Tool::Erase,
                 "structure" => Tool::Structure,
+                "terrain" => Tool::Terrain,
                 _ => Tool::Brush,
             }
         }
@@ -757,6 +872,34 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "view" => {
             ed.cam.center = vec2(num(1), num(2));
             ed.cam.zoom = num(3).max(0.01);
+        }
+        // viewopt zones|grid|collision on|off: the View toggles
+        "viewopt" => {
+            let on = arg(2) != "off";
+            match arg(1) {
+                "zones" => ed.view.zones = on,
+                "grid" => ed.view.grid = on,
+                "collision" => ed.view.collision = on,
+                _ => println!("[script] viewopt: zones|grid|collision on|off"),
+            }
+        }
+        // actionsheet SHEET: the sprite sheet of the last Effect / Fly action of the selected
+        // entity's first trigger (with addaction, to test the action's animation picker)
+        "actionsheet" => {
+            if let (Selection::Entity(uid), Some(doc)) = (ed.sel, ed.doc.as_mut()) {
+                let before = doc::Objects::of(&doc.map);
+                use rust2d_engine::events::Action as A;
+                let sprite = doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.triggers.first_mut()).and_then(|t| {
+                    t.actions.iter_mut().rev().find_map(|a| match a {
+                        A::Effect { sprite, .. } | A::Fly { sprite, .. } => Some(sprite),
+                        _ => None,
+                    })
+                });
+                if let Some(sprite) = sprite {
+                    sprite.sheet = arg(1).to_string();
+                }
+                doc.record_objects(before, "script");
+            }
         }
         // addaction LABEL...: appends the action template with that label (e.g. "Play effect") to
         // the selected entity's first trigger (testing the action editors)

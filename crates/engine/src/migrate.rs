@@ -364,8 +364,8 @@ mod tests {
             root: lib_root.clone(),
             config: ProjectConfig::new("lib"),
             db: Database {
-                sheets: vec![SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 32, frame_h: 32, kind: Default::default(), female: false, playable: false }],
-                tilesets: vec![crate::defs::TilesetDef { id: "terrain".into(), image: "tilesets/terrain.png".into(), solid: vec![], animations: vec![], lights: vec![] }],
+                sheets: vec![SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 32, frame_h: 32, kind: Default::default(), female: false, playable: false, tags: vec![] }],
+                tilesets: vec![crate::defs::TilesetDef { id: "terrain".into(), image: "tilesets/terrain.png".into(), solid: vec![], animations: vec![], lights: vec![], terrains: vec![] }],
                 ..Default::default()
             },
         };
@@ -380,10 +380,10 @@ mod tests {
         std::fs::write(root.join("tilesets/big.png"), terrain.encode().unwrap()).unwrap();
         let db = Database {
             sheets: vec![
-                SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false },
-                SheetDef { id: "own".into(), image: "sprites/own.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false },
+                SheetDef { id: "hero".into(), image: "sprites/hero.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false, tags: vec![] },
+                SheetDef { id: "own".into(), image: "sprites/own.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false, tags: vec![] },
             ],
-            tilesets: vec![crate::defs::TilesetDef { id: "big".into(), image: "tilesets/big.png".into(), solid: vec![3, 7], animations: vec![], lights: vec![] }],
+            tilesets: vec![crate::defs::TilesetDef { id: "big".into(), image: "tilesets/big.png".into(), solid: vec![3, 7], animations: vec![], lights: vec![], terrains: vec![] }],
             props: vec![PropDef { id: "p".into(), name: "P".into(), sprite: SpriteRef::new("own", 0), solid: true, hitbox: [12.0, 6.0], triggers: vec![], container: None, lock: None, default_state: "default".into(), states: vec![], light: None }],
             ..Default::default()
         };

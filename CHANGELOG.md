@@ -3,6 +3,64 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.4.0 — 2026-11-06
+
+### Editor
+- **Copy, cut and paste map regions**: drag a rectangle with the Select tool on empty space (or
+  Shift+drag anywhere); Ctrl+C copies its tiles on all layers, collision overrides and entities,
+  Ctrl+X also empties it, Del only empties it. Ctrl+V shows the copy under the mouse and each
+  click pastes it as one undo step until Esc or right-click. The clipboard is kept when another
+  map is opened. Pasted named entities get a free name. A selected entity can be copied alone.
+  The region's inspector has Copy, Cut, Paste, Clear and *Save as structure…*; the Edit menu has
+  Cut, Copy and Paste. Editor script commands `region`, `copy`, `cut`, `paste`, `unpaste`;
+  `status` prints `sel=`, `clipboard=` and `pasting=`.
+- Structure ghosts (Structures tool and paste preview) draw characters with all their layers.
+- **Import** (*File › Import…*): Tiled maps (`.tmx` / `.tmj` with their tilesets, repacked to
+  32 px; layers, collision layer, solid tiles, tile animations, trigger zones and `spawn:` points
+  from object layers), LPC character sheets (the walk cycle in the character layout, as a body,
+  hair, outfit… sheet) and Aseprite sprite sheets (frames in a grid, tags as named animations).
+  A window reports what was imported and left out; nothing is overwritten. Sprite sheets have
+  **animations** (*Database › Sprite sheets*), offered by the *Effect* / *Fly* actions and
+  played by `effect()` / `fly()` with `#{ tag: "name" }`. Editor script `import tiled|lpc|aseprite`,
+  `importdialog`, `actionsheet`; `tab KIND ID` selects by id. New editor dependencies:
+  `quick-xml`, `flate2` (both pure Rust, already in the lock file), `rhai` (JSON).
+- **Events graph**: the new *Events* tab shows the open map's triggers as a graph with their
+  owners, readable conditions and actions (dialog lines, choices with options), the script
+  functions they run (with their dialog lines, choices, events and flags) and the maps they
+  lead to; edges for script calls, custom events, flags / variables tested elsewhere, and
+  teleports / portals. Nodes can be dragged; the pencil edits a trigger with the inspector's
+  editors (undoable); function nodes open the script editor at the function. Scope: whole map
+  or the selected object; optionally all script functions. Engine: `script_refs::list_args`
+  (string arrays such as `choice()` options). Editor script `mode events`, `graph`,
+  `graphnode`, `graphedit`, `graphtext`, `graphview`, `graphdump`; `status` prints `graph=`.
+- **Auto-tiling terrains**: the new Terrain tool (A) paints a terrain and picks each cell's
+  edge tile from its four neighbours, also re-tiling the neighbours; Shift erases to the
+  terrain's base tile, right-click picks a terrain, each stroke is one undo step. Terrains are
+  defined in *Database › Tilesets › Terrains* (16 tiles per neighbour combination, a base
+  tile, terrains it joins, fill from a 4×4 block, a preview). Terrains can lie on each other
+  (sand joins the shore water inside it). Every starter tileset has terrains with new edge
+  tiles: terrain (10), dungeon (2), desert (2), mountains (3), city (2). All example maps use
+  them: soft roads, ponds, shores, forest floor, streams, snowfields, flagstones, rugs, earth
+  patches and a chasm, plus a new duck pond on the village green. Existing asset libraries get
+  the terrains, their solid flags and animations with the starter set. Editor script
+  `tool terrain`, `terrain NAME`, `terrainpaint X Y [erase]`, `terrainedit K`, `viewopt`.
+- **Script hot reload and developer console**: play-tests from the editor start the game with
+  the new `--dev` option. Saved scripts reload in the running game within half a second; a
+  script with an error leaves the previous scripts running and shows the error in a toast and
+  the console. F4 opens a console that pauses the game: `call`, `give`, `take`, `flag`, `var`,
+  `settime`, `teleport`, `hp`, `xp`, `effects`, `status`, `reload`, `clear`, `help`, and any other
+  line runs as Rhai with the project's functions. Exported games ignore `--dev`. Autoplay has
+  `console LINE`, and `status` starts with `dev=`; the editor script has `play [start]`.
+
+### Fixes
+- Database › Tilesets (also in the Asset Library window): the tile grid could only be seen in a
+  thin strip at the end of the form, and the scrollbar stopped before the tileset's last rows.
+  The grid is now part of the form (it scrolls only sideways for very wide images).
+- Lists and panels (the Database lists, the script file list, the map's left panel and
+  inspector, the Project form, the pixel editor's side panel, the library grid) shrank to their
+  widest entry: the scrollbar sat right after the longest name and the mouse wheel did nothing
+  over the empty space next to it. They now fill their panel.
+
 ## 0.3.0 — 2026-11-06
 
 ### Gameplay
