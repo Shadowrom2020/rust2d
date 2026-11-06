@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.4.0 — 2026-11-06
 
 ### Editor
 - **Copy, cut and paste map regions**: drag a rectangle with the Select tool on empty space (or
