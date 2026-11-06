@@ -65,6 +65,8 @@ pub struct DbState {
     pub art_focus: Option<(String, u32)>,
     /// Tilesets tab: clicks on the tile grid toggle light tiles.
     pub tile_light_pick: bool,
+    /// Editor script `dbscroll Y`: scroll the definition form there once.
+    pub form_scroll: Option<f32>,
     /// Tilesets tab: the terrain whose tiles clicks into the grid assign.
     pub terrain_pick: Option<crate::terrain::TerrainPick>,
     /// The structure editor (Structures tab).
@@ -411,7 +413,11 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             } else {
                 f32::INFINITY
             };
-            egui::ScrollArea::vertical().id_salt("db_form").max_height(form_height).show(ui, |ui| {
+            let mut form_area = egui::ScrollArea::vertical().id_salt("db_form").max_height(form_height);
+            if let Some(y) = ed.db.form_scroll.take() {
+                form_area = form_area.vertical_scroll_offset(y);
+            }
+            form_area.show(ui, |ui| {
                 let mut cx = Cx {
                     tex: &ed.tex,
                     assets: &mut ed.assets,
@@ -1374,7 +1380,10 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
     let scale = 3.0;
     let size = vec2(ts.image.width as f32 * scale, ts.image.height as f32 * scale);
     let cell = tile * scale;
-    egui::ScrollArea::both().id_salt("ts_solid").show(ui, |ui| {
+    // Only sideways (very wide images): vertically the grid is part of the form, so the form's
+    // scrollbar reaches its last row. (A scroll area of its own got just the space left below
+    // the sections above, often a 64 px strip.)
+    egui::ScrollArea::horizontal().id_salt("ts_solid").show(ui, |ui| {
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 0.0, Color32::from_gray(30));
