@@ -50,16 +50,19 @@ pub enum Tool {
     Link,
     /// Place multi-tile structures (houses, walls, rooms…) with one click.
     Structure,
+    /// Paint an auto-tiling terrain: edge tiles follow the neighbours.
+    Terrain,
 }
 
 impl Tool {
-    pub const ALL: [(Tool, &'static str, &'static str); 11] = [
+    pub const ALL: [(Tool, &'static str, &'static str); 12] = [
         (Tool::Select, "Select", "V"),
         (Tool::Brush, "Brush", "B"),
         (Tool::Rect, "Rect", "R"),
         (Tool::Fill, "Fill", "F"),
         (Tool::Erase, "Erase", "E"),
         (Tool::Pick, "Pick", "I"),
+        (Tool::Terrain, "Terrain", "A"),
         (Tool::Collision, "Collision", "C"),
         (Tool::Entity, "Entities", "N"),
         (Tool::Zone, "Zones", "Z"),
@@ -83,6 +86,7 @@ impl Tool {
             Tool::Zone => ph::BOUNDING_BOX,
             Tool::Link => ph::SIGNPOST,
             Tool::Structure => ph::HOUSE,
+            Tool::Terrain => ph::MOUNTAINS,
         }
     }
     pub fn name(self) -> &'static str {
@@ -105,6 +109,7 @@ impl Tool {
             Tool::Zone => "Drag to draw a zone (spawn, portal, trigger, spawner); click selects one, drag moves it",
             Tool::Link => "Drag over the exit area, choose the target map, then drag the arrival area on that map",
             Tool::Structure => "Pick a structure in the panel and click the map to place it; New from map area captures a rectangle as a structure",
+            Tool::Terrain => "Pick a terrain in the panel, then click or drag: edge tiles follow the neighbours; Shift erases, right-click picks the terrain under the cursor",
         }
     }
 }
@@ -237,6 +242,8 @@ pub struct Editor {
     pub place_structure: String,
     pub structure_filter: String,
     pub capture: crate::structures::CaptureState,
+    /// Terrain tool: the armed terrain (tileset id, index into its terrains).
+    pub terrain: Option<(String, usize)>,
     /// Copied region / entity (Ctrl+C / Ctrl+X), pasted with Ctrl+V; kept across maps.
     pub clipboard: Option<rust2d_engine::defs::StructureDef>,
     /// Ctrl+V armed the clipboard: the Select tool shows it at the mouse, clicks paste it.
@@ -362,6 +369,7 @@ impl Editor {
             place_filter: String::new(),
             place_structure: String::new(),
             clipboard: None,
+            terrain: None,
             pasting: false,
             structure_filter: String::new(),
             capture: Default::default(),
@@ -1499,7 +1507,7 @@ impl Editor {
                 });
                 let groups: [(&str, &[Tool]); 4] = [
                     ("Select", &[Tool::Select]),
-                    ("Paint", &[Tool::Brush, Tool::Rect, Tool::Fill, Tool::Erase, Tool::Pick]),
+                    ("Paint", &[Tool::Brush, Tool::Rect, Tool::Fill, Tool::Erase, Tool::Pick, Tool::Terrain]),
                     ("Collision", &[Tool::Collision]),
                     ("Objects", &[Tool::Entity, Tool::Zone, Tool::Link, Tool::Structure]),
                 ];
@@ -1865,6 +1873,7 @@ impl Editor {
                 ui.separator();
                 self.palette(ui);
             }
+            Tool::Terrain => self.terrain_palette(ui),
             t if t.paints_tiles() => self.palette(ui),
             Tool::Collision => {
                 ui.heading("Collision");

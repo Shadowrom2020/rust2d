@@ -15,6 +15,17 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   Cut, Copy and Paste. Editor script commands `region`, `copy`, `cut`, `paste`, `unpaste`;
   `status` prints `sel=`, `clipboard=` and `pasting=`.
 - Structure ghosts (Structures tool and paste preview) draw characters with all their layers.
+- **Auto-tiling terrains**: the new Terrain tool (A) paints a terrain and picks each cell's
+  edge tile from its four neighbours, also re-tiling the neighbours; Shift erases to the
+  terrain's base tile, right-click picks a terrain, each stroke is one undo step. Terrains are
+  defined in *Database › Tilesets › Terrains* (16 tiles per neighbour combination, a base
+  tile, terrains it joins, fill from a 4×4 block, a preview). Terrains can lie on each other
+  (sand joins the shore water inside it). Every starter tileset has terrains with new edge
+  tiles: terrain (10), dungeon (2), desert (2), mountains (3), city (2). All example maps use
+  them: soft roads, ponds, shores, forest floor, streams, snowfields, flagstones, rugs, earth
+  patches and a chasm, plus a new duck pond on the village green. Existing asset libraries get
+  the terrains, their solid flags and animations with the starter set. Editor script
+  `tool terrain`, `terrain NAME`, `terrainpaint X Y [erase]`, `terrainedit K`, `viewopt`.
 - **Script hot reload and developer console**: play-tests from the editor start the game with
   the new `--dev` option. Saved scripts reload in the running game within half a second; a
   script with an error leaves the previous scripts running and shows the error in a toast and

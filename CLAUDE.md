@@ -45,6 +45,9 @@ crates/engine/src/      library: everything shared by game and editor
   skills.rs             SkillSettings (project), SkillDef / SkillEffect, SpellDef / SpellEffect
   structure.rs          StructureDef::capture / place (multi-tile assets; editor-only, placing
                         writes ordinary tiles + entities)
+  autotile.rs           auto-tiling terrains (TilesetDef.terrains: 16 tiles per N/E/S/W neighbour
+                        mask + base tile + joins); paint() = the tile changes for one cell and its
+                        neighbours (editor), retile() = a whole layer (gen_example: autotile_terrain)
   project.rs            ProjectConfig (project.ron), defs loading/saving (DEFS list),
                         TILE_SIZE = 32, CharacterCreation / SexChoice
   settings.rs           player options (Options menu): ~/.config/rust2d/<game>/settings.ron,
@@ -97,7 +100,8 @@ crates/editor/src/      editor binary
   main.rs               loop + RUST2D_EDITOR_SCRIPT command runner
   app.rs                Editor state, menus, inspector, Pending/close-project logic, play-test
   canvas.rs (map view + tools), doc.rs (map doc + undo; Edit::Group), structures.rs (Structures
-  tool, capture, thumbnails), database.rs (Database tabs),
+  tool, capture, thumbnails), clipboard.rs (region copy / cut / paste), terrain.rs (Terrain tool,
+  Database › Tilesets › Terrains), database.rs (Database tabs),
   widgets.rs (sprite pickers, trigger/condition/action editors, shop/container/lock UIs),
   maps.rs (map switching, transitions), builder.rs (character builder: cards + preview, the
   New character / Customize window, `char…` script commands), models.rs (template chooser:
@@ -189,7 +193,7 @@ there and test on the copy. Set `RUST2D_MUTE=1` and `RUST2D_SETTINGS_DIR=<scratc
   `libdialogadd`, `libwindow`, `libedit`…; scripted assets: `tolib` / `projexport KIND ID PATH` open the *Script functions* dialog → `scriptpick FN on|off`, `scriptpickok`, `scriptpickcancel`; `libimport` / `projimport PATH` import packages, `libfilter KIND`), structures (`structure ID`, `stplace X Y`,
   `stcapture X Y W H ID`, `stinfo`; structure editor: `stnew`, `stsize W H`, `stlayer N`,
   `sttool stamp|keep|clear|solid|walkable|auto|prop`, `ststamp TS X Y W H`, `stprop ID`,
-  `stpaint X Y`), `hover X Y` (tool previews), `play [start]` (F5 / F6 play-test; the game inherits the environment, so set `RUST2D_AUTOPLAY` to drive it), clipboard (`region X Y W H` selects tiles, `copy` / `cut` the region or selected entity, `paste X Y` = top-left corner, `paste` arms it for `hover` / `click`, `unpaste`; `status` prints `sel=`, `clipboard=`, `pasting=`), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), `addaction LABEL` (append an action template to the selected entity's trigger), `entequip ITEM` / `entskin RRGGBB` (selected NPC's own equipment / look), pixel editor (`px…`),
+  `stpaint X Y`), `hover X Y` (tool previews), terrains (`tool terrain`, `terrain NAME`, `terrainpaint X Y [erase]` = a Terrain-tool click / Shift+click, `terrainedit K [block]` = edit terrain K in Database › Tilesets), `view CX CY ZOOM` / `viewopt zones|grid|collision on|off` (camera and view toggles for screenshots), `play [start]` (F5 / F6 play-test; the game inherits the environment, so set `RUST2D_AUTOPLAY` to drive it), clipboard (`region X Y W H` selects tiles, `copy` / `cut` the region or selected entity, `paste X Y` = top-left corner, `paste` arms it for `hover` / `click`, `unpaste`; `status` prints `sel=`, `clipboard=`, `pasting=`), `lighting on|off [HOUR]` (lighting preview), `mapfog on|off` (map's fog of war), `addaction LABEL` (append an action template to the selected entity's trigger), `entequip ITEM` / `entskin RRGGBB` (selected NPC's own equipment / look), pixel editor (`px…`),
   character builder (`charnew [ID NAME]`, `charcustom` = selected NPC, `charset body|hair|beard|skin|haircolor|clothing|head|armor|weapon|offhand|carry|id|name VALUE` on the open builder else the selected character, `charrandom`, `chartemplate ID` (project or library character), `charcreate` / `charapply`, `charcancel`, `charreset`, `playable SHEET on|off`; `status` prints `builder=`),
   `example` (welcome screen's *Example project*: only in packaged rust2d; copies to
   ~/rust2d/example_project — set HOME to a scratch dir in tests), export (`exportgame OUT [NAME]` = folder + zip, `exportpkg OUT appimage|flatpak|all [APP_ID]`,

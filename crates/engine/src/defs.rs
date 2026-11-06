@@ -21,6 +21,10 @@ pub struct TilesetDef {
     /// Tiles that give light wherever they are placed (wall torches, lamps).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lights: Vec<TileLight>,
+    /// Auto-tiling terrains (grass / dirt, grass / water…): the editor's Terrain tool picks
+    /// their edge tiles. Editor-only; games just show the painted tiles.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terrains: Vec<crate::autotile::Terrain>,
 }
 
 /// A light source: a soft circle of light around a tile, prop, character or carried item.
