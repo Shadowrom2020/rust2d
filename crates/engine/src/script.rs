@@ -24,6 +24,8 @@ struct Ctx {
     characters: Vec<(u32, String, i32)>,
     /// The project's crafting recipes (`can_craft`).
     recipes: Vec<crate::crafting::RecipeDef>,
+    /// Ids of the player's unlocked achievements (`achievement_unlocked`).
+    achievements: std::collections::BTreeSet<String>,
 }
 
 /// What scripts can read about the player besides the world state (the game updates it every
@@ -67,6 +69,11 @@ impl ScriptHost {
         });
         register_api(&mut engine, &ctx);
         ScriptHost { engine, ast: AST::empty(), ctx, errors: Vec::new(), printed }
+    }
+
+    /// The player's unlocked achievements, for `achievement_unlocked(id)`.
+    pub fn set_achievements(&mut self, ids: std::collections::BTreeSet<String>) {
+        self.ctx.borrow_mut().achievements = ids;
     }
 
     /// The project's crafting recipes, for `can_craft(id)`.
@@ -428,6 +435,8 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         c.actions.push(Action::Patrol { target: t.into(), active: true, points })
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
+    engine.register_fn("unlock_achievement", with!(ctx, |c, id: &str| c.actions.push(Action::UnlockAchievement { id: id.into() })));
+    engine.register_fn("achievement_unlocked", with!(ctx, |c, id: &str| c.achievements.contains(id)));
     engine.register_fn("can_craft", with!(ctx, |c, id: &str| c.recipes.iter().find(|r| r.id == id).is_some_and(|r| r.missing(&c.world).is_none())));
     engine.register_fn("open_crafting", with!(ctx, |c, station: &str| c.actions.push(Action::OpenCrafting { station: station.into(), title: String::new() })));
     engine.register_fn("open_crafting", with!(ctx, |c, station: &str, title: &str| c.actions.push(Action::OpenCrafting { station: station.into(), title: title.into() })));
@@ -833,6 +842,15 @@ mod tests {
         let mut w = WorldState::default();
         w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
         assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
+    }
+
+    #[test]
+    fn achievement_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn hoard() { if !achievement_unlocked("hoard") { unlock_achievement("hoard"); } }"#).unwrap();
+        assert_eq!(host.call(&mut WorldState::default(), "hoard", None), vec![Action::UnlockAchievement { id: "hoard".into() }]);
+        host.set_achievements(["hoard".to_string()].into());
+        assert!(host.call(&mut WorldState::default(), "hoard", None).is_empty());
     }
 
     #[test]

@@ -242,6 +242,10 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
     for d in &mut db.recipes {
         r.recipe(d);
     }
+    for d in &mut db.achievements {
+        r.fix(RefKind::Sheet, &mut d.icon.sheet);
+        r.conditions(&mut d.conditions);
+    }
     r.fix(RefKind::Character, &mut config.player);
     let cc = &mut config.creation;
     for s in [&mut cc.body_male, &mut cc.body_female].into_iter().chain(&mut cc.hair_styles).chain(&mut cc.beards) {

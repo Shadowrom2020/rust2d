@@ -67,13 +67,4 @@
         skill: "arcana",
         level: 1,
     ),
-    (
-        id: "vomit_potion",
-        result: "",
-        count: 1,
-        ingredients: [],
-        station: "",
-        skill: "",
-        level: 0,
-    ),
 ]

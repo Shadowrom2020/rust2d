@@ -646,6 +646,7 @@ impl Editor {
             quest_stages: self.project.db.quests.iter().map(|q| (q.id.clone(), q.stages.clone())).collect(),
             skills: self.project.db.skills.iter().map(|q| q.id.clone()).collect(),
             spells: self.project.db.spells.iter().map(|q| q.id.clone()).collect(),
+            achievements: self.project.db.achievements.iter().map(|a| a.id.clone()).collect(),
             stations: {
                 let mut v: Vec<String> = self.project.db.recipes.iter().map(|r| r.station.clone()).filter(|s| !s.is_empty()).collect();
                 v.sort();

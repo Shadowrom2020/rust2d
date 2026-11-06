@@ -917,6 +917,8 @@ pub struct Database {
     pub spells: Vec<crate::skills::SpellDef>,
     /// Crafting recipes.
     pub recipes: Vec<crate::crafting::RecipeDef>,
+    /// Achievements (the game's; unlocks are the player's, see `achievements::Progress`).
+    pub achievements: Vec<crate::achievements::AchievementDef>,
 }
 
 /// A multi-tile asset ("structure"): tiles on several map layers, collision overrides and
@@ -978,6 +980,9 @@ impl Database {
     }
     pub fn spell(&self, id: &str) -> Option<&crate::skills::SpellDef> {
         self.spells.iter().find(|d| d.id == id)
+    }
+    pub fn achievement(&self, id: &str) -> Option<&crate::achievements::AchievementDef> {
+        self.achievements.iter().find(|d| d.id == id)
     }
     pub fn recipe(&self, id: &str) -> Option<&crate::crafting::RecipeDef> {
         self.recipes.iter().find(|d| d.id == id)

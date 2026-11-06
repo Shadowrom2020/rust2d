@@ -41,6 +41,13 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   Example: an alchemy table in Tilda's shop with four brews, Healing Herbs and Red Caps along the
   forest path (new items), herbs for sale at Tilda's. Game `status` prints `crafting=`, autoplay
   `craft K` clicks a recipe's *Make* button.
+- **Achievements**: `defs/achievements.ron` (*Database › Achievements*: name, description, icon,
+  hidden, unlock conditions), checked twice a second while playing; the **Unlock achievement**
+  action and `unlock_achievement(id)` / `achievement_unlocked(id)` for the rest. Unlocks belong
+  to the player (`achievements.ron` next to the settings), show a toast (also over the pause
+  menu) and are listed on a new *Achievements* page of the title and pause menus with their
+  dates and a *Reset*. Example: six achievements, one of them hidden. Game `status` prints
+  `achievements=`.
 - **Changed:** the player's attacks (melee, arrows, spells, clicking to attack) only hit hostile
   characters. Friendly characters with HP (companions, the guard) can't be hurt by the player;
   make a huntable animal hostile with 0 damage.

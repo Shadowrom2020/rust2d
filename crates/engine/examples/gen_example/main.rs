@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use rust2d_engine::defs::*;
 use rust2d_engine::effects::{EffectKind, EffectSpec};
+use rust2d_engine::achievements::AchievementDef;
 use rust2d_engine::crafting::RecipeDef;
 use rust2d_engine::entity::{EntityInstance, EntityKind, Facing, ScheduleStop};
 use rust2d_engine::events::*;
@@ -225,6 +226,28 @@ fn skills() -> Vec<SkillDef> {
         SkillDef::new("arcana", "Arcana", "Understanding of magic. Each level adds 10 mana, and harder spells need it to be learned.", icon(it::STAR), 5, E::Mana { points: 10 }),
         SkillDef::new("spellcraft", "Spellcraft", "Focus and precision: every level adds 15% to the damage of Spark and Fire Burst.", icon(it::SPELL_SPARK), 4, E::SpellDamage { percent: 15.0 }),
         SkillDef::new("scavenging", "Scavenging", "An eye for what others leave behind: defeated slimes drop an extra coin per level (a scripted skill: see scavenging() in main.rhai).", icon(it::APPLE), 3, E::Script { function: "scavenging".into() }),
+    ]
+}
+
+/// The example's achievements (Database › Achievements; unlocks are the player's, kept next to
+/// the game's settings). Hidden Hoard has no conditions: the mine chest's Unlock trigger
+/// unlocks it with the action.
+fn achievements() -> Vec<AchievementDef> {
+    let icon = |f: u32| SpriteRef::new("items", f);
+    let defeated = |c: &str, n: i64| cond(Cond::Defeated { character: c.into(), op: CmpOp::Ge, count: n });
+    vec![
+        AchievementDef::new("first_blood", "First Blood", "Defeat your first slime.", icon(it::SWORD), vec![defeated("slime", 1)]),
+        AchievementDef::new("pest_control", "Pest Control", "Rid Tilda's deliveries of the slimes.", icon(it::POTION), vec![quest_is("pest_control", QuestCheck::Completed, 0)]),
+        AchievementDef::new("lights_in_the_dark", "Lights in the Dark", "Wake the old shrine in Whisperwood.", icon(it::SPELL_LIGHT), vec![cond(flag("shrine_lit"))]),
+        AchievementDef::new("seasoned", "Seasoned", "Reach level 5.", icon(it::STAR), vec![cond(Cond::Level { op: CmpOp::Ge, value: 5 })]),
+        AchievementDef::new(
+            "naturalist",
+            "Naturalist",
+            "Face a slime, a goblin archer, an outlaw and the bandit chief.",
+            icon(it::BOOK),
+            vec![defeated("slime", 1), defeated("goblin", 1), defeated("outlaw", 1), defeated("bandit_chief", 1)],
+        ),
+        AchievementDef { hidden: true, ..AchievementDef::new("hidden_hoard", "Hidden Hoard", "Pick the lock of the old mine's treasure chest.", icon(it::LOCKPICK), vec![]) },
     ]
 }
 
@@ -1387,6 +1410,7 @@ fn database() -> Database {
         skills: skills(),
         spells: spells(),
         recipes: recipes(),
+        achievements: achievements(),
     };
     layered_characters(&mut db);
     // Trade values (merchants use them unless their stock sets a price).
@@ -1495,6 +1519,8 @@ fn mine() -> Map {
     });
     // No key exists for it: only lockpicking 2 opens it.
     chest.lock = Some(LockSpec { pick_difficulty: 2, locked_text: "An old lock with no keyhole worth the name. A skilled lockpick might manage.".into(), ..Default::default() });
+    // Opening it unlocks the hidden achievement "Hidden Hoard" (Database › Achievements).
+    chest.triggers = vec![trig(TriggerOn::Unlock, vec![], vec![Action::UnlockAchievement { id: "hidden_hoard".into() }])];
     b.m.background = [0, 0, 0];
     b.m.lighting = MapLighting { mode: LightMode::Dark, darkness: 1.0 };
     // Explored regions: the map screen reveals it as the player walks around.
@@ -1538,6 +1564,7 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               open_shop(target) set_state(target, state)
 //               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
 //               follow(target) stop_following(target) is_companion(name) companion_count()
+//               unlock_achievement(id) achievement_unlocked(id) open_crafting(station[, title]) can_craft(recipe)
 //               stop_schedule(target) follow_schedule(target)
 // Cut-scenes:   cutscene(fn) walk_to(target, x, y) approach(target, other) place(target, x, y)
 //               hide_ui() show_ui() dim(amount, seconds) disable_spawners(map) enable_spawners(map)

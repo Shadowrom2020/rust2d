@@ -200,7 +200,7 @@ pub struct Project {
     pub db: Database,
 }
 
-const DEFS: [&str; 11] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "structures", "skills", "spells", "recipes"];
+const DEFS: [&str; 12] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "structures", "skills", "spells", "recipes", "achievements"];
 
 fn read_ron<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
     if !path.exists() {
@@ -240,6 +240,7 @@ impl Project {
             skills: read_ron(&d(DEFS[8]))?,
             spells: read_ron(&d(DEFS[9]))?,
             recipes: read_ron(&d(DEFS[10]))?,
+            achievements: read_ron(&d(DEFS[11]))?,
         };
         let mut db = db;
         db.upgrade_prop_states();
@@ -272,6 +273,9 @@ impl Project {
         }
         if !self.db.recipes.is_empty() || d(DEFS[10]).exists() {
             write_ron(&d(DEFS[10]), &self.db.recipes)?;
+        }
+        if !self.db.achievements.is_empty() || d(DEFS[11]).exists() {
+            write_ron(&d(DEFS[11]), &self.db.achievements)?;
         }
         Ok(())
     }

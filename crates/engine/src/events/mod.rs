@@ -504,6 +504,8 @@ pub enum Action {
     Companion { target: TargetName, join: bool },
     /// Opens the crafting window with the recipes of `station` (`title` "" = "Crafting").
     OpenCrafting { station: String, title: String },
+    /// Unlocks an achievement (the player's, kept across save games).
+    UnlockAchievement { id: String },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -607,6 +609,7 @@ impl Action {
             Action::Schedule { .. } => "Schedule",
             Action::Companion { .. } => "Companion",
             Action::OpenCrafting { .. } => "Open crafting",
+            Action::UnlockAchievement { .. } => "Unlock achievement",
         }
     }
 
@@ -670,6 +673,7 @@ impl Action {
             Action::Schedule { target: "self".into(), active: false },
             Action::Companion { target: "self".into(), join: true },
             Action::OpenCrafting { station: s(), title: s() },
+            Action::UnlockAchievement { id: s() },
         ]
     }
 }

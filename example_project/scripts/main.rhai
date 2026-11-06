@@ -12,6 +12,7 @@
 //               open_shop(target) set_state(target, state)
 //               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
 //               follow(target) stop_following(target) is_companion(name) companion_count()
+//               unlock_achievement(id) achievement_unlocked(id) open_crafting(station[, title]) can_craft(recipe)
 //               stop_schedule(target) follow_schedule(target)
 // Cut-scenes:   cutscene(fn) walk_to(target, x, y) approach(target, other) place(target, x, y)
 //               hide_ui() show_ui() dim(amount, seconds) disable_spawners(map) enable_spawners(map)

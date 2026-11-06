@@ -230,7 +230,7 @@ brew_swiftness(missing)] …")` (screenshot); `craft 0`, `craft 1` → inventory
 crafting, RON defaults, the script API, library export and item renames into recipes. Not
 checked by script: typing into the Recipes form (compile-checked) and Shift-crafting ten.
 
-### [ ] Achievements — `feature/achievements`
+### [x] Achievements — `feature/achievements`
 
 **Goal.** Creators define achievements; players unlock them by playing (quests, counters, flags,
 secrets, levels), see a toast and browse them on a page of the title and pause menus. Unlocked
@@ -259,6 +259,15 @@ achievements belong to the player, not to a save game.
   rows (`row_h` 60): name, description or "???", unlock date; header "N of M". `status()`:
   `achievements=[ids]`.
 
+**Decided while building.** Achievements aren't library assets (they belong to a game): the
+bundle `Database` literals leave them out. No hooks in `quest_changed` / `defeat_with` /
+`level_up`: the half-second check covers them. `Progress` (`engine/src/achievements.rs`) has
+`load` / `save` / `reset` (the menu's *Reset* asks first: `Page::ConfirmResetAchievements`); the
+script host gets the unlocked ids (`set_achievements`). Ids are edited like quest ids (a text
+field, not renamed through the project). The menu rows that used hard-coded indices
+(`back()`) now select by row (`select`). The Achievements row only appears when the game has
+achievements; long descriptions are cut with "..." (`fit`).
+
 **Touch points.** `engine/src/achievements.rs` (new: def + progress file),
 `runtime/achievements.rs` (new), `project.rs`, `release.rs`, `library.rs`, `events/mod.rs`,
 `script.rs`, `script_refs.rs`, `runtime/{menu,ui,mod,journal,combat,progression}.rs`,
@@ -269,9 +278,14 @@ completed), *Lights in the Dark* (flag `shrine_lit`), *Seasoned* (level ≥ 5), 
 (bestiary: `Defeated` ≥ 1 of four kinds), *Hidden Hoard* (hidden; unlocked by the mine chest's
 Unlocked trigger via the action). Icons from `items.png` / `outfit_icons.png`.
 
-**Verify.** Autoplay: defeat a slime → toast + `achievements=["first_blood"]`; the file in the
-scratch settings dir lists it; restart, `press escape`, open the page, screenshot; a hidden one
-shows "???"; `unlock_achievement` from a script; the editor tab with a definition.
+**Verify (done).** Autoplay on a scratch copy: `defeat_enemies()` in the forest → toast (screenshot)
+and `achievements=["first_blood"]`, `achievements.ron` in the scratch settings dir lists it;
+`unlock_achievement("hidden_hoard")` from the console → unlocked (and written); restarted with
+the title screen, the Achievements page shows First Blood unlocked and the hidden one as "???"
+(screenshot); the pause menu's page with a toast drawn over it (screenshot); *Reset
+achievements* → confirm → `achievements=[]`, the file is gone, Esc back to the pause menu. The
+editor's Achievements tab (screenshot). Not checked by script: the mine chest's Unlock trigger
+(needs Lockpicking 2) and the Unlock achievement action's editor fields (compile-checked).
 
 ### [ ] Minigames: lockpicking and fishing — `feature/minigames`
 

@@ -626,6 +626,8 @@ pub struct Refs {
     pub spells: Vec<String>,
     /// Crafting stations named by recipes.
     pub stations: Vec<String>,
+    /// Achievement ids.
+    pub achievements: Vec<String>,
     /// Sprite sheet ids (effects).
     pub sheets: Vec<String>,
     /// Named animations of sprite sheets (Aseprite tags).
@@ -1354,6 +1356,10 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 }
             });
             ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
+        }
+        Action::UnlockAchievement { id: ach } => {
+            labeled(ui, "achievement", |ui| suggest(ui, &format!("{id}/ach"), ach, &refs.achievements, 140.0));
+            ui.weak("unlocks it for the player (kept across save games; Database \u{203A} Achievements)");
         }
         Action::OpenCrafting { station, title } => {
             labeled(ui, "station", |ui| suggest(ui, &format!("{id}/station"), station, &refs.stations, 120.0));

@@ -317,6 +317,8 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `stop_schedule(target)` | The character stops following its daily schedule (set in the editor) and stays where it is. Saved. *(queued)* |
+| `unlock_achievement(id)` | Unlocks an achievement (*Database › Achievements*) for the player: a toast, kept across save games. *(queued)* |
+| `achievement_unlocked(id)` | Whether the player has unlocked an achievement (in any game). |
 | `open_crafting(station)` | Opens the crafting window with the recipes of a station (*Database › Recipes*), e.g. `open_crafting("alchemy")` on an alchemy table's trigger. *(queued)* |
 | `open_crafting(station, title)` | The same with a window title, e.g. `open_crafting("anvil", "Smithy")`. *(queued)* |
 | `can_craft(recipe)` | Whether the player has the ingredients (and the skill level) to make a recipe once. |

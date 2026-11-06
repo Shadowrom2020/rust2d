@@ -1,5 +1,6 @@
 //! The game runtime: loads a project and plays it.
 
+mod achievements;
 mod ai;
 mod charwin;
 mod combat;
@@ -224,6 +225,8 @@ pub struct Game {
     inv: inventory_ui::InvUi,
     shop: shop_ui::ShopUi,
     crafting: crafting_ui::CraftingUi,
+    /// The player's achievements, their checks and toasts.
+    ach: achievements::Achievements,
     journal: journal::Journal,
     worldmap: worldmap::WorldMap,
     creator: Option<creator::Creator>,
@@ -319,6 +322,7 @@ impl Game {
             inv: Default::default(),
             shop: Default::default(),
             crafting: Default::default(),
+            ach: Default::default(),
             journal: Default::default(),
             worldmap: Default::default(),
             creator: None,
@@ -344,6 +348,7 @@ impl Game {
             _ => Arrival::Spawn(game.project.config.start_spawn.clone()),
         };
         game.scripts.set_recipes(game.project.db.recipes.clone());
+        game.load_achievements();
         game.settings = crate::settings::Settings::load(&game.project.config.name);
         game.apply_settings();
         game.world.player_hp = Some(game.combat.max_hp);
@@ -946,6 +951,7 @@ impl Game {
             return;
         }
         self.world.play_time += dt as f64;
+        self.update_achievements(dt);
         if !self.on_title() && self.project.config.day_minutes > 0.0 {
             self.world.hour = (self.world.hour + dt * 24.0 / (self.project.config.day_minutes * 60.0)).rem_euclid(24.0);
         }
@@ -1464,7 +1470,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1498,6 +1504,7 @@ impl Game {
             format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_appearance().map_or("-".to_string(), |a| a.body)),
             self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
+            self.achievements_status(),
             self.shop_status(),
             self.crafting_status(),
             self.loaded.map.name,
@@ -1750,6 +1757,7 @@ impl Game {
         } else {
             self.draw_menu();
         }
+        self.draw_achievement_toasts();
         self.draw_console();
         if self.debug {
             let p = self.player.pos / ts;
@@ -2084,6 +2092,10 @@ impl ActionHost for Game {
                     Some(w) => self.world.weather.insert(map, crate::map::Weather::new(w.kind, w.intensity)),
                     None => self.world.weather.remove(&map),
                 };
+                Step::Continue
+            }
+            Action::UnlockAchievement { id } => {
+                self.unlock_achievement(id);
                 Step::Continue
             }
             Action::OpenCrafting { station, title } => {
