@@ -337,6 +337,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         states: vec![],
                         light: None,
                         use_spot: None,
+                        gather: None,
+                        regrow: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -934,6 +936,71 @@ fn portrait_ui(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     });
 }
 
+/// Gathering (hits with a tool give items) and regrowing (a state changes back after a while).
+fn gather_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
+    use rustpg2d_engine::defs::{Gather, Regrow};
+    let states = d.state_names();
+    ui.heading("Gathering");
+    let mut on = d.gather.is_some();
+    if ui.checkbox(&mut on, "Gathered with a tool (ore veins, trees, bushes)").changed() {
+        d.gather = on.then(|| Gather { tool: "pickaxe".into(), hits: 3, loot: Vec::new(), then_state: states.get(1).cloned().unwrap_or_default() });
+    }
+    if let Some(g) = &mut d.gather {
+        ui.weak("E or a melee swing at it is a hit while the player has the tool (equipped, held or carried); after the hits the loot rolls and it switches to the 'used up' state (where it can't be gathered).");
+        egui::Grid::new("prop_gather").num_columns(2).show(ui, |ui| {
+            ui.label("Tool kind");
+            let kinds: Vec<String> = cx.db.items.iter().map(|i| i.tool.clone()).filter(|t| !t.is_empty()).collect();
+            ui.horizontal(|ui| {
+                widgets::suggest(ui, "gather_tool", &mut g.tool, &kinds, 140.0);
+                ui.weak("(empty = bare hands)");
+            });
+            ui.end_row();
+            ui.label("Hits");
+            ui.add(egui::DragValue::new(&mut g.hits).range(1..=50)).on_hover_text("Fewer with a skill whose effect is Gathering for this tool");
+            ui.end_row();
+            ui.label("Used up state");
+            egui::ComboBox::from_id_salt("gather_then").selected_text(if g.then_state.is_empty() { "(stays)" } else { g.then_state.as_str() }).show_ui(ui, |ui| {
+                ui.selectable_value(&mut g.then_state, String::new(), "(stays: gathered again at once)");
+                for s in &states {
+                    ui.selectable_value(&mut g.then_state, s.clone(), s);
+                }
+            });
+            ui.end_row();
+        });
+        ui.label("Gives");
+        widgets::loot_ui(ui, "gather_loot", &mut g.loot, cx.refs, cx.tex, cx.assets, cx.db);
+    }
+    ui.heading("Regrows");
+    let mut on = d.regrow.is_some();
+    if ui.checkbox(&mut on, "A state changes back after some in-game time").changed() {
+        d.regrow = on.then(|| Regrow { from: d.gather.as_ref().map(|g| g.then_state.clone()).filter(|s| !s.is_empty()).or_else(|| states.get(1).cloned()).unwrap_or_default(), to: states[0].clone(), hours: 72.0 });
+    }
+    if let Some(r) = &mut d.regrow {
+        egui::Grid::new("prop_regrow").num_columns(2).show(ui, |ui| {
+            ui.label("From state");
+            egui::ComboBox::from_id_salt("regrow_from").selected_text(r.from.as_str()).show_ui(ui, |ui| {
+                for s in &states {
+                    ui.selectable_value(&mut r.from, s.clone(), s);
+                }
+            });
+            ui.end_row();
+            ui.label("Into state");
+            egui::ComboBox::from_id_salt("regrow_to").selected_text(r.to.as_str()).show_ui(ui, |ui| {
+                for s in &states {
+                    ui.selectable_value(&mut r.to, s.clone(), s);
+                }
+            });
+            ui.end_row();
+            ui.label("After");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut r.hours).range(0.1..=10_000.0).speed(1.0).suffix(" h"));
+                ui.weak(format!("in-game hours ({:.1} days); also while the player is elsewhere", r.hours / 24.0));
+            });
+            ui.end_row();
+        });
+    }
+}
+
 fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     ui.heading("Prop");
     rename_row(ui, RefKind::Prop, &d.id, cx.rename);
@@ -951,6 +1018,8 @@ fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
             widgets::light_ui(ui, "prop_light", slot, &format!("'{name}' gives light"));
         });
     }
+    ui.separator();
+    gather_ui(ui, d, cx);
     ui.separator();
     let states = d.state_names();
     ui.heading("Container");
@@ -2535,6 +2604,15 @@ fn skill_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::skills::SkillDef, cx: 
             widgets::suggest(ui, "skill_fn", function, &cx.refs.functions, 160.0);
             ui.end_row();
         }
+        SkillEffect::Gather { tool, percent } => {
+            ui.label("Tool kind");
+            let kinds: Vec<String> = cx.db.items.iter().map(|i| i.tool.clone()).filter(|t| !t.is_empty()).collect();
+            widgets::suggest(ui, "skill_tool", tool, &kinds, 140.0);
+            ui.end_row();
+            ui.label("Per level");
+            ui.add(egui::DragValue::new(percent).range(0.0..=80.0).speed(0.5).suffix(" % fewer hits"));
+            ui.end_row();
+        }
     });
     if let SkillEffect::Script { function } = &d.effect {
         ui.weak(format!("Called as {}(level) whenever the level changes (and when a game starts or loads with the skill at level 1 or more). The script applies the effect itself, e.g. with set_var or flags that other scripts and triggers read.", if function.is_empty() { "fn" } else { function.as_str() }));
@@ -2611,6 +2689,31 @@ fn recipe_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::crafting::RecipeDef, 
                 ui.add(egui::DragValue::new(&mut d.level).range(0..=99));
             } else {
                 ui.weak("(none)");
+            }
+        });
+        ui.end_row();
+        ui.label("Tools");
+        ui.vertical(|ui| {
+            let kinds: Vec<String> = {
+                let mut v: Vec<String> = cx.db.items.iter().map(|i| i.tool.clone()).filter(|t| !t.is_empty()).collect();
+                v.sort();
+                v.dedup();
+                v
+            };
+            let mut remove = None;
+            for (k, t) in d.tools.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    widgets::suggest(ui, &format!("recipe_tool{k}"), t, &kinds, 120.0);
+                    if ui.small_button("x").clicked() {
+                        remove = Some(k);
+                    }
+                });
+            }
+            if let Some(k) = remove {
+                d.tools.remove(k);
+            }
+            if ui.small_button("+ Tool").on_hover_text("A tool kind (an item's 'Tool kind', e.g. hammer) the player must have: not used up").clicked() {
+                d.tools.push(kinds.first().cloned().unwrap_or_else(|| "hammer".into()));
             }
         });
         ui.end_row();

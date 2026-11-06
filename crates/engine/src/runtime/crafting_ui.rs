@@ -103,6 +103,7 @@ impl Game {
                 let name = self.project.db.skill(skill).map_or(skill.clone(), |d| d.name.clone());
                 format!("Needs {name} {need}")
             }
+            Missing::Tools(kinds) => format!("Needs a {}", kinds.join(" and a ")),
         }
     }
 
@@ -111,7 +112,7 @@ impl Game {
         let Some(r) = self.crafting_recipes().into_iter().nth(k) else { return 0 };
         let mut made = 0;
         while made < n {
-            if let Some(m) = r.missing(&self.world) {
+            if let Some(m) = r.missing(&self.world, &self.project.db.tool_kinds()) {
                 if made == 0 {
                     let text = self.missing_text(&m);
                     self.crafting_msg(text, false);
@@ -124,7 +125,7 @@ impl Game {
                 }
                 break;
             }
-            if r.craft(&mut self.world).is_err() {
+            if r.craft(&mut self.world, &self.project.db.tool_kinds()).is_err() {
                 break;
             }
             made += 1;
@@ -153,7 +154,7 @@ impl Game {
     /// The open crafting window (for automated play-throughs): "station [ids] sel=K msg=…".
     pub(super) fn crafting_status(&self) -> Option<String> {
         let (station, _) = self.crafting.open.as_ref()?;
-        let ids: Vec<String> = self.crafting_recipes().iter().map(|r| if r.missing(&self.world).is_none() { r.id.clone() } else { format!("{}(missing)", r.id) }).collect();
+        let ids: Vec<String> = self.crafting_recipes().iter().map(|r| if r.missing(&self.world, &self.project.db.tool_kinds()).is_none() { r.id.clone() } else { format!("{}(missing)", r.id) }).collect();
         let msg = self.crafting.msg.as_ref().map_or("", |m| m.0.as_str());
         Some(format!("{station} [{}] sel={} msg={msg:?}", ids.join(" "), self.crafting.sel))
     }
@@ -242,7 +243,7 @@ impl Game {
             let k = self.crafting.scroll + vis;
             let rr = row_rect(list, vis);
             let selected = self.crafting.sel == k;
-            let missing = r.missing(&self.world);
+            let missing = r.missing(&self.world, &self.project.db.tool_kinds());
             let bg = if selected {
                 Color::new(0.85, 0.7, 0.3, 0.22)
             } else if rr.contains(m) {
@@ -271,6 +272,17 @@ impl Game {
                 let c = if have >= s.count { Color::new(0.7, 0.95, 0.7, 1.0) } else { Color::new(1.0, 0.55, 0.5, 1.0) };
                 draw_text(&t, x + 22.0, rr.y + 44.0, 17.0, c);
                 x += 30.0 + measure_text(&t, None, 17, 1.0).width;
+            }
+            // Tools: an icon of such a tool and its kind, red if the player has none.
+            let kinds = db.tool_kinds();
+            for kind in r.tools.iter().filter(|t| !t.trim().is_empty()) {
+                let have = crate::crafting::has_tool(&self.world, &kinds, kind);
+                if let Some(d) = db.items.iter().find(|d| d.tool.eq_ignore_ascii_case(kind)) {
+                    self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, Rect::new(x, rr.y + 28.0, 20.0, 20.0), WHITE);
+                }
+                let c = if have { Color::new(0.7, 0.95, 0.7, 1.0) } else { Color::new(1.0, 0.55, 0.5, 1.0) };
+                draw_text(kind, x + 22.0, rr.y + 44.0, 17.0, c);
+                x += 30.0 + measure_text(kind, None, 17, 1.0).width;
             }
             if let Some(Missing::Skill(..)) = &missing {
                 draw_text(self.missing_text(missing.as_ref().unwrap()), x + 6.0, rr.y + 44.0, 17.0, Color::new(1.0, 0.55, 0.5, 1.0));

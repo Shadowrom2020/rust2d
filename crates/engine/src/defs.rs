@@ -631,6 +631,41 @@ pub struct PropDef {
     /// Furniture: where and how a character uses it (sits, lies, stands at it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_spot: Option<UseSpot>,
+    /// Gathering: hitting it with a tool gives items (ore veins, trees, bushes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gather: Option<Gather>,
+    /// A state that changes back after some in-game time (a depleted vein refills).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regrow: Option<Regrow>,
+}
+
+/// A prop the player gathers from (`PropDef::gather`): `hits` hits with a tool of kind `tool`
+/// (equipped or carried; "" = bare hands) roll `loot`, then the prop switches to `then_state`
+/// (it can't be gathered in that state).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Gather {
+    #[serde(default)]
+    pub tool: String,
+    #[serde(default = "three")]
+    pub hits: u32,
+    #[serde(default)]
+    pub loot: Vec<LootEntry>,
+    #[serde(default)]
+    pub then_state: String,
+}
+
+fn three() -> u32 {
+    3
+}
+
+/// A prop state that turns into another one after `hours` in-game hours (`PropDef::regrow`),
+/// also while the player is on another map.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Regrow {
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+    pub hours: f32,
 }
 
 /// How a character uses a piece of furniture.
@@ -1078,6 +1113,11 @@ impl Database {
     pub fn sheet(&self, id: &str) -> Option<&SheetDef> {
         self.sheets.iter().find(|d| d.id == id)
     }
+    /// Item id -> tool kind of every tool item (`ItemDef::tool`).
+    pub fn tool_kinds(&self) -> crate::crafting::ToolKinds {
+        self.items.iter().filter(|d| !d.tool.is_empty()).map(|d| (d.id.clone(), d.tool.clone())).collect()
+    }
+
     pub fn item(&self, id: &str) -> Option<&ItemDef> {
         self.items.iter().find(|d| d.id == id)
     }
@@ -1411,5 +1451,20 @@ mod use_on_tests {
         let d = ItemDef { use_on: UseTarget::Choose, ..old };
         let back: ItemDef = ron::from_str(&ron::to_string(&d).unwrap()).unwrap();
         assert_eq!(back.use_on, UseTarget::Choose);
+    }
+}
+
+#[cfg(test)]
+mod gather_tests {
+    use super::*;
+
+    #[test]
+    fn gathering_props_in_ron() {
+        let old: PropDef = ron::from_str(r#"(id: "rock", name: "Rock", sprite: (sheet: "props", frame: 0))"#).unwrap();
+        assert!(old.gather.is_none() && old.regrow.is_none());
+        let p: PropDef = ron::from_str(r#"(id: "vein", name: "Vein", sprite: (sheet: "props", frame: 0), gather: Some((tool: "pickaxe", loot: [(item: "ore", chance: 100.0)], then_state: "mined out")), regrow: Some((from: "mined out", hours: 72.0)))"#).unwrap();
+        let g = p.gather.unwrap();
+        assert_eq!((g.hits, g.tool.as_str(), g.then_state.as_str()), (3, "pickaxe", "mined out"));
+        assert_eq!(p.regrow.unwrap().to, "", "\"\" = back to the default state");
     }
 }

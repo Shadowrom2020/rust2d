@@ -196,6 +196,8 @@ impl Editor {
                 states: vec![],
                 light: None,
                 use_spot: None,
+                gather: None,
+                regrow: None,
             }),
             WKind::Item => db.items.push(ItemDef {
                 id: id.clone(),

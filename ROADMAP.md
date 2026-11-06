@@ -84,7 +84,7 @@ across maps, using furniture and working at their trades. Suggested order: the g
 groundwork with mining → blacksmithing; farming → cooking; then the townsfolk items, which show
 the trades in their routines.
 
-### [ ] Mining and gathering — `feature/mining`
+### [x] Mining and gathering — `feature/mining`
 
 **Goal.** Ore veins the player breaks with a pickaxe, plus the groundwork the other trades use:
 tools in recipes, gathering props and prop states that change over in-game days.
@@ -109,6 +109,19 @@ tools in recipes, gathering props and prop states that change over in-game days.
 - *Mining*: copper, iron and silver veins (gem veins rarely) need a *pickaxe* (tool kind
   "pickaxe", also a weak weapon); depleted veins regrow after 3 in-game days.
 
+**Decided while building.** `RecipeDef::missing` / `craft` take the item -> tool kind map
+(`Database::tool_kinds`; scripts get it with `set_recipes`); `crafting::has_tool` checks
+equipment and inventory. The pickaxe is a Tool-slot item only (an item is either a tool or a
+weapon: `equip_slot`), so any weapon's swing counts as a hit while the pickaxe is carried.
+Gathering lives in `runtime/gather.rs`: E (`interact_entity`) or a melee swing with no enemy in
+it (`attack_at`) on a prop with `gather` that isn't in its `then_state`; hits are forgotten
+after 4 s; hits needed = `hits × (1 − Gathering %)`, at least 1 (bonus capped at 80 %). Prop
+state changes record `changed_at` (`RtEntity.changed_at`, saved in `EntityState`); a prop
+already in a regrow `from` state without a time starts counting when first seen.
+`WorldState::advance_hours` moves the clock across days (the running clock, sleeping, autoplay
+`settime +H`); `Action::SetTime` still only sets the hour. `status()` gains `gather=`
+(def:hits/needed), `props=` (props not in their first state) and `day=`.
+
 **Touch points.** `crafting.rs`, `runtime/crafting_ui.rs`, `state.rs` (`day`, `changed_at`),
 `defs.rs` (`Regrow`, `Gather`), `skills.rs`, `runtime/{mod,lights,furniture,combat}.rs`, new
 `runtime/gather.rs`, editor `database.rs` (prop form), game `main.rs` (`settime +H`), README.
@@ -116,24 +129,49 @@ tools in recipes, gathering props and prop states that change over in-game days.
 **Example.** Veins in the old mine's dark corridors, a pickaxe in the mine's entrance chest, a
 *Mining* skill; ore sells at Tilda's.
 
-**Verify.** Autoplay with a pickaxe: hit a vein three times → `inv` has iron ore, the prop state
-is `depleted`; `settime +72`, re-enter → full again; without a pickaxe a toast names it; a
-recipe with a tool shows it missing. Unit tests: old saves without `day`, `regrow` arithmetic.
+**Example content added afterwards (user request: tools, stations and resources for every
+crafting skill so far).** Alchemy: a *Mortar and Pestle* (tool kind "mortar", at Tilda's) needed
+by every alchemy recipe, an *Alchemy* skill (Antidote 1, Swiftness 2; Swiftness needed Arcana 1
+before), herb bushes and mushroom patches (gathered bare-handed in one hit, regrow after 24 h).
+Mining: coal veins, a *smelter* by the mine entrance (`smelter` station: 2 ore + 1 coal → an
+ingot, *Smith's Tongs* needed, silver at Mining 2; it glows), tongs in the miner's crate and at
+Tilda's. Checked: a herb bush gives a herb and is back the next day; the smelter lists its three
+recipes, with ore, coal and tongs it makes a copper ingot and the tongs stay; the alchemy table
+marks every brew missing without the mortar and makes a potion with it (screenshots of both
+crafting windows with the tools and skill levels). Then (user request) **the Workshop**: a map
+north of the village (village `edges.north`, offset -11, through a gap in the border trees at x
+27-28) gathering it all: supply chest (pickaxe, tongs, mortar, apples, coal), herb garden (three
+herb bushes, three mushroom patches, the alchemy table), quarry (all eight veins, the smelter),
+a bed and signs; plants regrow after 12 h so one night in the bed brings them back. Checked by
+walking north from the village into it and back, taking the chest, picking, mining, smelting a
+copper ingot, brewing a potion, and sleeping (07:00 next day, the bush back).
+
+**Verify (done).** Autoplay on a scratch copy of the mine (slimes cleared): right-click on the
+iron vein without a pickaxe → "You need a pickaxe for the iron vein."; with one, three hits →
+`gather=["vein_iron:1/3"]`, `2/3`, then iron ore (and copper) and `props=["vein_iron:mined
+out@10,7"]` (screenshots of the progress bar and the rubble); `settime +71` → still mined out on
+day 3, `+2` more → regrown; Mining 2 → `1/2` and an X swing finishes it; F5 / F9 keeps the
+change time (`changed_at` in the save), +73 h after loading → regrown. Editor screenshots of the
+Gathering / Regrows sections, the Gathering skill effect and the recipe's Tools row. Unit tests:
+old saves without `day` / `changed_at`, the clock across days, gathering props in RON, tools
+needed but not used up.
 
 ### [ ] Blacksmithing — `feature/blacksmithing` (follows *Mining*)
 
-**Goal.** A forge smelts ore into ingots and an anvil forges them into weapons, armor and tools.
+**Goal.** An anvil forges ingots into weapons, armor and tools (smelting ore into ingots exists
+since *Mining and gathering*: the example's smelter by the mine, coal as fuel, smith's tongs).
 
 **Design.**
-- Two crafting stations (props with `Open crafting`): the *forge* (ore + coal → ingot) and the
-  *anvil* (ingots, leather, wood → weapons, armor, arrowheads, tools; recipes need a *hammer*
-  via `RecipeDef.tools`).
+- The *anvil* crafting station (a prop with `Open crafting`): ingots, leather, wood → weapons,
+  armor, arrowheads, tools; recipes need a *hammer* and the smith's tongs via `RecipeDef.tools`.
+  Smelting stays at the smelter (`smelter` station, already in the example).
 - A *Smithing* skill unlocks better recipes (recipe `skill` / `level`). Quality: optional
   `RecipeDef.quality: Vec<(level, item)>` makes a better item id at higher skill (a *Fine Iron
   Sword* is its own definition, so items stay plain).
 - Optional upgrade recipes: an equipped item as an ingredient (sword + 2 iron ingots → fine
   sword), using the existing ingredient check.
-- The forge's "lit" state is a light source (`LightSpec` on the state) and needs coal to light.
+- Optional: a forge whose "lit" state is a light source and needs coal to light (the example's
+  smelter glows all the time).
 
 **Touch points.** `crafting.rs` (`quality`), `runtime/crafting_ui.rs`, gen_example (smithy map
 part, forge / anvil / ingot / coal art, recipes), README.
