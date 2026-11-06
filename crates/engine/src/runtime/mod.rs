@@ -4,6 +4,7 @@ mod ai;
 mod charwin;
 mod combat;
 mod cutscene;
+mod dev;
 mod effects;
 mod equipment;
 mod fx;
@@ -78,6 +79,9 @@ pub struct StartOptions {
     pub cutscene: Option<String>,
     /// Show the title screen (main menu) first.
     pub title: bool,
+    /// Developer play-test (`--dev`, started by the editor): script hot reload and the F4
+    /// console.
+    pub dev: bool,
 }
 
 /// A moving thing: the player or a runtime entity.
@@ -186,6 +190,8 @@ pub struct Game {
     combat: PlayerCombat,
     /// Screen shake and the hurt flash.
     juice: juice::Juice,
+    /// Script hot reload and the console (`--dev`).
+    dev: dev::Dev,
     /// A save waits for its thumbnail (captured while drawing), and what waits for that.
     thumb_request: Option<String>,
     after_thumb: Option<thumbs::AfterThumb>,
@@ -277,6 +283,7 @@ impl Game {
             autosave_pending: false,
             settings: crate::settings::Settings::default(),
             juice: Default::default(),
+            dev: dev::Dev::new(start.dev, &project.scripts_dir()),
             thumb_request: None,
             after_thumb: None,
             fullscreen: None,
@@ -867,6 +874,10 @@ impl Game {
                 }
             }
         }
+        // The developer console pauses everything while open.
+        if self.update_dev(dt) {
+            return;
+        }
         if self.update_creator(dt) {
             return;
         }
@@ -1380,7 +1391,8 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            self.dev_status(),
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1653,6 +1665,7 @@ impl Game {
         } else {
             self.draw_menu();
         }
+        self.draw_console();
         if self.debug {
             let p = self.player.pos / ts;
             draw_text(

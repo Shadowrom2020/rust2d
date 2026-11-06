@@ -834,6 +834,8 @@ impl Editor {
         };
         let mut cmd = std::process::Command::new(exe);
         cmd.arg(&self.project.root);
+        // Developer play-test: scripts reload when saved, F4 opens the console.
+        cmd.arg("--dev");
         if !here || cutscene.is_some() {
             cmd.arg("--no-title");
         }

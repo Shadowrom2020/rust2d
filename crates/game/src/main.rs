@@ -1,6 +1,6 @@
 //! rust2d game runner.
 //!
-//! Usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title]
+//! Usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--dev]
 //!
 //! Without PROJECT_DIR a released game runs the project in `data/` next to the executable
 //! (saves in `~/.local/share/<game>/saves`); otherwise `example_project` is used.
@@ -46,6 +46,7 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
         match a.as_str() {
             "--map" => start.map = Some(value()?),
             "--no-title" => no_title = true,
+            "--dev" => start.dev = true,
             "--engine-build" => {}
             "--spawn" => start.spawn = Some(value()?),
             "--cutscene" => start.cutscene = Some(value()?),
@@ -55,7 +56,7 @@ fn parse_args() -> Result<(PathBuf, StartOptions)> {
                 start.pos = Some(vec2(x.trim().parse()?, y.trim().parse()?));
             }
             "-h" | "--help" => {
-                println!("usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--cutscene FUNCTION]");
+                println!("usage: rust2d-game [PROJECT_DIR] [--map NAME] [--spawn NAME] [--pos X,Y] [--no-title] [--cutscene FUNCTION] [--dev]");
                 std::process::exit(0);
             }
             s if s.starts_with('-') => bail!("unknown option {s}"),
@@ -92,7 +93,12 @@ fn window_conf() -> Conf {
 #[macroquad::main(window_conf)]
 async fn main() {
     let result = (|| -> Result<Game> {
-        let (root, start) = parse_args()?;
+        let (root, mut start) = parse_args()?;
+        // A released game (the bundle next to the executable) never gets the developer console.
+        if start.dev && root_arg().is_none() && default_root().1 {
+            eprintln!("[game] --dev is only for play-tests from the editor");
+            start.dev = false;
+        }
         let project = Project::load(&root).with_context(|| format!("loading project {}", root.display()))?;
         // A released game may live in a read-only folder: keep saves in the user's data folder.
         if root_arg().is_none() && default_root().1 {
@@ -129,6 +135,9 @@ async fn main() {
             }
             if let Some(h) = a.hour.take() {
                 game.set_hour(h);
+            }
+            for line in std::mem::take(&mut a.console) {
+                game.console_command(&line);
             }
             for (cmd, id) in std::mem::take(&mut a.skill_cmds) {
                 match cmd.as_str() {
@@ -173,6 +182,8 @@ struct Autoplay {
     /// `settime H`: applied by the main loop.
     hour: Option<f32>,
     skill_cmds: Vec<(String, String)>,
+    /// `console LINE`: applied by the main loop.
+    console: Vec<String>,
 }
 
 impl Autoplay {
@@ -182,7 +193,7 @@ impl Autoplay {
             .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .filter(|c| !c.is_empty())
             .collect();
-        Autoplay { cmds, timer: 0.0, held: Vec::new(), held_pad: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new() }
+        Autoplay { cmds, timer: 0.0, held: Vec::new(), held_pad: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new(), console: Vec::new() }
     }
 
     /// Advances the script; returns false to quit.
@@ -357,6 +368,12 @@ impl Autoplay {
                     return true;
                 }
                 "status" => println!("[autoplay] {} order={}", game.status(), game.order_debug()),
+                // console LINE: runs a developer console line (needs --dev), like typing it after F4
+                "console" => {
+                    self.console.push(cmd[1..].join(" "));
+                    // Runs before the next command (e.g. a status right after it).
+                    return true;
+                }
                 "spawners" => println!("[autoplay] spawners: {}", game.spawner_status()),
                 // settime H: jump to a time of day (hours)
                 "settime" => self.hour = arg(1).parse().ok(),
