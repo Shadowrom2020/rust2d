@@ -1,0 +1,179 @@
+{
+ "type": "map",
+ "orientation": "orthogonal",
+ "width": 6,
+ "height": 4,
+ "tilewidth": 16,
+ "tileheight": 16,
+ "infinite": false,
+ "tilesets": [
+  {
+   "firstgid": 1,
+   "source": "ground.tsj"
+  },
+  {
+   "firstgid": 5,
+   "name": "decorations",
+   "tilewidth": 32,
+   "tileheight": 32,
+   "spacing": 2,
+   "margin": 1,
+   "tilecount": 2,
+   "columns": 2,
+   "image": "deco.png",
+   "imagewidth": 68,
+   "imageheight": 34
+  }
+ ],
+ "layers": [
+  {
+   "type": "tilelayer",
+   "name": "Ground",
+   "width": 6,
+   "height": 4,
+   "data": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    2,
+    3,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    4
+   ]
+  },
+  {
+   "type": "group",
+   "name": "Upper",
+   "layers": [
+    {
+     "type": "tilelayer",
+     "name": "Overhead trees",
+     "width": 6,
+     "height": 4,
+     "data": [
+      0,
+      0,
+      0,
+      0,
+      2147483653,
+      0,
+      0,
+      0,
+      6,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "type": "tilelayer",
+   "name": "collision",
+   "width": 6,
+   "height": 4,
+   "data": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "objectgroup",
+   "name": "Objects",
+   "objects": [
+    {
+     "name": "door",
+     "x": 16,
+     "y": 16,
+     "width": 32,
+     "height": 16
+    },
+    {
+     "name": "spawn:start",
+     "x": 50,
+     "y": 40,
+     "point": true,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "name": "pond",
+     "x": 48,
+     "y": 0,
+     "polygon": [
+      {
+       "x": 0,
+       "y": 0
+      },
+      {
+       "x": 30,
+       "y": 0
+      },
+      {
+       "x": 30,
+       "y": 20
+      }
+     ]
+    },
+    {
+     "gid": 2,
+     "x": 0,
+     "y": 64,
+     "width": 16,
+     "height": 16
+    }
+   ]
+  }
+ ]
+}

@@ -244,6 +244,9 @@ pub struct Editor {
     pub place_structure: String,
     pub structure_filter: String,
     pub capture: crate::structures::CaptureState,
+    /// File › Import… window and the last import's result (ok, text).
+    pub import: Option<crate::import::ImportDialog>,
+    pub import_report: Option<(bool, String)>,
     /// Events mode: layout, scope and editing state of the graph.
     pub graph: crate::graph::GraphState,
     /// Terrain tool: the armed terrain (tileset id, index into its terrains).
@@ -375,6 +378,8 @@ impl Editor {
             clipboard: None,
             terrain: None,
             graph: Default::default(),
+            import: None,
+            import_report: None,
             pasting: false,
             structure_filter: String::new(),
             capture: Default::default(),
@@ -627,6 +632,7 @@ impl Editor {
             skills: self.project.db.skills.iter().map(|q| q.id.clone()).collect(),
             spells: self.project.db.spells.iter().map(|q| q.id.clone()).collect(),
             sheets: self.project.db.sheets.iter().map(|q| q.id.clone()).collect(),
+            sheet_tags: self.project.db.sheets.iter().filter(|q| !q.tags.is_empty()).map(|q| (q.id.clone(), q.tags.clone())).collect(),
         };
     }
 
@@ -948,6 +954,7 @@ impl Editor {
                     d.opts.icon = path.display().to_string();
                 }
             }
+            P::Import(kind) => self.import_and_report(kind, &path),
             P::OpenProject => self.request(Pending::OpenProject(path)),
             P::NewProject => self.request(Pending::NewProject(path)),
             P::NewProjectParent => {
@@ -1248,6 +1255,7 @@ impl Editor {
         }
         self.export_window(ctx);
         self.capture_window(ctx);
+        self.import_window(ctx);
         self.confirm_remove_dialog(ctx);
         self.script_pick_dialog(ctx);
         self.add_from_library_dialog(ctx);
@@ -1354,6 +1362,10 @@ impl Editor {
                         ui.close_menu();
                     }
                     ui.separator();
+                    if ui.button(ui::t(ph::DOWNLOAD_SIMPLE, "Import…")).on_hover_text("A Tiled map (.tmx / .tmj), an LPC character sheet or an Aseprite sprite sheet").clicked() {
+                        self.import = Some(Default::default());
+                        ui.close_menu();
+                    }
                     if ui.button(ui::t(ph::PACKAGE, "Export game (standalone)…")).clicked() {
                         self.open_export();
                         ui.close_menu();

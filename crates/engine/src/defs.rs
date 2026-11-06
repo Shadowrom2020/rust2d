@@ -141,11 +141,24 @@ pub struct SheetDef {
     /// Bodies: players may choose it in the character creator (people yes, a slime no).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub playable: bool,
+    /// Named frame ranges (animations), e.g. from an Aseprite export: offered by the *Effect* /
+    /// *Fly* actions and the `tag` option of `effect()` / `fly()`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<SheetTag>,
+}
+
+/// A named animation of a sprite sheet: frames `first..=last` at `fps`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetTag {
+    pub name: String,
+    pub first: u32,
+    pub last: u32,
+    pub fps: f32,
 }
 
 impl SheetDef {
     pub fn new(id: &str, image: &str, frame_w: u32, frame_h: u32) -> Self {
-        SheetDef { id: id.into(), image: image.into(), frame_w, frame_h, kind: SheetKind::Sprite, female: false, playable: false }
+        SheetDef { id: id.into(), image: image.into(), frame_w, frame_h, kind: SheetKind::Sprite, female: false, playable: false, tags: Vec::new() }
     }
     /// "hair_short" -> "Short", "body_goblin_female" -> "Goblin female": the id without the kind's
     /// prefix, for pickers.

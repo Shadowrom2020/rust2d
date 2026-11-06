@@ -27,6 +27,8 @@ pub enum Purpose {
     ExportGameFolder,
     /// Icon picture of the AppImage / Flatpak packages (File → Export game).
     ExportIcon,
+    /// File › Import…: a Tiled map, LPC sheet or Aseprite export.
+    Import(crate::import::ImportKind),
 }
 
 /// A file dialog running on a background thread, so the editor keeps drawing.
@@ -54,6 +56,10 @@ impl PendingDialog {
                 Purpose::SoundFile(_) => d.set_title("Choose sound").add_filter("Audio (WAV, OGG)", &["wav", "ogg"]).pick_file(),
                 Purpose::ExportGameFolder => d.set_title("Folder for the exported game").pick_folder(),
                 Purpose::ExportIcon => d.set_title("Icon of the game (PNG, e.g. 256 x 256)").add_filter("PNG image", &["png"]).pick_file(),
+                Purpose::Import(k) => {
+                    let (name, exts) = crate::import::file_filter(k);
+                    d.set_title(format!("Import {}", k.label())).add_filter(name, exts).pick_file()
+                }
                 Purpose::ImportPackage { .. } => d.set_title("Import asset package").add_filter("rust2d asset package", &["r2dpack"]).pick_file(),
                 Purpose::ExportPackage { .. } => d.set_title("Export asset package").add_filter("rust2d asset package", &["r2dpack"]).set_file_name("assets.r2dpack").save_file(),
             };
