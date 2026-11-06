@@ -32,6 +32,8 @@ pub enum Mode {
     Library,
     /// The pixel editor.
     Pixel,
+    /// The open map's events as a graph.
+    Events,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -242,6 +244,8 @@ pub struct Editor {
     pub place_structure: String,
     pub structure_filter: String,
     pub capture: crate::structures::CaptureState,
+    /// Events mode: layout, scope and editing state of the graph.
+    pub graph: crate::graph::GraphState,
     /// Terrain tool: the armed terrain (tileset id, index into its terrains).
     pub terrain: Option<(String, usize)>,
     /// Copied region / entity (Ctrl+C / Ctrl+X), pasted with Ctrl+V; kept across maps.
@@ -370,6 +374,7 @@ impl Editor {
             place_structure: String::new(),
             clipboard: None,
             terrain: None,
+            graph: Default::default(),
             pasting: false,
             structure_filter: String::new(),
             capture: Default::default(),
@@ -1226,6 +1231,7 @@ impl Editor {
             }
             Mode::Library => self.library_ui(ctx),
             Mode::Pixel => self.pixel_ui(ctx),
+            Mode::Events => self.events_ui(ctx),
         }
         self.wizard_window(ctx);
         self.builder_window(ctx);
@@ -1469,6 +1475,7 @@ impl Editor {
                 });
                 ui.separator();
                 ui::tab(ui, self.mode == Mode::Map, ph::MAP_TRIFOLD, "Map").on_hover_text("Maps: tiles, entities, zones, transitions").clicked().then(|| self.mode = Mode::Map);
+                ui::tab(ui, self.mode == Mode::Events, ph::GRAPH, "Events").on_hover_text("The open map's events as a graph: triggers, dialogs and choices, the scripts they run, events, flags and variables, where they lead").clicked().then(|| self.mode = Mode::Events);
                 ui::tab(ui, self.mode == Mode::Database, ph::DATABASE, "Database").on_hover_text("Definitions: items, props, characters, tilesets, sprite sheets, sounds, structures, quests, project settings, scripts").clicked().then(|| self.mode = Mode::Database);
                 let px_label = if self.px.is_dirty() { "Pixel editor •" } else { "Pixel editor" };
                 ui::tab(ui, self.mode == Mode::Pixel, ph::IMAGE, px_label).on_hover_text("Draw and edit the project's images").clicked().then(|| self.mode = Mode::Pixel);

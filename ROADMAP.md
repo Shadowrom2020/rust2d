@@ -212,7 +212,7 @@ and terrain animations stripped and an old stamp gets them back. The map format 
 Compile-checked only: clicks in the Terrains section (egui clicks; `terrainedit` opens it for
 the screenshot) and real Shift+drag erasing (`terrainpaint … erase` uses the same function).
 
-### [ ] Event / dialog graph editor — `feature/event-graph`
+### [x] Event / dialog graph editor — `feature/event-graph`
 
 **Goal.** See a map's events as a graph: triggers, their conditions and actions as nodes,
 dialog lines and choices readable at a glance, and the connections the data implies
@@ -247,6 +247,22 @@ in place.
 - Editor script commands: `graph scope map|selection`, `graphnode N` (select), `graphshot`
   is just `shot`; `status` prints `graph=nodes,edges`.
 
+**Decided while building.** One node per trigger rather than per action: it shows a compact
+summary (conditions in one line, one row per action, choice options and their variable under
+the choice) and the pencil expands it into the inspector's own `conditions_ui` / `actions_ui`
+(already public, so `action_fields` stayed private); edits are recorded as a "graph" undo step
+like the inspector's. Owners are the map, zones with triggers (and every portal / transition,
+for its map edge) and entities with instance or definition triggers. Function nodes list `say`
+lines, choices with options (`script_refs::list_args`, new), the answer variable, `emit`,
+`then_call`, `set_flag` / `set_var` / `add_var`, teleports, quest and item calls; texts built at
+run time show as "…". State edges also run from script writes to script reads (`flag()`,
+`get_var()`), so Mira's choice reaches `mira_walk`. Focus mode follows edges forward from the
+selected owner and adds the owners of reached triggers. Layout: owners with their triggers side
+by side, functions and maps level with their callers (a function called by a function just
+below it); same-column edges loop out to the right. The view has its own Ctrl+Z / Ctrl+Y /
+Ctrl+S (the canvas only handles them in Map mode). Extra script commands `graph functions`,
+`graphedit`, `graphtext`, `graphview`, `graphdump`.
+
 **Touch points.** `editor/src/graph.rs` (new), `app.rs` (Mode, dispatch, menu tab),
 `widgets.rs` (pub helpers), `main.rs` (commands), `engine/src/script_refs.rs` (choice options),
 README editor section.
@@ -254,10 +270,18 @@ README editor section.
 **Example.** Nothing new; the village (elder, Mira's choice, the shrine's `emit("shrine_lit")`)
 is the showcase.
 
-**Verify.** Editor script: `open village; mode events; status` reports nodes and edges; a
-screenshot shows Mira's choice node with its two options and the edge to `mira_walk`; edit a
-dialog text through a graph node, `undo`, `dump` shows the original text; `graph scope
-selection` after `select named elder`.
+**Verify.** Done: a unit test builds the graph of a small map and script (owner, call,
+event, state edges from a trigger choice and from a script choice to `get_var`, function to
+function, teleport, unused functions only with *all*, focus mode, layout). Editor script on a
+scratch copy of the example: `open village; mode events` gives `graph=29,21`; `graphdump` lists
+the elder's choice, Mira's `mira_talk()` with *Sure* / *No thanks* and its edges to `mira_walk`
+(call and variable) and `quest_accepted` between the elder's triggers; `graphtext` changed the
+elder's first line, `undo` restored it; `select named elder` + `graph scope selection` gives 4
+nodes; in the forest `shrine_awakening()`'s `emit shrine_lit` reaches the map trigger.
+Screenshots of the village graph, Mira's function node, the elder's trigger in edit mode and the
+forest's shrine functions with the slimes' definition triggers. Compile-checked only: mouse
+dragging of nodes and the *Show on map*, *Open in Database*, *Edit in …* and *Open* buttons
+(egui clicks).
 
 ### [ ] Imports: Tiled, LPC, Aseprite — `feature/imports`
 
