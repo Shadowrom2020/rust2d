@@ -519,6 +519,9 @@ pub enum Action {
     /// The player sleeps `hours` (camping, an inn's "Rest"): the screen fades, the clock jumps,
     /// HP and mana are restored; blocks until the player is awake again.
     Sleep { hours: f32 },
+    /// Heals a character (negative = hurts it): `"player"`, `"self"` or a character's name. On
+    /// an item's *on use* the player's choice of target replaces a plain *Heal player*.
+    HealCharacter { target: TargetName, amount: i32 },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -625,6 +628,7 @@ impl Action {
             Action::UnlockAchievement { .. } => "Unlock achievement",
             Action::Lockpick { .. } => "Lockpicking game",
             Action::Sleep { .. } => "Sleep",
+            Action::HealCharacter { .. } => "Heal character",
         }
     }
 
@@ -691,6 +695,7 @@ impl Action {
             Action::UnlockAchievement { id: s() },
             Action::Lockpick { difficulty: 1, var: "picked".into() },
             Action::Sleep { hours: 8.0 },
+            Action::HealCharacter { target: "self".into(), amount: 2 },
         ]
     }
 }

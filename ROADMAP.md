@@ -83,7 +83,7 @@ Theme: companions become real party members (the player heals them, picks them u
 fall, gives them orders and gear), and characters can have drawn portraits. Builds on
 *Companions* and *Dialog portraits* of 0.5.0.
 
-### [ ] Healing companions — `feature/heal-companions`
+### [x] Healing companions — `feature/heal-companions`
 
 **Goal.** Spells, scrolls and potions can heal a companion, not only the player, and the HUD
 shows how the companions are doing.
@@ -107,6 +107,19 @@ shows how the companions are doing.
   the chosen row is highlighted and rows are clickable. Hidden with the HUD (`H`).
 - `status()`: `companions=` already has HP; add `aim=heal:<target>` while choosing.
 
+**Decided while building.** `Action::Heal` keeps its shape: version-1 map files decode actions
+with postcard, which can't skip a new field, so the named heal is a new appended variant
+`Action::HealCharacter { target, amount }` ("player", "self" or a name) and an item used on a
+companion runs its *on use* actions with the companion as "self" and *Heal player* turned into
+*Heal character self* (`runtime/healing.rs` `redirect_heals`). The choice only opens for items
+whose *on use* heals (other items behave as before) and pauses the world like the minigames (the
+character window steps aside meanwhile); it is a bar at the bottom (toasts use the top), the
+most hurt candidate is pre-selected; one click on a name in the bar, a character or a HUD row
+heals at once and pointing at one selects it (user feedback: no extra E after clicking). `UseTarget::Ally` with no companion here refuses with a
+toast; with exactly one candidate it is used at once. The Heal spell pays its mana only once
+the target is chosen. The red potion lost its "already at full health" line (the target may be
+someone else). `heal_area` now saves companion HP too.
+
 **Touch points.** `defs.rs` (`UseTarget`, `ItemDef.use_on`), `events/mod.rs` (`Heal.target`),
 `runtime/{skills,companions,combat,mod,inventory_ui}.rs`, a HUD part in `runtime/ui.rs` or
 `companions.rs`, `script.rs` (`heal_npc`), editor `widgets.rs` (Heal target field) and
@@ -115,10 +128,14 @@ shows how the companions are doing.
 **Example.** The guard companion; Tilda sells a *Healing Scroll* (`Choose`); the red potion
 becomes `Choose`.
 
-**Verify.** Autoplay from a crafted save with the guard at 3/8: use a potion → target choice
-(`aim=heal:player`), Right, Confirm → `companions=` guard 7/8, the player's HP unchanged; the Heal
-spell the same; without a companion the potion heals at once; screenshot of the HUD rows and
-the choice. Unit test: an old map's `Heal { amount }` loads with an empty target.
+**Verify (done).** Autoplay from a crafted save (`follow("guard")` and `heal_npc("guard", -5)` in
+the console): a potion opens the choice with the guard pre-selected (`aim=heal:guard`), E → guard
+5/8 → 8/8, the player's HP unchanged, one potion used; Right moves to the player; Esc cancels and
+keeps the potion; the Heal spell: mana 20 while choosing, 10 after, guard healed; without a
+companion the potion heals the player at once; clicking the guard's HUD row and clicking him on
+the map both heal him with a bandage; F5 saves his healed HP. Screenshots of the bar, the ring on
+the guard and the HUD row; the editor's *Use on* field and a *Heal character* action. Unit tests:
+`use_on` defaults to the player (not written), `redirect_heals` inside *If* actions.
 
 ### [ ] Knocked-down companions — `feature/downed-companions` (follows *Healing companions*)
 

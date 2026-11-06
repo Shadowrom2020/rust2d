@@ -3,6 +3,21 @@
 All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Gameplay
+- **Healing companions**: a *Heal* spell or a healing item set to *Use on: Player or companion*
+  asks whom to heal while companions are on the map: a "heal whom?" bar pauses the game; one
+  click on a name in the bar, the character or its HUD row heals at once (Left / Right and E
+  work too; Esc cancels, nothing is spent). Items can
+  also be *for companions only*. Companions get HUD rows with their head and HP under the
+  player's panel. New action **Heal character** and script `heal_npc(name, amount)`.
+- Example: the Red Potion and a new **Bandage** (Tilda, 6 coins) work on the guard. The Red
+  Potion no longer says "You're already at full health" (it may be meant for someone else).
+
+### Fixes
+- Healing friendly characters with *Heal area* now keeps a companion's new HP in the save game.
+
 ## 0.5.0 — 2026-11-06
 
 ### Gameplay

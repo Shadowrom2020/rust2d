@@ -502,6 +502,8 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("wait", with!(ctx, |c, s: Dynamic| c.actions.push(Action::Wait { seconds: num(&s) })));
     engine.register_fn("emit", with!(ctx, |c, n: &str| c.actions.push(Action::Emit { name: n.into() })));
     engine.register_fn("heal", with!(ctx, |c, n: i64| c.actions.push(Action::Heal { amount: n as i32 })));
+    // A character ("player" works too): companions, friendly characters, enemies (negative hurts).
+    engine.register_fn("heal_npc", with!(ctx, |c, t: &str, n: i64| c.actions.push(Action::HealCharacter { target: t.into(), amount: n as i32 })));
     engine.register_fn("set_locked", with!(ctx, |c, t: &str, locked: bool| c.actions.push(Action::SetLocked {
         target: t.into(),
         locked

@@ -73,7 +73,12 @@ impl Game {
     }
 
     pub(super) fn mouse_world(&self) -> Vec2 {
-        self.camera().screen_to_world(input::mouse_pos())
+        self.mouse_world_at(input::mouse_pos())
+    }
+
+    /// The world point under screen point `p`.
+    pub(super) fn mouse_world_at(&self, p: Vec2) -> Vec2 {
+        self.camera().screen_to_world(p)
     }
 
     /// Sprite-sized rect of an entity (what the player sees and clicks).
@@ -99,7 +104,7 @@ impl Game {
             .map(|(i, _)| i)
     }
 
-    fn uid_index(&self, uid: u32) -> Option<usize> {
+    pub(super) fn uid_index(&self, uid: u32) -> Option<usize> {
         self.loaded.entities.iter().position(|e| e.uid == uid && e.active)
     }
 

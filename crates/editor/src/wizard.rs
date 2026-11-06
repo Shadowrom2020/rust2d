@@ -212,6 +212,7 @@ impl Editor {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
             }),
             WKind::Tileset | WKind::Sheet | WKind::Structure => {}
         }

@@ -683,6 +683,7 @@ impl Game {
             h += 22.0;
         }
         let frame = Rect::new(x0, y0, tx + col_w + PAD + 2.0 - x0, h.max(portrait.h) + 2.0 * PAD);
+        self.hud_bottom.set(frame.bottom());
 
         // Frame: dark backing, a gold border with an inner line and corner studs.
         let gold = Color::new(0.85, 0.72, 0.38, 1.0);

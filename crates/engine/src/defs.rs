@@ -455,6 +455,38 @@ pub struct ItemDef {
     /// Tool slot and are what activities ask for (a fishing spot needs a fishing rod).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tool: String,
+    /// Whom a healing item (its *on use* heals) is used on: the player, a companion, or a choice
+    /// between them while companions are around.
+    #[serde(default, skip_serializing_if = "UseTarget::is_player")]
+    pub use_on: UseTarget,
+}
+
+/// Whom a healing item is used on (`ItemDef::use_on`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UseTarget {
+    /// Always the player (as before).
+    #[default]
+    Player,
+    /// Only companions (a salve for the dog).
+    Ally,
+    /// The player or a companion: with companions on the map the player chooses.
+    Choose,
+}
+
+impl UseTarget {
+    pub const ALL: [UseTarget; 3] = [UseTarget::Player, UseTarget::Ally, UseTarget::Choose];
+
+    fn is_player(&self) -> bool {
+        *self == UseTarget::Player
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            UseTarget::Player => "Player",
+            UseTarget::Ally => "Companions",
+            UseTarget::Choose => "Player or companion",
+        }
+    }
 }
 
 fn default_max_stack() -> u32 {
@@ -1224,6 +1256,7 @@ mod tests {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
             });
         }
         let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };
@@ -1347,5 +1380,20 @@ mod furniture_tests {
         let s: UseSpot = ron::from_str("(pose: Lie)").unwrap();
         assert_eq!((s.pose, s.sleep_until, s.cover.sheet.as_str()), (Pose::Lie, 7.0, ""));
         assert!(!ron::to_string(&p).unwrap().contains("use_spot"));
+    }
+}
+
+#[cfg(test)]
+mod use_on_tests {
+    use super::*;
+
+    #[test]
+    fn items_default_to_the_player() {
+        let old: ItemDef = ron::from_str(r#"(id: "potion", name: "Red Potion", icon: (sheet: "items", frame: 1))"#).unwrap();
+        assert_eq!(old.use_on, UseTarget::Player);
+        assert!(!ron::to_string(&old).unwrap().contains("use_on"), "the default isn't written");
+        let d = ItemDef { use_on: UseTarget::Choose, ..old };
+        let back: ItemDef = ron::from_str(&ron::to_string(&d).unwrap()).unwrap();
+        assert_eq!(back.use_on, UseTarget::Choose);
     }
 }

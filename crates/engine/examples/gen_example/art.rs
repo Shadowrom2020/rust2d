@@ -1795,6 +1795,7 @@ pub fn clothing_item(id: &str, name: &str, description: &str, icon_sheet: &str, 
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
     }
 }
 
@@ -2650,8 +2651,10 @@ pub mod it {
     pub const ROD: u32 = 37;
     pub const TROUT: u32 = 38;
     pub const BOOT: u32 = 39;
+    /// A rolled linen bandage (heals the player or a companion).
+    pub const BANDAGE: u32 = 40;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 40;
+    pub const COUNT: u32 = 41;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -2999,6 +3002,20 @@ pub fn items(out: &Path) {
                 c.hline(9, 8, 9, hex(leather[3]));
                 c.px(22, 17, hex(0x6fa8dc)); // a drip
                 c.px(22, 18, hex(0x6fa8dc));
+            }
+            it::BANDAGE => {
+                // A roll of linen with its loose end trailing off, marked with a red cross.
+                let linen = [0x9e9a90, 0xcfcac0, 0xece8de, 0xffffff];
+                c.shade_box(14, 18, 14, 5, linen); // the loose end
+                c.shade_disc(12.0, 15.0, 8.5, linen);
+                c.shade_disc(12.0, 15.0, 3.0, [0x8a857a, 0xb0aa9e, 0xcfcac0, 0xe6e2d8]);
+                for k in [7, 10] {
+                    c.px(k, 9, hex(linen[0]));
+                    c.px(k + 9, 20, hex(linen[1]));
+                }
+                c.rect(23, 18, 2, 5, hex(0xd32f2f));
+                c.rect(21, 19, 6, 2, hex(0xd32f2f));
+                c.hline(14, 23, 14, hex(linen[0]));
             }
             it::HERB => {
                 // A sprig with three pairs of leaves and a tied stem.

@@ -309,6 +309,10 @@ impl Game {
             self.runner.push(&actions, &crate::events::runner::ActionCtx::default());
             return true;
         }
+        // With companions around, a Heal spell asks whom to heal (paid once chosen).
+        if matches!(d.effect, SpellEffect::Heal { .. }) && self.start_heal_pick(super::healing::HealSource::Spell(id.to_string())) {
+            return true;
+        }
         self.pay_spell(&d);
         match &d.effect {
             SpellEffect::Heal { amount } => self.heal(*amount),
@@ -322,7 +326,7 @@ impl Game {
     }
 
     /// Spends a spell's mana, starts its cooldown and plays the cast sound.
-    fn pay_spell(&mut self, d: &crate::skills::SpellDef) {
+    pub(super) fn pay_spell(&mut self, d: &crate::skills::SpellDef) {
         self.world.mana -= d.mana as f32;
         if d.cooldown > 0.0 {
             self.skills.cooldown.insert(d.id.clone(), d.cooldown);
