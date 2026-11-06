@@ -333,6 +333,7 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `order(target, order)` | Tells a companion (or `"all"`) what to do, like the player's orders menu (G): `"attack"` (fight enemies near the player, the default), `"defend"` (only what hunts the player or the companion), `"passive"` (no fighting, back away from enemies), `"stay"` (wait where it is, fighting what comes close) or `"follow"`. Saved. *(queued)* |
 | `order_of(name)` | How a companion fights: `"attack"`, `"defend"` or `"passive"` (`""` if no companion has that name). |
 | `is_staying(name)` | Whether a companion was told to stay where it is. |
+| `open_companion(target)` | Opens a companion's window — its gear and bag next to the player's inventory — once the running event is over, e.g. after a dialog's "Let me see your gear". *(queued)* |
 | `follow_schedule(target)` | The character follows its daily schedule again: it heads for the stop of the current hour. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 | `defeated_count(character)` | How many characters of a definition the player has defeated (the bestiary's count), e.g. `defeated_count("slime")`. |

@@ -1474,6 +1474,10 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             ui.weak("(negative = damage; on a healing item set to 'Use on: Player or companion' it heals whom the player chooses)");
         }
+        Action::OpenCompanion { target } => {
+            target_field(ui, id, target, refs);
+            ui.weak("(a companion: its window with its gear and bag opens after the event, e.g. after a dialog's \"Let me see your gear\")");
+        }
         Action::CompanionOrder { target, order } => {
             target_field(ui, id, target, refs);
             labeled(ui, "order", |ui| {

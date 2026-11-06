@@ -525,6 +525,9 @@ pub enum Action {
     /// Tells a companion (or "all" of them) what to do: "attack", "defend", "passive" (how it
     /// fights), "stay" (wait here) or "follow".
     CompanionOrder { target: TargetName, order: String },
+    /// Opens a companion's window (its gear and bag next to the player's inventory) once the
+    /// running event is over.
+    OpenCompanion { target: TargetName },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -633,6 +636,7 @@ impl Action {
             Action::Sleep { .. } => "Sleep",
             Action::HealCharacter { .. } => "Heal character",
             Action::CompanionOrder { .. } => "Companion order",
+            Action::OpenCompanion { .. } => "Open companion window",
         }
     }
 
@@ -701,6 +705,7 @@ impl Action {
             Action::Sleep { hours: 8.0 },
             Action::HealCharacter { target: "self".into(), amount: 2 },
             Action::CompanionOrder { target: "self".into(), order: "stay".into() },
+            Action::OpenCompanion { target: "self".into() },
         ]
     }
 }

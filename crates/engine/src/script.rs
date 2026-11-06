@@ -457,6 +457,7 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     // Orders: order("guard", "defend" | "attack" | "passive" | "stay" | "follow"), "all" = every companion.
     engine.register_fn("order", with!(ctx, |c, t: &str, o: &str| c.actions.push(Action::CompanionOrder { target: t.into(), order: o.into() })));
     engine.register_fn("order_of", with!(ctx, |c, name: &str| c.world.companions.iter().find(|m| m.name == name).map_or(String::new(), |m| m.order.id().to_string())));
+    engine.register_fn("open_companion", with!(ctx, |c, t: &str| c.actions.push(Action::OpenCompanion { target: t.into() })));
     engine.register_fn("is_staying", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name && m.post.is_some())));
     engine.register_fn("follow_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: true })));
     engine.register_fn("stop_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: false })));

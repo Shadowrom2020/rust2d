@@ -49,6 +49,8 @@ pub(super) struct Link {
     pub post: Option<Vec2>,
     /// It fought in its last step (`status()`).
     fighting: bool,
+    /// It already said it is out of ammunition.
+    out_of_ammo: bool,
 }
 
 impl Game {
@@ -256,6 +258,28 @@ impl Game {
     /// hits it in reach (melee), or shoots it in range and in sight. Returns true while fighting.
     fn companion_fight(&mut self, i: usize, dt: f32) -> bool {
         let ts = self.ts();
+        // A bow the player gave it shoots arrows from its bag; without any it keeps out of
+        // fights (and says so once).
+        let ammo = self.companion_ammo(i);
+        if let Some((kind, n)) = &ammo {
+            let said = self.loaded.entities[i].companion.as_ref().is_some_and(|l| l.out_of_ammo);
+            if *n == 0 {
+                if !said {
+                    let who = self.display_name(i);
+                    let what = self.project.db.item(kind).map_or(kind.clone(), |d| d.name.clone());
+                    self.ui.toast(format!("{who} is out of {what}."));
+                    if let Some(l) = self.loaded.entities[i].companion.as_mut() {
+                        l.out_of_ammo = true;
+                    }
+                }
+                return false;
+            }
+            if said {
+                if let Some(l) = self.loaded.entities[i].companion.as_mut() {
+                    l.out_of_ammo = false;
+                }
+            }
+        }
         let e = &self.loaded.entities[i];
         let Some(w) = e.weapon.clone() else { return false };
         if w.damage <= 0 || crate::effects::stunned(&e.effects) {
@@ -300,6 +324,9 @@ impl Game {
                     let (r, uid, fx) = (r.clone(), e.uid, w.effect);
                     self.audio.play(&self.project.config.sfx.attack);
                     self.shoot(eye, (o_mid(&self.loaded.entities[t]) - eye).normalize_or_zero(), &r, damage, true, Some(uid), fx);
+                    if let Some((kind, _)) = &ammo {
+                        self.npc_give(i, kind, -1);
+                    }
                 }
                 return true;
             }
@@ -613,7 +640,7 @@ fn make_companion(rt: &mut RtEntity, map: &str, triggers: Vec<Trigger>, k: usize
     rt.body.move_target = None;
     // The player walks through companions (they never block a corridor).
     rt.solid = false;
-    rt.companion = Some(Box::new(Link { map: map.to_string(), uid: home_uid, triggers, walker: Walker::default(), goal: None, regen: 0.0, down: None, order: Default::default(), post: None, fighting: false }));
+    rt.companion = Some(Box::new(Link { map: map.to_string(), uid: home_uid, triggers, walker: Walker::default(), goal: None, regen: 0.0, down: None, order: Default::default(), post: None, fighting: false, out_of_ammo: false }));
 }
 
 fn is_hurtable_companion(e: &RtEntity) -> bool {

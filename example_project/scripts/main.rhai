@@ -168,7 +168,7 @@ fn guard_talk() {
         // "stay" | "follow"); order_of(name) / is_staying(name) tell what it does now.
         let wait = if is_staying("guard") { "Come along again" } else { "Wait here" };
         let fight = if order_of("guard") == "passive" { "Fight with me again" } else { "Stay out of fights" };
-        choice("What is it, {player}?", [wait, fight, "Go back to your post", "Nothing"], "guard_cmd");
+        choice("What is it, {player}?", [wait, fight, "Let me see your gear", "Go back to your post", "Nothing"], "guard_cmd");
         then_call("guard_orders");
     } else if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
@@ -201,6 +201,9 @@ fn guard_orders() {
             order("guard", "passive");
         }
     } else if cmd == 2 {
+        // open_companion(name): the companion's window (gear, bag) after the dialog.
+        open_companion("guard");
+    } else if cmd == 3 {
         say("Guard", "Back to the road, then. Good luck, {player}!");
         stop_following("guard");
     }

@@ -23,6 +23,14 @@ All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and edi
   rows; a staying companion catches up on a map change. New action **Companion order** and
   scripts `order(name, order)`, `order_of(name)`, `is_staying(name)`; the guard's dialog in the
   example offers *Wait here* / *Stay out of fights*.
+- **Companion inventory**: a companion window (its HUD row, *Gear...* in the orders menu, or
+  `open_companion(name)` / the **Open companion window** action) shows its gear, its bag and the
+  player's inventory: hand items over and back, equip it (weapons and armor change how it
+  fights). Characters use the items they carry themselves (companions, other NPCs and enemies):
+  healing when their health is critical (35 % or less, or one more hit like the last would fell
+  them), cures when poisoned or burning, buffs in a fight; a bow the player gave them shoots arrows from
+  their bag (the HUD row counts them). Characters can be marked *can't be given gear*. The
+  guard's dialog in the example offers "Let me see your gear".
 - Gamepad: LB no longer opens the character window from the map (RB and Y do); it opens the
   companion orders.
 - Example: the Red Potion and a new **Bandage** (Tilda, 6 coins) work on the guard. The Red
