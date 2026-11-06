@@ -25,6 +25,10 @@ const NEAR: f32 = 1.6;
 const ENGAGE: f32 = 5.0;
 /// Seconds per HP regained while no enemy hunts.
 const REGEN: f32 = 4.0;
+/// A staying companion fights hostile characters this close (tiles).
+const STAY_GUARD: f32 = 2.5;
+/// A passive companion backs away from hunting enemies this close (tiles).
+const BACK_OFF: f32 = 2.5;
 
 /// What makes a runtime entity a companion.
 #[derive(Clone, Debug)]
@@ -39,6 +43,12 @@ pub(super) struct Link {
     regen: f32,
     /// Knocked down: seconds it has been lying there.
     pub down: Option<f32>,
+    /// How it fights (the player's order).
+    pub order: crate::state::Order,
+    /// Told to stay: where it waits (world pixels).
+    pub post: Option<Vec2>,
+    /// It fought in its last step (`status()`).
+    fighting: bool,
 }
 
 impl Game {
@@ -67,6 +77,14 @@ impl Game {
             if let Some(hp) = c.hp {
                 rt.hp = hp.clamp(1, rt.max_hp.max(1));
             }
+            if let Some(l) = &mut rt.companion {
+                l.order = c.order;
+                l.post = c.post.map(|[x, y]| vec2(x, y));
+            }
+            if let Some([x, y]) = c.post {
+                rt.body.pos = vec2(x, y);
+                rt.home = rt.body.pos;
+            }
             // Still lying where it fell (a save loaded on that map).
             if let Some([x, y]) = c.down {
                 rt.hp = 0;
@@ -84,7 +102,7 @@ impl Game {
     /// Puts the companions on free spots behind the player (entering a map, catching up).
     pub(super) fn place_companions(&mut self) {
         for i in 0..self.loaded.entities.len() {
-            if self.loaded.entities[i].companion.as_ref().is_some_and(|l| l.down.is_none()) {
+            if self.loaded.entities[i].companion.as_ref().is_some_and(|l| l.down.is_none() && l.post.is_none()) {
                 self.place_companion(i);
             }
         }
@@ -139,12 +157,42 @@ impl Game {
         let ts = self.ts();
         let pos = self.loaded.entities[i].body.pos;
         let dist = pos.distance(self.player.pos);
-        if dist > CATCH_UP * ts {
+        let post = self.loaded.entities[i].companion.as_ref().and_then(|l| l.post);
+        if dist > CATCH_UP * ts && post.is_none() {
             self.place_companion(i);
             return true;
         }
         self.companion_regen(i, dt);
-        if self.companion_fight(i, dt) {
+        let fighting = self.companion_fight(i, dt);
+        if let Some(l) = self.loaded.entities[i].companion.as_mut() {
+            l.fighting = fighting;
+        }
+        if fighting {
+            return true;
+        }
+        if self.companion_back_off(i, dt) {
+            return true;
+        }
+        // Told to stay: back to its post, then wait there.
+        if let Some(post) = post {
+            if pos.distance(post) > 0.4 * ts {
+                let goal = self.tile_of(post);
+                let Some(l) = self.loaded.entities[i].companion.as_mut() else { return true };
+                if l.goal != Some(goal) {
+                    l.goal = Some(goal);
+                    l.walker = Walker::default();
+                }
+                let mut walker = std::mem::take(&mut l.walker);
+                let walked = self.walk_to_tile(i, goal, &mut walker, self.player.speed, dt);
+                if let Some(l) = self.loaded.entities[i].companion.as_mut() {
+                    l.walker = walker;
+                    if walked != Walk::Walking {
+                        l.goal = None;
+                    }
+                }
+            } else {
+                self.loaded.entities[i].body.moving = false;
+            }
             return true;
         }
         // Close enough (but not on top of the player, who walks through companions): wait.
@@ -215,10 +263,23 @@ impl Game {
         }
         let me = e.body.pos;
         let eye = me - vec2(0.0, e.body.hitbox.y / 2.0);
+        let Some(link) = e.companion.as_ref() else { return false };
+        let (order, staying) = (link.order, link.post.is_some());
+        if order == crate::state::Order::Passive {
+            return false;
+        }
+        let player = self.player.pos;
         let target = (0..self.loaded.entities.len())
             .filter(|&t| {
                 let o = &self.loaded.entities[t];
-                o.active && o.hostile && o.max_hp > 0 && o.body.pos.distance(me) <= ENGAGE * ts && o.body.pos.distance(self.player.pos) <= ENGAGE * 1.5 * ts
+                if !(o.active && o.hostile && o.max_hp > 0) {
+                    return false;
+                }
+                // Staying: only what comes close; else what is near both it and the player.
+                let near = if staying { o.body.pos.distance(me) <= STAY_GUARD * ts } else { o.body.pos.distance(me) <= ENGAGE * ts && o.body.pos.distance(player) <= ENGAGE * 1.5 * ts };
+                // Defend: only enemies hunting the player or this companion.
+                let threat = order != crate::state::Order::Defend || (o.ai.aggro > 0.0 && (o.ai.last_seen.distance(player) < 1.5 * ts || o.ai.last_seen.distance(me) < 1.5 * ts));
+                near && threat
             })
             .filter(|&t| self.line_clear(eye, self.loaded.entities[t].body.pos - vec2(0.0, self.loaded.entities[t].body.hitbox.y / 2.0)))
             .min_by(|&a, &b| self.loaded.entities[a].body.pos.distance(me).total_cmp(&self.loaded.entities[b].body.pos.distance(me)));
@@ -274,7 +335,7 @@ impl Game {
         let Some(inst) = self.loaded.map.entity(e.uid).cloned() else { return };
         // Its runtime uid: one past the companions here (uids stay unique on this map).
         let k = self.loaded.entities.iter().filter(|e| (COMPANION_UID_BASE..crate::state::DROPPED_UID_BASE).contains(&e.uid)).map(|e| e.uid - COMPANION_UID_BASE + 1).max().unwrap_or(0) as usize;
-        self.world.companions.push(Companion { map: map.clone(), uid: e.uid, name: e.name.clone(), hp: (e.hp < e.max_hp).then_some(e.hp), down: None });
+        self.world.companions.push(Companion { map: map.clone(), uid: e.uid, name: e.name.clone(), hp: (e.hp < e.max_hp).then_some(e.hp), down: None, order: Default::default(), post: None });
         make_companion(&mut self.loaded.entities[i], &map, inst.triggers, k);
         let name = self.display_name(i);
         self.ui.toast(format!("{name} joins you."));
@@ -335,6 +396,83 @@ impl Game {
     fn display_name(&self, i: usize) -> String {
         let e = &self.loaded.entities[i];
         self.project.db.character(&e.def).map(|d| d.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| e.name.clone())
+    }
+
+    /// A passive companion steps away from the nearest hunting enemy close to it. Returns true
+    /// while it does.
+    fn companion_back_off(&mut self, i: usize, dt: f32) -> bool {
+        let e = &self.loaded.entities[i];
+        if e.companion.as_ref().is_none_or(|l| l.order != crate::state::Order::Passive) {
+            return false;
+        }
+        let (me, ts) = (e.body.pos, self.ts());
+        let threat = self
+            .loaded
+            .entities
+            .iter()
+            .filter(|o| o.active && o.hostile && o.max_hp > 0 && o.ai.aggro > 0.0 && o.body.pos.distance(me) <= BACK_OFF * ts)
+            .map(|o| o.body.pos)
+            .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
+        let Some(from) = threat else { return false };
+        let away = (me - from).try_normalize().unwrap_or(vec2(0.0, 1.0));
+        self.step_towards_dir(i, away, dt, None);
+        true
+    }
+
+    /// Gives companion `i` an order: how it fights (`order`) and / or whether it stays where it
+    /// is (`stay`: Some(true) = wait here, Some(false) = follow). Saved.
+    pub(super) fn give_order(&mut self, i: usize, order: Option<crate::state::Order>, stay: Option<bool>) {
+        let pos = self.loaded.entities[i].body.pos;
+        let Some(l) = self.loaded.entities[i].companion.as_mut() else { return };
+        if let Some(o) = order {
+            l.order = o;
+        }
+        if let Some(s) = stay {
+            l.post = s.then_some(pos);
+            l.goal = None;
+            l.walker = Walker::default();
+        }
+        let (map, uid, o, post) = (l.map.clone(), l.uid, l.order, l.post);
+        if let Some(c) = self.world.companions.iter_mut().find(|c| c.map == map && c.uid == uid) {
+            c.order = o;
+            c.post = post.map(|p| [p.x, p.y]);
+        }
+    }
+
+    /// Changing maps: companions told to stay catch up and follow again.
+    pub(super) fn companions_follow_again(&mut self) {
+        for i in 0..self.loaded.entities.len() {
+            if self.loaded.entities[i].companion.as_ref().is_some_and(|l| l.post.is_some()) {
+                self.give_order(i, None, Some(false));
+            }
+        }
+    }
+
+    /// `Action::CompanionOrder`: "attack" / "defend" / "passive" / "stay" / "follow" for a
+    /// companion by name ("self", "all").
+    pub(super) fn order_companion(&mut self, target: &str, order: &str, owner: Option<u32>) {
+        let (o, stay) = match order.trim().to_lowercase().as_str() {
+            "stay" | "wait" => (None, Some(true)),
+            "follow" => (None, Some(false)),
+            s => match crate::state::Order::from_id(s) {
+                Some(o) => (Some(o), None),
+                None => {
+                    eprintln!("[events] Companion order: unknown order '{order}' (attack, defend, passive, stay, follow)");
+                    return;
+                }
+            },
+        };
+        let all: Vec<usize> = if target.eq_ignore_ascii_case("all") {
+            (0..self.loaded.entities.len()).filter(|&i| self.loaded.entities[i].companion.is_some() && self.loaded.entities[i].active).collect()
+        } else {
+            self.entity_index(target, owner).filter(|&i| self.loaded.entities[i].companion.is_some()).into_iter().collect()
+        };
+        if all.is_empty() {
+            eprintln!("[events] Companion order: '{target}' is no companion here");
+        }
+        for i in all {
+            self.give_order(i, o, stay);
+        }
     }
 
     /// Whether companion `i` is knocked down.
@@ -453,8 +591,12 @@ impl Game {
             .map(|e| {
                 let t = self.tile_of(e.body.pos);
                 let name = if e.name.is_empty() { e.def.as_str() } else { e.name.as_str() };
-                let down = if e.companion.as_ref().is_some_and(|l| l.down.is_some()) { ":down" } else { "" };
-                format!("{name}:{}/{}{down}@{},{}", e.hp, e.max_hp, t.0, t.1)
+                let l = e.companion.as_ref();
+                let down = if l.is_some_and(|l| l.down.is_some()) { ":down" } else { "" };
+                let order = l.map(|l| l.order).filter(|o| *o != crate::state::Order::Attack).map_or(String::new(), |o| format!(":{}", o.id()));
+                let stay = if l.is_some_and(|l| l.post.is_some()) { ":stay" } else { "" };
+                let fighting = if l.is_some_and(|l| l.fighting) { ":fighting" } else { "" };
+                format!("{name}:{}/{}{down}{order}{stay}{fighting}@{},{}", e.hp, e.max_hp, t.0, t.1)
             })
             .collect()
     }
@@ -471,7 +613,7 @@ fn make_companion(rt: &mut RtEntity, map: &str, triggers: Vec<Trigger>, k: usize
     rt.body.move_target = None;
     // The player walks through companions (they never block a corridor).
     rt.solid = false;
-    rt.companion = Some(Box::new(Link { map: map.to_string(), uid: home_uid, triggers, walker: Walker::default(), goal: None, regen: 0.0, down: None }));
+    rt.companion = Some(Box::new(Link { map: map.to_string(), uid: home_uid, triggers, walker: Walker::default(), goal: None, regen: 0.0, down: None, order: Default::default(), post: None, fighting: false }));
 }
 
 fn is_hurtable_companion(e: &RtEntity) -> bool {

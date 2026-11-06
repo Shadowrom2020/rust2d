@@ -522,6 +522,9 @@ pub enum Action {
     /// Heals a character (negative = hurts it): `"player"`, `"self"` or a character's name. On
     /// an item's *on use* the player's choice of target replaces a plain *Heal player*.
     HealCharacter { target: TargetName, amount: i32 },
+    /// Tells a companion (or "all" of them) what to do: "attack", "defend", "passive" (how it
+    /// fights), "stay" (wait here) or "follow".
+    CompanionOrder { target: TargetName, order: String },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -629,6 +632,7 @@ impl Action {
             Action::Lockpick { .. } => "Lockpicking game",
             Action::Sleep { .. } => "Sleep",
             Action::HealCharacter { .. } => "Heal character",
+            Action::CompanionOrder { .. } => "Companion order",
         }
     }
 
@@ -696,6 +700,7 @@ impl Action {
             Action::Lockpick { difficulty: 1, var: "picked".into() },
             Action::Sleep { hours: 8.0 },
             Action::HealCharacter { target: "self".into(), amount: 2 },
+            Action::CompanionOrder { target: "self".into(), order: "stay".into() },
         ]
     }
 }

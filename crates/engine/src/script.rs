@@ -454,6 +454,10 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("stop_following", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: false })));
     engine.register_fn("is_companion", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name)));
     engine.register_fn("companion_count", with!(ctx, |c| c.world.companions.len() as i64));
+    // Orders: order("guard", "defend" | "attack" | "passive" | "stay" | "follow"), "all" = every companion.
+    engine.register_fn("order", with!(ctx, |c, t: &str, o: &str| c.actions.push(Action::CompanionOrder { target: t.into(), order: o.into() })));
+    engine.register_fn("order_of", with!(ctx, |c, name: &str| c.world.companions.iter().find(|m| m.name == name).map_or(String::new(), |m| m.order.id().to_string())));
+    engine.register_fn("is_staying", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name && m.post.is_some())));
     engine.register_fn("follow_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: true })));
     engine.register_fn("stop_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: false })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
@@ -852,7 +856,7 @@ mod tests {
         let actions = host.call(&mut WorldState::default(), "party", None);
         assert_eq!(actions, vec![Action::Companion { target: "guard".into(), join: true }, Action::Companion { target: "self".into(), join: false }]);
         let mut w = WorldState::default();
-        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None, down: None });
+        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None, down: None, order: Default::default(), post: None });
         assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
     }
 

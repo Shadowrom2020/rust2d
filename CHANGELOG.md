@@ -17,10 +17,19 @@ All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and edi
   the map asks "Leave … behind?" (it then limps home); save games keep it down in its place.
   *Project settings → Companions at 0 HP*: stays down until healed (default), gets up after N
   seconds with 1 HP, or goes home at once (the old behaviour).
+- **Companion orders**: G (pad LB) opens a menu that pauses the game: *Attack* (the default),
+  *Defend* (only what hunts the player or the companion), *Passive* (no fighting, backs away),
+  *Stay here* / *Follow me*, for one companion or all. Orders are saved and shown in the HUD
+  rows; a staying companion catches up on a map change. New action **Companion order** and
+  scripts `order(name, order)`, `order_of(name)`, `is_staying(name)`; the guard's dialog in the
+  example offers *Wait here* / *Stay out of fights*.
+- Gamepad: LB no longer opens the character window from the map (RB and Y do); it opens the
+  companion orders.
 - Example: the Red Potion and a new **Bandage** (Tilda, 6 coins) work on the guard. The Red
   Potion no longer says "You're already at full health" (it may be meant for someone else).
 
 ### Fixes
+- Loading a save while a companion was knocked down no longer asks "Leave … behind?".
 - Healing friendly characters with *Heal area* now keeps a companion's new HP in the save game.
 
 ## 0.5.0 — 2026-11-06

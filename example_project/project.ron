@@ -70,4 +70,5 @@
         skill_points_per_level: 1,
     ),
     dialog_portraits: true,
+    companion_down: StaysDown,
 )

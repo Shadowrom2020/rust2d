@@ -141,7 +141,7 @@ impl Game {
             // Tab / RB: next tab, LB: previous one (both open the window when it is closed).
             let step = if input::act_pressed(Act::NextTab) {
                 1
-            } else if input::act_pressed(Act::PrevTab) {
+            } else if open.is_some() && input::act_pressed(Act::PrevTab) {
                 tabs.len() - 1
             } else {
                 0

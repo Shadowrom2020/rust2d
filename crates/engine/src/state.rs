@@ -223,6 +223,53 @@ pub struct Companion {
     /// Knocked down: where it lies on the current map (world pixels); None = on its feet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub down: Option<[f32; 2]>,
+    /// How it fights (the player's order).
+    #[serde(default, skip_serializing_if = "Order::is_attack")]
+    pub order: Order,
+    /// Told to stay: where it waits on the current map (world pixels); None = follows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<[f32; 2]>,
+}
+
+/// How a companion fights (`Companion::order`); staying put is separate (`Companion::post`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Order {
+    /// Fights hostile characters near the player.
+    #[default]
+    Attack,
+    /// Only fights what hunts the player or itself.
+    Defend,
+    /// Never fights; backs away from enemies close to it.
+    Passive,
+}
+
+impl Order {
+    pub const ALL: [Order; 3] = [Order::Attack, Order::Defend, Order::Passive];
+
+    fn is_attack(&self) -> bool {
+        *self == Order::Attack
+    }
+
+    /// The name scripts use (`order("guard", "defend")`).
+    pub fn id(self) -> &'static str {
+        match self {
+            Order::Attack => "attack",
+            Order::Defend => "defend",
+            Order::Passive => "passive",
+        }
+    }
+
+    pub fn from_id(s: &str) -> Option<Order> {
+        Order::ALL.into_iter().find(|o| o.id().eq_ignore_ascii_case(s.trim()))
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Order::Attack => "Attack",
+            Order::Defend => "Defend",
+            Order::Passive => "Passive",
+        }
+    }
 }
 
 /// How many dialog lines the journal keeps.
@@ -585,7 +632,7 @@ mod tests {
         assert!(!old.contains("companions"));
         assert!(WorldState::from_ron(&old).unwrap().companions.is_empty());
         let mut w = WorldState::default();
-        w.companions.push(Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: Some(5), down: None });
+        w.companions.push(Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: Some(5), down: None, order: Order::Defend, post: Some([100.0, 200.0]) });
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert_eq!(back.companions, w.companions);
         assert!(back.is_companion("village", 22) && !back.is_companion("forest", 22));
@@ -596,6 +643,9 @@ mod tests {
         down.down = Some([272.0, 590.0]);
         assert_eq!(ron::from_str::<Companion>(&ron::to_string(&down).unwrap()).unwrap(), down);
         assert!(!ron::to_string(&c).unwrap().contains("down"));
+        // ... and follow with the Attack order.
+        assert_eq!((c.order, c.post), (Order::Attack, None));
+        assert!(!ron::to_string(&c).unwrap().contains("order"));
     }
 
     #[test]
