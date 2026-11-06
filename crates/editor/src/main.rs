@@ -805,6 +805,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         // pxframe N: select frame N · pxclip copy|cut|paste|mirror (Ctrl+C / X / V)
         "pxframe" => ed.px.sel_frame = num(1) as u32,
         "pxclip" => ed.frame_clipboard(arg(1)),
+        // dbscroll Y: scrolls the Database form to Y px (a large number = the end)
+        "dbscroll" => ed.db.form_scroll = Some(num(1)),
         "tab" => {
             use database::Tab;
             ed.db.tab = match arg(1) {
