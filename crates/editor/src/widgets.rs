@@ -1357,6 +1357,13 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
         }
+        Action::Sleep { hours } => {
+            ui.horizontal(|ui| {
+                ui.label("hours");
+                ui.add(egui::DragValue::new(hours).range(0.25..=48.0).speed(0.25));
+            });
+            ui.weak("the player sleeps (camping, an inn's rest): the screen fades, the clock moves on, HP and mana are restored; 'Woke up' triggers run after. Not with enemies nearby.");
+        }
         Action::Lockpick { difficulty, var } => {
             ui.horizontal(|ui| {
                 ui.label("difficulty");

@@ -39,6 +39,10 @@ pub struct PlayerInfo {
     pub facing: Facing,
     /// The current map's weather (`weather()`).
     pub weather: crate::map::Weather,
+    /// Using furniture: "sit", "lie", "stand"; "" on their feet.
+    pub pose: String,
+    /// The night is passing (the Sleep action).
+    pub sleeping: bool,
 }
 
 pub struct ScriptHost {
@@ -435,6 +439,11 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         c.actions.push(Action::Patrol { target: t.into(), active: true, points })
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
+    // (Typed, so they win over Rhai's own `sleep(seconds)`, which would pause the script.)
+    engine.register_fn("sleep", with!(ctx, |c, hours: i64| c.actions.push(Action::Sleep { hours: hours as f32 })));
+    engine.register_fn("sleep", with!(ctx, |c, hours: f64| c.actions.push(Action::Sleep { hours: hours as f32 })));
+    engine.register_fn("is_sitting", with!(ctx, |c| c.player.pose == "sit"));
+    engine.register_fn("is_sleeping", with!(ctx, |c| c.player.sleeping || c.player.pose == "lie"));
     engine.register_fn("lockpick", with!(ctx, |c, difficulty: i64, var: &str| c.actions.push(Action::Lockpick { difficulty: difficulty.max(0) as u32, var: var.into() })));
     engine.register_fn("unlock_achievement", with!(ctx, |c, id: &str| c.actions.push(Action::UnlockAchievement { id: id.into() })));
     engine.register_fn("achievement_unlocked", with!(ctx, |c, id: &str| c.achievements.contains(id)));
@@ -843,6 +852,15 @@ mod tests {
         let mut w = WorldState::default();
         w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
         assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
+    }
+
+    #[test]
+    fn sleep_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn rest() { if !is_sitting() && !is_sleeping() { sleep(8); } sleep(2.5); }"#).unwrap();
+        assert_eq!(host.call(&mut WorldState::default(), "rest", None), vec![Action::Sleep { hours: 8.0 }, Action::Sleep { hours: 2.5 }]);
+        host.set_player(PlayerInfo { pose: "sit".into(), ..Default::default() });
+        assert_eq!(host.call(&mut WorldState::default(), "rest", None), vec![Action::Sleep { hours: 2.5 }]);
     }
 
     #[test]

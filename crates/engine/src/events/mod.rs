@@ -34,6 +34,8 @@ pub enum GameEvent {
     Lock,
     /// A character's HP dropped from `from` to `to` (fractions of its max HP, still alive).
     HpBelow { from: f32, to: f32 },
+    /// The player woke up after sleeping (in a bed, or the Sleep action).
+    Sleep,
 }
 
 /// Which events a trigger reacts to.
@@ -54,6 +56,8 @@ pub enum TriggerOn {
     Lock,
     /// The owning character's HP fell below `percent` of its max HP (and it is still alive).
     HpBelow { percent: u32 },
+    /// The player woke up after sleeping (map triggers; a bed's own triggers when slept in).
+    Sleep,
 }
 
 /// Where a trigger lives. The game only sends some events to each kind of owner (see
@@ -81,10 +85,10 @@ impl TriggerOwner {
         match (self, on) {
             // emit() / "Emit event" reach the map, its zones and its entities.
             (O::Map | O::Zone | O::Character | O::Prop | O::Pickup, T::Custom { .. }) => true,
-            (O::Map, T::MapEnter) => true,
+            (O::Map, T::MapEnter | T::Sleep) => true,
             (O::Zone, T::Enter | T::Leave | T::Interact) => true,
             (O::Character, T::Interact | T::UseItem { .. } | T::Defeat | T::HpBelow { .. }) => true,
-            (O::Prop, T::Interact | T::UseItem { .. } | T::Unlock | T::Lock) => true,
+            (O::Prop, T::Interact | T::UseItem { .. } | T::Unlock | T::Lock | T::Sleep) => true,
             (O::Pickup, T::Interact | T::UseItem { .. }) => true,
             (O::ItemUse, T::UseItem { .. }) => true,
             _ => false,
@@ -138,7 +142,8 @@ impl TriggerOn {
             | (TriggerOn::MapEnter, GameEvent::MapEnter)
             | (TriggerOn::Defeat, GameEvent::Defeat)
             | (TriggerOn::Unlock, GameEvent::Unlock)
-            | (TriggerOn::Lock, GameEvent::Lock) => true,
+            | (TriggerOn::Lock, GameEvent::Lock)
+            | (TriggerOn::Sleep, GameEvent::Sleep) => true,
             (TriggerOn::UseItem { item: want }, GameEvent::UseItem { item }) => {
                 want.is_empty() || want == item
             }
@@ -164,6 +169,7 @@ impl TriggerOn {
             TriggerOn::Unlock => "Unlocked",
             TriggerOn::Lock => "Locked again",
             TriggerOn::HpBelow { .. } => "HP below %",
+            TriggerOn::Sleep => "Woke up",
         }
     }
 
@@ -179,6 +185,7 @@ impl TriggerOn {
             TriggerOn::Unlock,
             TriggerOn::Lock,
             TriggerOn::HpBelow { percent: 50 },
+            TriggerOn::Sleep,
         ]
     }
 }
@@ -509,6 +516,9 @@ pub enum Action {
     /// The lockpicking game for a custom puzzle: 1 (picked) or 0 goes into variable `var`;
     /// blocks until it is over. `difficulty` like a lock's (the player's skill makes it easier).
     Lockpick { difficulty: u32, var: String },
+    /// The player sleeps `hours` (camping, an inn's "Rest"): the screen fades, the clock jumps,
+    /// HP and mana are restored; blocks until the player is awake again.
+    Sleep { hours: f32 },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -614,6 +624,7 @@ impl Action {
             Action::OpenCrafting { .. } => "Open crafting",
             Action::UnlockAchievement { .. } => "Unlock achievement",
             Action::Lockpick { .. } => "Lockpicking game",
+            Action::Sleep { .. } => "Sleep",
         }
     }
 
@@ -679,6 +690,7 @@ impl Action {
             Action::OpenCrafting { station: s(), title: s() },
             Action::UnlockAchievement { id: s() },
             Action::Lockpick { difficulty: 1, var: "picked".into() },
+            Action::Sleep { hours: 8.0 },
         ]
     }
 }
@@ -744,7 +756,7 @@ mod tests {
         assert!(TriggerOwner::Prop.allows(&TriggerOn::Unlock) && !TriggerOwner::Character.allows(&TriggerOn::Unlock));
         assert!(TriggerOwner::Character.allows(&TriggerOn::Defeat) && !TriggerOwner::Prop.allows(&TriggerOn::Defeat));
         assert!(!TriggerOwner::ItemUse.allows(&TriggerOn::Custom { name: "x".into() }));
-        assert_eq!(TriggerOwner::Map.templates().iter().map(|t| t.label()).collect::<Vec<_>>(), vec!["Map enter", "Custom event"]);
+        assert_eq!(TriggerOwner::Map.templates().iter().map(|t| t.label()).collect::<Vec<_>>(), vec!["Map enter", "Custom event", "Woke up"]);
         assert_eq!(TriggerOwner::Map.replacement(&TriggerOn::Enter), TriggerOn::MapEnter);
         assert_eq!(TriggerOwner::Zone.replacement(&TriggerOn::MapEnter), TriggerOn::Enter);
     }

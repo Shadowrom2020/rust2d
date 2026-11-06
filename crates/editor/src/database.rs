@@ -334,7 +334,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         lock: None,
                         default_state: default_state_name(),
                         states: vec![],
-        light: None,
+                        light: None,
+                        use_spot: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -925,9 +926,96 @@ fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
         widgets::lock_ui(ui, "prop_lock", lock, cx.refs, cx.tex, cx.assets, cx.db, Some(&prop));
     }
     ui.separator();
+    use_spot_ui(ui, d, cx);
+    ui.separator();
     ui.heading("Default triggers");
     ui.weak("Run for every placed instance, in addition to the instance's own triggers.");
     widgets::triggers_ui(ui, &format!("prop/{}", d.id), &mut d.triggers, cx.refs, rust2d_engine::events::TriggerOwner::Prop);
+}
+
+/// Furniture: where and how the player uses the prop (sits, lies, stands at it).
+fn use_spot_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
+    use rust2d_engine::defs::{Pose, UseSpot};
+    ui.heading("Furniture");
+    let mut on = d.use_spot.is_some();
+    if ui.checkbox(&mut on, "The player can use it (sit, sleep, stand at it)").changed() {
+        d.use_spot = on.then(UseSpot::default);
+    }
+    let sprite = d.sprite.clone();
+    let Some(s) = &mut d.use_spot else { return };
+    let before = s.pose;
+    ui.horizontal(|ui| {
+        ui.label("Pose");
+        for p in Pose::ALL {
+            ui.selectable_value(&mut s.pose, p, p.label());
+        }
+    });
+    if s.pose != before && s.pose == Pose::Lie {
+        s.facing = rust2d_engine::entity::Facing::Up; // a new bed: the head at the top
+    }
+    egui::Grid::new("use_spot").num_columns(2).show(ui, |ui| {
+        ui.label("Spot (px)");
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut s.offset[0]).range(-128.0..=128.0).prefix("x "));
+            ui.add(egui::DragValue::new(&mut s.offset[1]).range(-128.0..=128.0).prefix("y "));
+        })
+        .response
+        .on_hover_text("Where the user's feet go, from the prop's feet (bottom center); in a bed, so that the head lies on the pillow");
+        ui.end_row();
+        // In a bed the facing is the side the head lies on.
+        let lie = s.pose == Pose::Lie;
+        let name = |f: rust2d_engine::entity::Facing| match (lie, f) {
+            (true, rust2d_engine::entity::Facing::Up) => "Top (upright bed)",
+            (true, rust2d_engine::entity::Facing::Left) => "Left (sideways bed)",
+            (true, rust2d_engine::entity::Facing::Right) => "Right (sideways bed)",
+            (true, rust2d_engine::entity::Facing::Down) => "Bottom",
+            (false, f) => f.label(),
+        };
+        ui.label(if lie { "Head at" } else { "Facing" });
+        egui::ComboBox::from_id_salt("use_spot_facing").selected_text(name(s.facing)).width(150.0).show_ui(ui, |ui| {
+            for f in rust2d_engine::entity::Facing::ALL {
+                ui.selectable_value(&mut s.facing, f, name(f));
+            }
+        });
+        ui.end_row();
+        if s.pose == Pose::Lie {
+            ui.label("Sleep until");
+            ui.add(egui::DragValue::new(&mut s.sleep_until).range(0.0..=23.75).speed(0.25).custom_formatter(|h, _| rust2d_engine::entity::hour_text(h as f32)));
+            ui.end_row();
+        }
+    });
+    // Preview: the prop with the spot (a dot at the feet, a line the way the user looks).
+    let size = cx.assets.sprite_size(&sprite, 32.0);
+    let k = 2.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size.x * k + 40.0, size.y * k + 40.0), egui::Sense::hover());
+    let r = egui::Rect::from_min_size(rect.min + egui::vec2(20.0, 20.0), egui::vec2(size.x * k, size.y * k));
+    ui.painter().rect_filled(rect, 2.0, egui::Color32::from_gray(30));
+    widgets::paint_sprite(ui, cx.tex, cx.assets, &sprite, r);
+    let feet = egui::pos2(r.center().x, r.bottom());
+    let spot = feet + egui::vec2(s.offset[0], s.offset[1]) * k;
+    let (dx, dy) = s.facing.dir();
+    ui.painter().circle_filled(spot, 4.0, egui::Color32::from_rgb(255, 200, 60));
+    ui.painter().line_segment([spot, spot + egui::vec2(dx, dy) * 14.0], egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 200, 60)));
+    if s.pose == Pose::Lie {
+        ui.label("Cover (drawn over the sleeper, e.g. the blanket; same size as the bed)");
+        widgets::sprite_field(ui, "use_spot_cover", &mut s.cover, cx.tex, cx.assets, cx.db, true);
+    } else if s.pose == Pose::Sit {
+        ui.label("Cover (drawn over the sitter, e.g. the backrest of a chair facing away; same size as the chair; optional)");
+        widgets::sprite_field(ui, "use_spot_cover", &mut s.cover, cx.tex, cx.assets, cx.db, true);
+    }
+    ui.label("Only usable when");
+    widgets::conditions_ui(ui, &format!("use_spot/{}", d.id), &mut s.conditions, cx.refs);
+    if !s.conditions.is_empty() {
+        ui.horizontal(|ui| {
+            ui.label("Otherwise");
+            ui.add(egui::TextEdit::singleline(&mut s.refuse_text).hint_text("You can't use that now.").desired_width(260.0));
+        });
+    }
+    ui.weak(match s.pose {
+        Pose::Sit => "Interacting sits down (when the prop's own triggers did nothing), facing the chosen way (one prop per direction, e.g. chairs around a table); HP and mana come back faster while sitting. Moving, attacking or E stands up.",
+        Pose::Lie => "Interacting asks \"Sleep until …?\": the night passes (HP and mana restored, effects worn off, enemies respawned, scheduled characters moved on), the bed's and the map's 'Woke up' triggers run, the game autosaves. Not with enemies nearby.",
+        Pose::Stand => "Interacting steps up to it and faces it (counters, anvils, desks).",
+    });
 }
 
 /// The prop's states in one place: name, sprite, whether it blocks movement.

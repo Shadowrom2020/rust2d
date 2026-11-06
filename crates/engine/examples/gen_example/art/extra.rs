@@ -1455,6 +1455,7 @@ fn props(x: &mut Extras) {
         default_state: default_state_name(),
         states: vec![],
         light: None,
+        use_spot: None,
     };
     let with = |mut d: PropDef, default: &str, states: Vec<PropState>| {
         d.default_state = default.into();

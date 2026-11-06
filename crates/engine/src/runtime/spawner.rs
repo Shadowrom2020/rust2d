@@ -24,6 +24,13 @@ pub(super) struct SpawnerRt {
 }
 
 impl Game {
+    /// Time passed (sleeping): every defeated character waiting to respawn comes back now.
+    pub(super) fn spawners_catch_up(&mut self) {
+        for sp in &mut self.spawners {
+            sp.timers.fill(0.0);
+        }
+    }
+
     /// Is the spawner zone `zone` of map `map` switched off (`SetSpawners`)?
     fn spawner_off(&self, map: &str, zone: &str) -> bool {
         self.world.spawners_off.get(map).is_some_and(|s| s.contains("") || s.contains(zone))

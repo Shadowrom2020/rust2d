@@ -589,6 +589,68 @@ pub struct PropDef {
     /// Light of the default state (e.g. a lit lamp).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<LightSpec>,
+    /// Furniture: where and how a character uses it (sits, lies, stands at it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_spot: Option<UseSpot>,
+}
+
+/// How a character uses a piece of furniture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Pose {
+    /// Chairs, benches: a short rest.
+    #[default]
+    Sit,
+    /// Beds: sleeping skips time.
+    Lie,
+    /// Counters, anvils, desks: only facing it.
+    Stand,
+}
+
+impl Pose {
+    pub const ALL: [Pose; 3] = [Pose::Sit, Pose::Lie, Pose::Stand];
+    pub fn label(self) -> &'static str {
+        match self {
+            Pose::Sit => "Sit",
+            Pose::Lie => "Lie (bed)",
+            Pose::Stand => "Stand",
+        }
+    }
+}
+
+/// The spot of a piece of furniture: where the user's feet go (relative to the prop's feet,
+/// pixels) and how they are posed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UseSpot {
+    #[serde(default)]
+    pub pose: Pose,
+    #[serde(default)]
+    pub offset: [f32; 2],
+    /// The way the user looks (chairs: any of the four). In a bed: the side the head is on
+    /// (Up = at the top, an upright bed; Left / Right = a sideways bed; Down = at the bottom).
+    #[serde(default)]
+    pub facing: crate::entity::Facing,
+    /// Beds: the hour sleeping lasts until.
+    #[serde(default = "default_wake")]
+    pub sleep_until: f32,
+    /// Drawn over the user while it is used (a bed's blanket); empty sheet = nothing.
+    #[serde(default)]
+    pub cover: SpriteRef,
+    /// The furniture can only be used when these hold (a paid inn room)...
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<crate::events::Condition>,
+    /// ...else this is shown ("" = "You can't use that now.").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub refuse_text: String,
+}
+
+fn default_wake() -> f32 {
+    7.0
+}
+
+impl Default for UseSpot {
+    fn default() -> Self {
+        UseSpot { pose: Pose::Sit, offset: [0.0, 0.0], facing: Default::default(), sleep_until: default_wake(), cover: SpriteRef::default(), conditions: Vec::new(), refuse_text: String::new() }
+    }
 }
 
 /// A named look of a prop: its sprite and whether it blocks movement.
@@ -1270,5 +1332,20 @@ mod tests {
         assert_eq!(a.frame_at(1.5), 3);
         let still = TileAnim { tile: 3, frames: vec![], fps: 2.0 };
         assert_eq!(still.frame_at(9.0), 3);
+    }
+}
+
+#[cfg(test)]
+mod furniture_tests {
+    use super::*;
+
+    #[test]
+    fn use_spots_in_ron() {
+        // Props from before furniture have none; a minimal spot gets the defaults.
+        let p: PropDef = ron::from_str("(id: \"bed\", name: \"Bed\", sprite: (sheet: \"props\", frame: 0))").unwrap();
+        assert!(p.use_spot.is_none());
+        let s: UseSpot = ron::from_str("(pose: Lie)").unwrap();
+        assert_eq!((s.pose, s.sleep_until, s.cover.sheet.as_str()), (Pose::Lie, 7.0, ""));
+        assert!(!ron::to_string(&p).unwrap().contains("use_spot"));
     }
 }

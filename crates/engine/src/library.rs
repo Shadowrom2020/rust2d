@@ -1013,7 +1013,8 @@ mod tests {
             lock: None,
             default_state: default_state_name(),
             states: vec![],
-        light: None,
+            light: None,
+            use_spot: None,
         });
         let mut b = Bundle::collect(&db, &root, 16, "x", &all_assets(&db)).unwrap();
         b.rescale(32).unwrap();
