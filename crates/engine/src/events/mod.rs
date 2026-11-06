@@ -506,6 +506,9 @@ pub enum Action {
     OpenCrafting { station: String, title: String },
     /// Unlocks an achievement (the player's, kept across save games).
     UnlockAchievement { id: String },
+    /// The lockpicking game for a custom puzzle: 1 (picked) or 0 goes into variable `var`;
+    /// blocks until it is over. `difficulty` like a lock's (the player's skill makes it easier).
+    Lockpick { difficulty: u32, var: String },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -610,6 +613,7 @@ impl Action {
             Action::Companion { .. } => "Companion",
             Action::OpenCrafting { .. } => "Open crafting",
             Action::UnlockAchievement { .. } => "Unlock achievement",
+            Action::Lockpick { .. } => "Lockpicking game",
         }
     }
 
@@ -674,6 +678,7 @@ impl Action {
             Action::Companion { target: "self".into(), join: true },
             Action::OpenCrafting { station: s(), title: s() },
             Action::UnlockAchievement { id: s() },
+            Action::Lockpick { difficulty: 1, var: "picked".into() },
         ]
     }
 }

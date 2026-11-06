@@ -640,6 +640,66 @@
         value: 20,
     ),
     (
+        id: "fishing_rod",
+        name: "Fishing Rod",
+        description: "A tool: stand at the pond\'s edge and press E to cast.",
+        icon: (
+            sheet: "items",
+            frame: 37,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 1,
+        value: 0,
+        held: "held_rod",
+        tool: "fishing rod",
+    ),
+    (
+        id: "trout",
+        name: "Trout",
+        description: "A fresh trout. Eating it restores a heart.",
+        icon: (
+            sheet: "items",
+            frame: 38,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 2,
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 0,
+    ),
+    (
+        id: "old_boot",
+        name: "Old Boot",
+        description: "Soggy. Nobody wants it - except perhaps a merchant who buys anything.",
+        icon: (
+            sheet: "items",
+            frame: 39,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 5,
+        value: 0,
+    ),
+    (
         id: "herb",
         name: "Healing Herb",
         description: "A fragrant herb. Brewed into potions at an alchemy table.",

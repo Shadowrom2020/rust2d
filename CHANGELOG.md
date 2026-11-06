@@ -48,6 +48,22 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   menu) and are listed on a new *Achievements* page of the title and pause menus with their
   dates and a *Reset*. Example: six achievements, one of them hidden. Game `status` prints
   `achievements=`.
+- **Minigames**: picking a lock is a short game now (three pins: press while the marker is in
+  the green spot; harder locks have smaller spots and faster markers, the Lockpick skill — level 1 or more — eases
+  them, three misses and it holds); experts still pick at once, and the key is used when the
+  player has it. The **Lockpicking game** action / `lockpick(difficulty, var)` plays it for
+  any puzzle. **Fishing** spots (a new zone kind over the water, with the item needed and a catch table;
+  fish shadows glide through it): facing it from the shore, cast, wait for the bite, strike,
+  reel in without snapping the line. Example: a Fishing Rod at
+  Tilda's, Trout and Old Boot, the village pond as a fishing spot. Game `status` prints
+  `minigame=`; autoplay `minigame hit|miss|bite` presses at the right (or wrong) moment.
+- **Tool slot**: a sixth equipment slot for tools. Items get a *Tool kind* (*Database › Items ›
+  Equipment: Tool*; `ItemDef.tool`, `Equipment.tool`, both optional in older files) and go into
+  it; activities ask for them, and the character holds the tool's *Held sprite* in the right
+  hand while using it. Fishing puts the rod into the Tool slot by itself if it is in the bag and
+  shows it in the hand with the line leaving its tip (example: `held_rod`). `unequip(target,
+  "tool")`.
+- **Changed:** picking a lock you have the key for uses the key (it used to pick it).
 - **Changed:** the player's attacks (melee, arrows, spells, clicking to attack) only hit hostile
   characters. Friendly characters with HP (companions, the guard) can't be hurt by the player;
   make a huntable animal hostile with 0 damage.

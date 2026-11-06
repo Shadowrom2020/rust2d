@@ -273,6 +273,7 @@ pub fn rename_in_map(map: &mut Map, kind: RefKind, old: &str, new: &str) -> usiz
         match &mut z.kind {
             ZoneKind::Portal { target_map, .. } | ZoneKind::Transition { target_map, .. } => r.fix(RefKind::Map, target_map),
             ZoneKind::Spawner { character, .. } => r.fix(RefKind::Character, character),
+            ZoneKind::FishingSpot { rod } => r.fix(RefKind::Item, rod),
             _ => {}
         }
         r.triggers(&mut z.triggers);
@@ -472,6 +473,7 @@ mod tests {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),

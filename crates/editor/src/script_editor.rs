@@ -115,7 +115,7 @@ pub const API: &[ApiFn] = api! {
     "light_at"(x: Num, y: Num, radius: Num, seconds: Num, options: Opts) "Like light_at(); options #{ color: [r, g, b], flicker: true } (queued)";
     "heal_area"(x: Num, y: Num, radius: Num, amount: Num) "Heals the player and friendly characters within radius tiles of tile x, y (queued)";
     "equip"(target: Target, item: Item) "Puts an item into its slot on a character (clothing, armor, weapon, left hand); what it wore there is carried instead. The player takes it from the inventory (queued)";
-    "unequip"(target: Target, slot: Text) "Takes off what a character wears in \"clothing\", \"head\", \"body\", \"weapon\" or \"offhand\" (into its carried items) (queued)";
+    "unequip"(target: Target, slot: Text) "Takes off what a character wears in \"clothing\", \"head\", \"body\", \"weapon\", \"offhand\" or \"tool\" (into its carried items) (queued)";
     "give_item_to"(target: Target, item: Item, count: Num) "Adds items to what a character carries (dropped when it is defeated) (queued)";
     "take_item_from"(target: Target, item: Item, count: Num) "Takes items from what a character carries (queued)";
     "hide_ui"() "Hides the HUD (status frame, clock, quick bar, buttons), e.g. for a cut-scene; dialogs still show. The player shows it again with H (queued)";
@@ -164,6 +164,7 @@ pub const API: &[ApiFn] = api! {
     "patrol"(target: Target) "Starts a character's own patrol route (queued)";
     "patrol"(target: Target, points: List) "Patrols [[x, y], ...] tile waypoints (queued)";
     "stop_patrol"(target: Target) "Stops a character's patrol (queued)";
+    "lockpick"(difficulty: Num, var: Var) "Plays the lockpicking game; 1 (picked) or 0 goes into the variable (queued, blocks)";
     "unlock_achievement"(id: Achievement) "Unlocks an achievement for the player (queued; kept across save games)";
     "achievement_unlocked"(id: Achievement) "Whether the player has unlocked an achievement";
     "open_crafting"(station: Station) "Opens the crafting window with the station's recipes (queued)";

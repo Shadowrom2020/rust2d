@@ -184,6 +184,8 @@ struct Autoplay {
     skill_cmds: Vec<(String, String)>,
     /// `console LINE`: applied by the main loop.
     console: Vec<String>,
+    /// `minigame hit|miss|bite`: waiting for that moment (probe name, seconds left), then E.
+    until: Option<(&'static str, f32)>,
 }
 
 impl Autoplay {
@@ -193,7 +195,7 @@ impl Autoplay {
             .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .filter(|c| !c.is_empty())
             .collect();
-        Autoplay { cmds, timer: 0.0, held: Vec::new(), held_pad: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new(), console: Vec::new() }
+        Autoplay { cmds, timer: 0.0, held: Vec::new(), held_pad: Vec::new(), shot: None, mouse: None, mouse_frames: Default::default(), close: false, hour: None, skill_cmds: Vec::new(), console: Vec::new(), until: None }
     }
 
     /// Advances the script; returns false to quit.
@@ -213,6 +215,21 @@ impl Autoplay {
             frames.push_back(MouseInject { pos: p, released: vec![b], ..Default::default() });
             frames.push_back(MouseInject { pos: p, ..Default::default() });
         };
+        if let Some((probe, left)) = &mut self.until {
+            if game.minigame_probe(probe) {
+                self.until = None;
+                inject(&[KeyCode::E], &[KeyCode::E]);
+                self.timer = 0.1;
+                return true;
+            }
+            *left -= get_frame_time();
+            if *left <= 0.0 {
+                println!("[autoplay] minigame: '{probe}' never came");
+                self.until = None;
+            }
+            inject(&[], &[]);
+            return true;
+        }
         if self.timer > 0.0 {
             self.timer -= get_frame_time();
             inject(&self.held, &[]);
@@ -311,6 +328,17 @@ impl Autoplay {
                         continue;
                     };
                     click(&mut self.mouse_frames, p, MouseButton::Left);
+                    return true;
+                }
+                // minigame hit|miss|bite: press E when the lockpick marker is in the sweet spot
+                // (hit) / well outside it (miss), or when a fish bites (bite); waits up to 8 s
+                "minigame" => {
+                    let probe = match arg(1) {
+                        "hit" => "in_spot",
+                        "miss" => "out_spot",
+                        _ => "bite",
+                    };
+                    self.until = Some((probe, 8.0));
                     return true;
                 }
                 // craft K: click the Make button of recipe row K in the crafting window

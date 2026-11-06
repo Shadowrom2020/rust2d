@@ -287,7 +287,7 @@ achievements* → confirm → `achievements=[]`, the file is gone, Esc back to t
 editor's Achievements tab (screenshot). Not checked by script: the mine chest's Unlock trigger
 (needs Lockpicking 2) and the Unlock achievement action's editor fields (compile-checked).
 
-### [ ] Minigames: lockpicking and fishing — `feature/minigames`
+### [x] Minigames: lockpicking and fishing — `feature/minigames`
 
 **Goal.** Picking a lock becomes a short skill game instead of an instant check, and water
 spots can be fished for items; both are small, keyboard / gamepad playable, pausing the world.
@@ -316,6 +316,29 @@ spots can be fished for items; both are small, keyboard / gamepad playable, paus
 - The player faces the water (`Facing` from the zone centre); fishing shows the rod `held`
   sheet if the rod item has one.
 
+**Decided while building.** Who plays: `pick_difficulty > 0`, skills on, no key at hand,
+Lockpick level ≥ max(1, difficulty − 1) (`min_pick_level`: no picking without the skill, the user's call; the roadmap's "skill 0 tries difficulty 1" was dropped); level ≥ difficulty + 2 picks at once (games without the skill
+system can't pick, as before; a player who has the key uses it). The level gap −1…3 sets the
+spot's half width (0.17 … 0.05 of the bar) and the marker speed (0.55 … 1.95 bars/s). The
+minigame runs right after the creator in `update` (early return, so Esc gives up instead of
+opening the menu); `blocked()` waits for it (the *Lockpick* action). Winning a lock fires
+Unlock, Interact and opens the container. Fishing: a `FishingSpot` zone covers the water (not the shore): Interact casts when one of
+the three tiles straight ahead belongs to it (`fishing_target`; facing grass does nothing), the
+bobber lands two tiles out or on the farthest spot tile closer than that; the player keeps
+their facing; fish shadows (`render::fish::draw_shadows`, a pure function of the time: 1–4
+fish per spot, each showing for part of a 7–11 s cycle at a new place) mark spots in the game
+and the editor;
+the bobber lands 2 tiles ahead. A new **Tool** equipment slot (`EquipSlot::Tool`, appended;
+`ItemDef.tool` = the tool kind, `Equipment.tool`) holds the rod: a fishing spot's item is taken
+from the Tool slot (moved there from the bag if needed), and while fishing the player is drawn
+with the tool in the right hand instead of the weapon (`player_equipment_drawn`), the line
+leaving the rod's tip (`rod_tip`: fixed offsets of the idle frame in the 32 x 48 layout that
+the example's `held_rod` follows); the catch is one weighted entry of the zone's loot table
+(`pick_catch`). Timings: bite after 1–4 s, 0.6 s to strike, reeling 0.3 / s while the tension
+stays under 0.9, the fish pulls in waves, the line snaps at full tension, 10 s to land it. A
+fixed seed under `RUST2D_AUTOPLAY` keeps the spots and waits the same in tests, and the
+autoplay `minigame hit|miss|bite` command presses at the right (or wrong) moment.
+
 **Touch points.** `runtime/minigame.rs` (new), `runtime/{mod,locks,input}.rs`, `map/transition.rs`
 (`ZoneKind`), `events/mod.rs`, `script.rs`, editor `widgets.rs` (zone kind UI),
 `script_editor.rs`, gen_example (rod + fish items, icons, a pond spot), README, scripting.md.
@@ -324,11 +347,21 @@ spots can be fished for items; both are small, keyboard / gamepad playable, paus
 a fishing spot on the village pond's sand rim (x 5–15, y 24) with a loot table; the forest
 chest (difficulty 1) and the mine chest (difficulty 2) use the lockpicking game.
 
-**Verify.** Autoplay: at the forest chest with Lockpicking 1, `press e` opens the game
-(`minigame=lockpick`), timed `press e` presses succeed (the marker speed is deterministic for
-tests: `RUST2D_AUTOPLAY` seeds it), the chest opens; three misses leave it locked. Fishing:
-stand in the spot, `press e`, wait, `press e` on the bite (status shows `bite`), hold / release,
-`status` inventory shows a trout; without a rod a toast says what is needed. Screenshots of both.
+**Verify (done).** Autoplay on a scratch copy with crafted saves: at the forest chest with
+Lockpicking 1, `press e` → `minigame=lockpick:pin=0/3…` (screenshot), `minigame hit` ×3 (one
+`miss` in between) → done(true), the chest opens with its loot window (screenshot); three
+`minigame miss` → done(false), the lock holds; with Lockpicking 0 the chest only shows its
+locked text (screenshot). At the pond's rim facing up or left (grass): nothing
+happens; facing the water without a rod: "You need a Fishing Rod to fish here."; with one,
+facing down: `fishing:wait` (bobber screenshot), `minigame bite` →
+`reel`, holding E in bursts lands it: `inv` gains a trout; the rod in the bag moves into the
+Tool slot ("Equipped Fishing Rod", `equip=[…, "fishing_rod"]`) and is drawn in the hand in all
+four facings with the line from its tip (screenshots), the character sheet shows the Tool slot; the bobber lands on the water
+(screenshot); fish shadows in six screenshots a second apart and in the editor; holding E for 3 s snaps the line (no
+catch). `lockpick(2, "vault")` from the console → three hits → `vault=1`; `lockpick(1, "door")`
+and Esc → `door=0`, no pause menu. Unit test: weighted catches. Not checked by script: the mine
+chest (difficulty 2), the editor's Fishing spot fields and catch table, the Lockpicking game
+action fields (compile-checked).
 
 ### [ ] Swimming and ladders — `feature/swim-climb`
 
@@ -612,6 +645,38 @@ Options row *Language*; the editor exports a translation template. Large but mec
     into the companion tab), poison him below 40 % → he drinks it (`companions=` HP rises,
     inventory shrinks, toast); equip a bow on him → he shoots and his arrows run down; save /
     load keeps his bag; screenshot of the tab.
+- **NPC routines: visible activities** (only visual; builds on *NPC schedules*, the Tool slot of
+  *Minigames* and the held sprites): characters are seen fishing at the pond, hoeing a field,
+  hammering at an anvil, chopping wood, sweeping, reading — without producing anything.
+  - *Data*: `Activity { kind: ActivityKind, tool: String /* item id, "" = the kind's default or
+    none */, facing: Option<Facing> }` with `ActivityKind { Fish, Farm, Craft, Chop, Mine, Sweep,
+    Read, Custom { sheet: String } }` (appended later as needed); on a schedule stop
+    (`ScheduleStop.activity: Option<Activity>`, serde default) and on a placed character that
+    does it all day (`EntityInstance.activity`, in the map's RON `Meta` like the schedule).
+    The editor gets an *Activity* combo (+ tool item, facing) in the Daily schedule rows and in
+    the inspector of a placed character.
+  - *Looks*: while doing it, the character stands at its spot facing the activity and is drawn
+    with the tool from its Tool slot (or the activity's item) in the right hand, like the
+    player's rod (`player_equipment_drawn` generalised to any character). A work cycle replaces
+    the idle frame: the walk frames played slowly in place for arm movement, plus small
+    per-activity effects drawn by a pure function of time like the fish shadows — *Fish*: line
+    and bobber on the water in front (the same drawing as the player's, with an occasional
+    splash and a fish lifted out now and then); *Farm*: a hoe swing every ~1.5 s with soil
+    specks; *Craft*: a hammer stroke with sparks and the anvil `hit` sound when the player is
+    near; *Chop* / *Mine*: chips of wood / stone; *Sweep*: dust puffs; *Read*: a book held,
+    pages turning; *Custom*: a character-layout sheet of the creator's played instead (its own
+    4 frames per facing). Sounds only within a few tiles and at the effects volume.
+  - *Behaviour*: talking to a working character pauses the activity (it turns to the player,
+    then goes back to work); a schedule moves it on at the next stop as today; nothing is
+    saved (it's derived from the stop or instance). Optional later: activities that do produce
+    something (the fishing NPC sells fresh trout at the market stall the next morning) via a
+    trigger on the activity's end.
+  - *Example*: Tomas fishes at the big pond in the afternoon instead of standing there,
+    a farmer hoes the garden behind Tilda's shop (with *Farming*: the plots), the blacksmith of
+    *Blacksmithing* hammers at the anvil by day, the elder reads by the well.
+  - *Verify*: `settime 16` → Tomas at his stop with `activity=fish` in `schedule=` status and
+    the rod in his hand (screenshot), the bobber on the water; talking to him turns him to the
+    player and back; the editor rows show and change the activity (screenshot).
 - **Gathering and trades** (four ideas building on *Crafting*; suggested order: mining →
   blacksmithing, farming → cooking). Shared groundwork, done with the first of them:
   - *Tools*: `ItemDef.tool: String` (serde default; "pickaxe", "hammer", "hoe", "knife", …)
