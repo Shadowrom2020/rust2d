@@ -153,6 +153,7 @@ fn intro_cutscene() {
     wait(0.4);
     approach("guard", "player");
     say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("{player}", "I came as fast as I could. What is going on?");
     say("Guard", "Something is not right in Whisperwood, east of town. Strange lights flicker between the trees at night, and the slimes grow bolder every day.");
     say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well in the middle of town.");
     wait(0.3);

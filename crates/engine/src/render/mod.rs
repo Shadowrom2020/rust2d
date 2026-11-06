@@ -264,6 +264,16 @@ impl Assets {
     }
 
     /// Like [`draw_frame_colored`](Self::draw_frame_colored), scaled into `dest` (portraits).
+    /// Draws part of a frame (`part`: fractions of the frame, e.g. the top half) into `dest`
+    /// (portraits: head and shoulders).
+    pub fn draw_frame_part_in(&self, sheet: &str, frame: u32, part: Rect, dest: Rect, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
+        let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
+        let r = s.src_rect(frame);
+        let src = Rect::new(r.x + part.x * r.w, r.y + part.y * r.h, part.w * r.w, part.h * r.h);
+        draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { source: Some(src), dest_size: Some(dest.size()), ..Default::default() });
+        true
+    }
+
     pub fn draw_frame_colored_in(&self, sheet: &str, frame: u32, dest: Rect, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
         let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
         draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { source: Some(s.src_rect(frame)), dest_size: Some(dest.size()), ..Default::default() });

@@ -63,6 +63,11 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   hand while using it. Fishing puts the rod into the Tool slot by itself if it is in the bag and
   shows it in the hand with the line leaving its tip (example: `held_rod`). `unequip(target,
   "tool")`.
+- **Dialog portraits**: dialogs and choices show the speaker's head and shoulders, drawn from
+  their layered model; the speaker is found from the speaker name (`{player}`, `{self}`, a
+  character on the map or a definition whose name fits). *Database › Project › Dialog
+  portraits* (`ProjectConfig::dialog_portraits`, on by default) turns them off. The example's
+  intro has a line of the hero's.
 - **Changed:** picking a lock you have the key for uses the key (it used to pick it).
 - **Changed:** the player's attacks (melee, arrows, spells, clicking to attack) only hit hostile
   characters. Friendly characters with HP (companions, the guard) can't be hurt by the player;

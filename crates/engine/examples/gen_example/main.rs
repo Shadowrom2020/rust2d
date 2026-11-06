@@ -1719,6 +1719,7 @@ fn intro_cutscene() {
     wait(0.4);
     approach("guard", "player");
     say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("{player}", "I came as fast as I could. What is going on?");
     say("Guard", "Something is not right in Whisperwood, east of town. Strange lights flicker between the trees at night, and the slimes grow bolder every day.");
     say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well in the middle of town.");
     wait(0.3);
@@ -1945,6 +1946,8 @@ fn main() {
         skills: rust2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
         // Experience and levels: a few levels over the example's quests and fights.
         progression: rust2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
+        // Dialog boxes show the speaker's portrait (found from the speaker's name).
+        dialog_portraits: true,
         },
         db: database(),
     };

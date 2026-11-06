@@ -1718,6 +1718,10 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         let ids: Vec<String> = ed.project.db.characters.iter().map(|d| d.id.clone()).collect();
         widgets::suggest(ui, "player", &mut c.player, &ids, 140.0);
         ui.end_row();
+        ui.label("Dialog portraits");
+        ui.checkbox(&mut c.dialog_portraits, "show the speaker's portrait in dialogs")
+            .on_hover_text("Found from the speaker's name: the player (\"{player}\" or the player's name), the trigger's owner ({self}), a character on the map or a character definition with that name. Narration and signs (no matching character) have none.");
+        ui.end_row();
     });
     ui.weak("Tile size changes need a restart of the editor.");
     ui.separator();

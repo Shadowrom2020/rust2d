@@ -7,6 +7,8 @@ use crate::render::wrap_text;
 use crate::state::WorldState;
 
 struct Dialog {
+    /// Room for the speaker's portrait at the left (the game draws it into `portrait_rect`).
+    portrait: bool,
     speaker: String,
     text: String,
     revealed: f32,
@@ -19,6 +21,8 @@ pub struct Ui {
     toasts: Vec<(String, f32)>,
     /// Choice option areas, recorded while drawing the previous frame.
     choice_rects: Vec<Rect>,
+    /// Where the open dialog's portrait goes (set while drawing).
+    pub portrait_rect: Option<Rect>,
     /// Dialog text speed from the player's options (set every frame; 0 = instant).
     pub text_speed: f32,
 }
@@ -43,11 +47,19 @@ impl Ui {
     }
 
     pub fn show_dialog(&mut self, speaker: &str, text: &str) {
-        self.dialog = Some(Dialog { speaker: speaker.into(), text: text.into(), revealed: 0.0, choice: None });
+        self.dialog = Some(Dialog { portrait: false, speaker: speaker.into(), text: text.into(), revealed: 0.0, choice: None });
+    }
+
+    /// The open dialog gets a portrait (call right after `show_dialog` / `show_choice`).
+    pub fn with_portrait(&mut self) {
+        if let Some(d) = &mut self.dialog {
+            d.portrait = true;
+        }
     }
 
     pub fn show_choice(&mut self, speaker: &str, text: &str, options: &[String], var: &str) {
         self.dialog = Some(Dialog {
+            portrait: false,
             speaker: speaker.into(),
             text: text.into(),
             revealed: 0.0,
@@ -129,16 +141,28 @@ impl Ui {
     pub fn draw_dialog(&mut self) {
         let (sw, sh) = (screen_width(), screen_height());
         self.choice_rects.clear();
+        self.portrait_rect = None;
 
         if let Some(d) = &self.dialog {
             let margin = 16.0;
             let w = (sw - margin * 2.0).min(900.0);
             let x = (sw - w) / 2.0;
+            // A portrait takes a square at the left; the text moves right of it.
+            const PORTRAIT: f32 = 120.0;
+            let inset = if d.portrait { PORTRAIT + 18.0 } else { 0.0 };
             let choice_rows = d.choice.as_ref().map_or(0, |c| c.0.len()) as f32;
-            let lines = wrap_text(&d.text, FONT, w - 40.0);
-            let h = 56.0 + lines.len().max(2) as f32 * 30.0 + choice_rows * 30.0;
+            let lines = wrap_text(&d.text, FONT, w - 40.0 - inset);
+            let mut h = 56.0 + lines.len().max(2) as f32 * 30.0 + choice_rows * 30.0;
+            if d.portrait {
+                h = h.max(PORTRAIT + 28.0);
+            }
             let y = sh - h - margin;
             panel(x, y, w, h);
+            if d.portrait {
+                self.portrait_rect = Some(Rect::new(x + 14.0, y + 14.0, PORTRAIT, PORTRAIT));
+            }
+            let x = x + inset;
+            let w = w - inset;
             let mut ty = y + 34.0;
             if !d.speaker.is_empty() {
                 draw_text(&d.speaker, x + 20.0, ty, 28.0, GOLD);
