@@ -70,6 +70,8 @@ impl Game {
             eprintln!("[fx] effect: unknown sprite sheet '{}'", sprite.sheet);
         }
         let pos = tile * self.ts();
+        // Explosions and the like can shake the screen (a bit harder than a hit).
+        self.shake_screen(sprite.shake, 1.3);
         self.fx.push(Fx { sprite, pos, age: 0.0, kind: FxKind::Once });
     }
 

@@ -11,7 +11,7 @@ use crate::settings::{Settings, TEXT_SPEEDS, ZOOMS};
 
 const W: f32 = 520.0;
 const ROW_H: f32 = 40.0;
-const MAX_ROWS: usize = 10;
+const MAX_ROWS: usize = 11;
 const MAX_NAME: usize = 32;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,13 +48,15 @@ enum Opt {
     Music,
     Effects,
     TextSpeed,
+    /// Screen shake and the hurt flash.
+    ScreenEffects,
     /// Opens the Controls page.
     Controls,
     Reset,
     Back,
 }
 
-const OPTS: [Opt; 10] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::TextSpeed, Opt::Controls, Opt::Reset, Opt::Back];
+const OPTS: [Opt; 11] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::TextSpeed, Opt::ScreenEffects, Opt::Controls, Opt::Reset, Opt::Back];
 
 struct SaveInfo {
     slot: String,
@@ -464,6 +466,7 @@ impl Game {
             Opt::Music => "Music volume",
             Opt::Effects => "Effects volume",
             Opt::TextSpeed => "Text speed",
+            Opt::ScreenEffects => "Shake & flash",
             Opt::Controls => "Controls...",
             Opt::Reset => "Reset to defaults",
             Opt::Back => "Back",
@@ -478,6 +481,7 @@ impl Game {
             Opt::Fullscreen => on(s.fullscreen),
             Opt::Zoom => pct(s.zoom),
             Opt::ShowFps => on(s.show_fps),
+            Opt::ScreenEffects => on(s.screen_effects),
             Opt::Master => pct(s.master_volume),
             Opt::Music => pct(s.music_volume),
             Opt::Effects => pct(s.effects_volume),
@@ -499,6 +503,7 @@ impl Game {
         match o {
             Opt::Fullscreen => s.fullscreen = !s.fullscreen,
             Opt::ShowFps => s.show_fps = !s.show_fps,
+            Opt::ScreenEffects => s.screen_effects = !s.screen_effects,
             Opt::Zoom => s.zoom = step(&ZOOMS, s.zoom),
             Opt::Master => s.master_volume = step(&VOLUMES, s.master_volume),
             Opt::Music => s.music_volume = step(&VOLUMES, s.music_volume),

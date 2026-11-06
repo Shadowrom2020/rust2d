@@ -46,6 +46,10 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   another action where both are used show in orange with the clash named. Saved per game in
   `settings.ron` (only the changed actions); the Options page's own reset keeps the keys. Escape,
   F3 and the gamepad buttons stay fixed.
+- **Screen shake and hit flash**: a hurt player gets a short camera shake and a red flash;
+  explosions shake the screen (`shake` option of `effect()` and the *Effect* action; the example's
+  Fireball uses it); scenes shake it with `shake(seconds[, strength])` or the new *Shake the
+  screen* action. *Options › Shake & flash* switches both off (accessibility).
 
 ### Fixes
 - Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage

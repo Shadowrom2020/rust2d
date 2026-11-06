@@ -282,7 +282,7 @@ so the default C / Space on both *Character* and *Map: center* is fine. `status(
 **Verify.** `opt` commands rebind *Attack* to another key, `press` the new key attacks; the
 setting survives a restart (settings file in the scratch settings dir).
 
-### [ ] Screen shake and damage flash — `feature/juice`
+### [x] Screen shake and damage flash — `feature/juice`
 
 **Goal.** Hits feel like hits: a short camera shake and a red flash when the player is hurt,
 shake on explosions; usable from scripts for scenes; switchable off (accessibility).
@@ -291,6 +291,13 @@ shake on explosions; usable from scripts for scenes; switchable off (accessibili
 target by a decaying random vector; the flash is a red rectangle drawn next to the fade overlay
 in `draw()`. Options row *Screen shake* (on/off). Script `shake(seconds)` / `Action::Shake`
 (appended), used by `effect()` with a `shake` option. `status()`: `shake=`.
+
+**Decided while building.** One player option covers both, *Shake & flash* (`Settings.screen_effects`,
+default on), since both bother the same players. State in `runtime/juice.rs`; a shake fades out
+over its duration with a new random direction each frame, strength 1 = 3 art pixels; a stronger
+shake replaces a weaker one. Effects shake with strength 1.3 (`FxSprite.shake` = seconds, only
+offered for *Effect*, not *Fly*). Poison and burning don't shake or flash (they tick too often).
+`Action::Shake { seconds, strength }`; the Options menu shows eleven rows.
 
 **Verify.** Two screenshots 50 ms apart after a hit differ in camera offset; flash visible;
 `opt` turns shake off and the offset stays 0.

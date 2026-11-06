@@ -233,6 +233,9 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("hp_of", with!(ctx, |c, uid: i64| c.characters.iter().find(|ch| ch.0 as i64 == uid).map_or(-1, |ch| ch.2 as i64)));
     // Bestiary: how many characters of a definition the player has defeated.
     engine.register_fn("defeated_count", with!(ctx, |c, id: &str| c.world.defeated(id) as i64));
+    // Screen shake (scenes: earthquakes, a boss landing).
+    engine.register_fn("shake", with!(ctx, |c, s: Dynamic| c.actions.push(Action::Shake { seconds: num(&s), strength: 1.0 })));
+    engine.register_fn("shake", with!(ctx, |c, s: Dynamic, st: Dynamic| c.actions.push(Action::Shake { seconds: num(&s), strength: num(&st) })));
     // Status effects.
     engine.register_fn("apply_effect", with!(ctx, |c, t: &str, kind: &str, s: Dynamic, secs: Dynamic| {
         if let Some(k) = effect_kind(kind) {
@@ -441,6 +444,7 @@ fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
     s.fps = opt("fps").unwrap_or(s.fps).max(0.1);
     s.scale = opt("scale").unwrap_or(s.scale).max(0.05);
     s.light = opt("light").unwrap_or(0.0).max(0.0);
+    s.shake = opt("shake").unwrap_or(0.0).max(0.0);
     if let Some(c) = o.get("color").and_then(|c| c.clone().try_cast::<Array>()).filter(|a| a.len() >= 3) {
         s.glow = [0, 1, 2].map(|i| num(&c[i]).clamp(0.0, 255.0) as u8);
     }
