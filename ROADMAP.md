@@ -363,7 +363,7 @@ and Esc → `door=0`, no pause menu. Unit test: weighted catches. Not checked by
 chest (difficulty 2), the editor's Fishing spot fields and catch table, the Lockpicking game
 action fields (compile-checked).
 
-### [ ] The player uses furniture — `feature/furniture`
+### [x] The player uses furniture — `feature/furniture`
 
 **Goal.** The player sits on chairs and benches and sleeps in beds: sitting is a short rest,
 sleeping skips the night (restored, the world moved on). Props become furniture with a *use
@@ -398,6 +398,24 @@ spot*; NPC furniture (backlog: *Schedules across maps and with furniture*) reuse
   dream, an ambush, a quest stage), `Action::Sleep { hours }` (appended) / script `sleep(hours)`
   to rest without a bed (camping, an inn keeper's "Rest"), `is_sitting()` / `is_sleeping()`.
 
+**Decided while building.** `UseSpot` also has `cover: SpriteRef` (drawn over the user at
+the prop's feet: the bed's quilt) instead of an "occupied" prop state. In a bed, `facing` is the
+side the head is on: Up = an upright bed (the front idle frame, head on the pillow), Left /
+Right = a sideways bed (the frame turned ±90° around the body, `draw_frame_colored_rotated`),
+Down = upside down; chairs come one prop per facing (the example: `chair`, `chair_up` with its
+backrest as the cover, `chair_left`, `chair_right`; `bed` and `bed_side`); *Sit* draws the top 80 % of the frame
+6 px lower, so the chair's posts and legs show beside the sitter (the example chair is drawn
+wide for that). The player sorts after a bed (`player_sort_y`) so the cover goes on top.
+Sitting: 1 HP per 4 s and mana at twice the rate (no project setting). Standing up: a movement
+key held, an attack or E; the player returns to where they stood (`Seat::back`, also what a
+save stores while seated). The bed's question is a Choice into `_sleep_answer` followed by an
+*If* with `Action::Sleep` (so it works with the runner, dialogs and the dev console); the bed
+the player chose is remembered for that Sleep action (`Game::bed`). Sleeping: 0.8 s fade, 1.4 s
+dark with "Z z z", 0.8 s back; spawner respawn timers are set to zero
+(`spawners_catch_up`), there is no day counter yet. `sleep(hours)` is registered for integers
+and floats because Rhai's own `sleep(seconds)` would win over a Dynamic parameter. Not done:
+NPCs on furniture (their own backlog idea), Tilda's paid "Rest" (the docs show `sleep(8)`).
+
 **Touch points.** `defs.rs` (`UseSpot`, `Pose`), `runtime/furniture.rs` (new: using, standing
 up, sleeping), `runtime/{mod,paperdoll,lights,spawner,schedule}.rs`, `events/mod.rs`,
 `script.rs`, `render/mod.rs` (rotated / clipped frames), editor `database.rs` (prop form) and
@@ -405,13 +423,19 @@ up, sleeping), `runtime/{mod,paperdoll,lights,spawner,schedule}.rs`, `events/mod
 art, placements), README, scripting.md.
 
 **Example.** A bed in the elder's house (sleep until 7:00, free), Tilda's "Rest (10 coins)"
-choice using `sleep(8)`, benches on the village green and chairs in the shop.
+choice using `sleep(8)`, benches on the village green and chairs in the shop; the user asked for
+chairs in every direction around a table (the elder's house) and sideways beds too.
 
-**Verify.** Autoplay: `press e` at a chair → `pose=sit` (screenshot), `hold left` stands up;
-at the bed at 22:00 with 5 HP: the choice, `press e` → `time=07:00`, full HP, Tomas at his 07:00
-stop, the autosave written; with a slime in sight the toast and no time jump; the sleeping
-hero under the blanket (screenshot); `sleep(8)` from the console; the editor's Use spot form
-(screenshot).
+**Verify (done).** Autoplay on a scratch copy with crafted saves: at Tilda's chair `press e`
+→ `pose=sit#…` (screenshot: posts and legs beside the hero), `hold left` stands up; at the
+elder's bed at 22:00 with 5 HP: the question (screenshot), `press e` → lying under the quilt
+(screenshot), `Z z z`, then `time=07:00`, `hp=12`, `autosave=saved` and "You feel rested."; the
+village bench (screenshot); `sleep(8)` from the console 10:01 → 18:01; near the slime den
+"You can't sleep with enemies nearby." and no time jump; the editor's Furniture section of the
+bed (screenshot); the elder's table with a chair on each side, sitting on each of the
+four (screenshots: the up-facing chair's backrest over the sitter), sleeping in the sideways
+guest bed (screenshot); unit tests for the RON defaults and the script functions. Not checked by
+script: the Woke up triggers (no example uses one) and the spot's conditions.
 
 ### [x] Dialog portraits — `feature/portraits`
 

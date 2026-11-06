@@ -68,6 +68,15 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   character on the map or a definition whose name fits). *Database › Project › Dialog
   portraits* (`ProjectConfig::dialog_portraits`, on by default) turns them off. The example's
   intro has a line of the hero's.
+- **Furniture**: props can be furniture (`PropDef.use_spot`: pose *Sit* / *Lie* / *Stand*,
+  spot, facing, wake-up hour, a cover sprite drawn over a sleeper, conditions). The player sits
+  on chairs and benches (HP and mana come back faster) and sleeps in beds: the night passes
+  (clock, HP, mana, effects, respawns, schedules), the new *Woke up* trigger runs, the game
+  autosaves; not with enemies nearby. **Sleep** action / `sleep(hours)`, `is_sitting()`,
+  `is_sleeping()`. Chairs face any of the four directions (a cover draws a backrest
+  over the sitter), beds stand upright or sideways (the sleeper is drawn turned). Example: the
+  elder's house has an upright bed (instead of the bed tiles), a sideways guest bed and a table
+  with four chairs; a chair at Tilda's, benches by the village road. Game `status` prints `pose=`.
 - **Changed:** picking a lock you have the key for uses the key (it used to pick it).
 - **Changed:** the player's attacks (melee, arrows, spells, clicking to attack) only hit hostile
   characters. Friendly characters with HP (companions, the guard) can't be hurt by the player;

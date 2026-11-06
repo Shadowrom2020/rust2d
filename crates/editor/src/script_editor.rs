@@ -164,6 +164,9 @@ pub const API: &[ApiFn] = api! {
     "patrol"(target: Target) "Starts a character's own patrol route (queued)";
     "patrol"(target: Target, points: List) "Patrols [[x, y], ...] tile waypoints (queued)";
     "stop_patrol"(target: Target) "Stops a character's patrol (queued)";
+    "sleep"(hours: Num) "The player sleeps that many hours: the night passes, HP and mana are restored (queued, blocks)";
+    "is_sitting"() "Whether the player sits on a chair or bench";
+    "is_sleeping"() "Whether the player lies in a bed or the night is passing";
     "lockpick"(difficulty: Num, var: Var) "Plays the lockpicking game; 1 (picked) or 0 goes into the variable (queued, blocks)";
     "unlock_achievement"(id: Achievement) "Unlocks an achievement for the player (queued; kept across save games)";
     "achievement_unlocked"(id: Achievement) "Whether the player has unlocked an achievement";

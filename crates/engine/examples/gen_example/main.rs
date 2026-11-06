@@ -547,6 +547,9 @@ fn village() -> Map {
     if let Some(z) = b.m.zones.iter_mut().find(|z| z.uid == spot) {
         z.loot = Some(vec![LootEntry::new("trout", 75.0, 1, 1), LootEntry::new("old_boot", 25.0, 1, 1)]);
     }
+    // Benches by the road to sit on (furniture).
+    b.entity(EntityKind::Prop, "bench", 12, 16);
+    b.entity(EntityKind::Prop, "bench", 31, 16);
 
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
     b.m.triggers = vec![
@@ -694,6 +697,8 @@ fn shop() -> Map {
     b.entity(EntityKind::Prop, "barrel", 10, 8);
     // An alchemy table for the customers (crafting: Database › Recipes, station "alchemy").
     b.entity(EntityKind::Prop, "alchemy_table", 1, 8);
+    // A chair to rest on.
+    b.entity(EntityKind::Prop, "chair", 2, 6);
     b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
     autotile_terrain(&mut b.m, |m, x, y| (ground(m, x, y)? == t::RUG).then_some("Rug"), |_, _, _, _| false);
@@ -712,8 +717,7 @@ fn house() -> Map {
     b.fill(1, 11, 0, 1, h as i32, t::VOID);
     b.fill(1, 0, 9, w as i32, 1, t::VOID);
     b.fill(0, 4, 4, 4, 3, t::RUG);
-    b.set(1, 2, 2, t::BED);
-    b.set(1, 2, 3, t::BED_FOOT);
+    // (The bed is a prop now: furniture the player sleeps in, placed at the end.)
     b.fill(1, 6, 2, 2, 1, t::SHELF);
     b.set(1, 9, 5, t::TABLE);
     b.set(0, 6, 9, t::WOOD_FLOOR);
@@ -735,6 +739,16 @@ fn house() -> Map {
     b.entity(EntityKind::Item, "bow", 1, 7);
     let arrows = b.entity(EntityKind::Item, "arrows", 2, 8);
     arrows.count = 20;
+    // The elder's bed: sleep until morning (Database › Props › Bed › Furniture).
+    b.entity(EntityKind::Prop, "bed", 2, 3);
+    // The elder's table with a chair on each side (chairs face every way).
+    b.set(1, 8, 5, t::TABLE);
+    b.entity(EntityKind::Prop, "chair", 8, 4);
+    b.entity(EntityKind::Prop, "chair_right", 7, 5);
+    b.entity(EntityKind::Prop, "chair_left", 10, 5);
+    b.entity(EntityKind::Prop, "chair_up", 9, 6);
+    // A sideways bed for a guest by the door.
+    b.entity(EntityKind::Prop, "bed_side", 4, 8);
     b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
     autotile_terrain(&mut b.m, |m, x, y| (ground(m, x, y)? == t::RUG).then_some("Rug"), |_, _, _, _| false);
@@ -1097,6 +1111,7 @@ fn database() -> Database {
         default_state: default_state_name(),
         states: vec![],
         light: None,
+        use_spot: None,
     };
     let state = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid, light: None };
     // `body` = the body sheet of monsters; people get their layered look in `layered_characters`.
@@ -1358,6 +1373,42 @@ fn database() -> Database {
                 ..prop("shrine", "Shrine", p::GRAND_SHRINE, true, [40.0, 7.0])
             },
             prop("well", "Well", p::WELL, true, [14.0, 8.0]),
+            // Furniture (Database › Props › Furniture): sit on chairs and benches, sleep in beds.
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Down, ..Default::default() }),
+                ..prop("chair", "Chair", p::CHAIR, true, [10.0, 4.0])
+            },
+            // The same chair facing the other ways (one prop per direction): facing up, its
+            // backrest is drawn over the sitter (the cover).
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, -8.0], facing: Facing::Up, cover: sprite("props", p::CHAIR_UP_BACK), ..Default::default() }),
+                ..prop("chair_up", "Chair (facing up)", p::CHAIR_UP, true, [10.0, 4.0])
+            },
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Left, ..Default::default() }),
+                ..prop("chair_left", "Chair (facing left)", p::CHAIR_LEFT, true, [10.0, 4.0])
+            },
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Right, ..Default::default() }),
+                ..prop("chair_right", "Chair (facing right)", p::CHAIR_RIGHT, true, [10.0, 4.0])
+            },
+            PropDef {
+                sprite: SpriteRef::block("props", p::BENCH, 2, 1),
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Down, ..Default::default() }),
+                ..prop("bench", "Bench", p::BENCH, true, [28.0, 4.0])
+            },
+            PropDef {
+                sprite: SpriteRef::block("props", p::BED, 1, 2),
+                // The head on the pillow; the quilt (cover) is drawn over the sleeper.
+                use_spot: Some(UseSpot { pose: Pose::Lie, offset: [0.0, -17.0], facing: Facing::Up, sleep_until: 7.0, cover: SpriteRef::block("props", p::BLANKET, 1, 2), ..Default::default() }),
+                ..prop("bed", "Bed", p::BED, true, [14.0, 28.0])
+            },
+            // A sideways bed: the head at the left (the sleeper is drawn turned).
+            PropDef {
+                sprite: SpriteRef::block("props", p::BED_SIDE, 2, 1),
+                use_spot: Some(UseSpot { pose: Pose::Lie, offset: [19.0, -16.0], facing: Facing::Left, sleep_until: 7.0, cover: SpriteRef::block("props", p::BLANKET_SIDE, 2, 1), ..Default::default() }),
+                ..prop("bed_side", "Bed (sideways)", p::BED_SIDE, true, [30.0, 12.0])
+            },
             // A crafting station: its definition's Interact trigger opens the "alchemy" recipes.
             PropDef {
                 triggers: vec![trig(TriggerOn::Interact, vec![], vec![Action::OpenCrafting { station: "alchemy".into(), title: "Alchemy Table".into() }])],

@@ -9,6 +9,7 @@ mod cutscene;
 mod dev;
 mod effects;
 mod equipment;
+mod furniture;
 mod fx;
 mod inventory_ui;
 mod journal;
@@ -233,6 +234,10 @@ pub struct Game {
     minigame: Option<minigame::Minigame>,
     /// Whose portrait the open dialog shows.
     portrait: Option<portraits::Speaker>,
+    /// The furniture the player uses, the sleep sequence, and the bed a Sleep action lies in.
+    seat: Option<furniture::Seat>,
+    sleeping: Option<furniture::Sleeping>,
+    bed: Option<u32>,
     journal: journal::Journal,
     worldmap: worldmap::WorldMap,
     creator: Option<creator::Creator>,
@@ -331,6 +336,9 @@ impl Game {
             ach: Default::default(),
             minigame: None,
             portrait: None,
+            seat: None,
+            sleeping: None,
+            bed: None,
             journal: Default::default(),
             worldmap: Default::default(),
             creator: None,
@@ -572,6 +580,8 @@ impl Game {
     }
 
     fn enter_map(&mut self, map: Map, arrival: Arrival) {
+        // Off any furniture (it belongs to the old map).
+        self.seat = None;
         // Patrolling characters continue where they were when the player comes back.
         self.persist_patrols();
         let ts = self.ts();
@@ -955,6 +965,10 @@ impl Game {
         if self.update_minigame(dt) {
             return;
         }
+        // Sleeping: the night passes behind a dark screen.
+        if self.update_sleep(dt) {
+            return;
+        }
         if self.update_menu(can_open) {
             return;
         }
@@ -1080,6 +1094,16 @@ impl Game {
 
     fn update_player(&mut self, dt: f32, frozen: bool, key_consumed: bool) {
         let ts = self.ts();
+        // On furniture: stays there (frozen: dialogs) until a key stands the player up.
+        if let Some(s) = &self.seat {
+            if frozen {
+                (self.player.pos, self.player.moving) = (s.pos, false);
+                return;
+            }
+            if self.update_seat(dt, key_consumed) {
+                return;
+            }
+        }
         if let Some(target) = self.player.move_target {
             let (pos, done) = step_towards(self.player.pos, target, self.player.speed * dt);
             self.player.facing = Facing::from_vec(target.x - pos.x, target.y - pos.y).unwrap_or(self.player.facing);
@@ -1286,7 +1310,10 @@ impl Game {
             }
             self.fire(GameEvent::Interact, Source::Entity(uid));
             match self.loaded.entities[i].kind {
-                EntityKind::Prop => self.try_open_container(i),
+                EntityKind::Prop => {
+                    self.try_open_container(i);
+                    self.try_use_furniture(i);
+                }
                 EntityKind::Character => {
                     self.try_open_shop(i, true);
                 }
@@ -1483,7 +1510,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1519,6 +1546,7 @@ impl Game {
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
             self.achievements_status(),
             self.minigame_status(),
+            self.pose_status(),
             self.shop_status(),
             self.crafting_status(),
             self.loaded.map.name,
@@ -1542,7 +1570,9 @@ impl Game {
     fn sync_world(&mut self) {
         self.persist_patrols();
         self.world.current_map = self.loaded.map.name.clone();
-        self.world.player_pos = (self.player.pos.x, self.player.pos.y);
+        // On furniture, the spot it was used from (the furniture itself is solid).
+        let pos = self.seat.as_ref().map_or(self.player.pos, |s| s.back);
+        self.world.player_pos = (pos.x, pos.y);
         self.world.player_facing = self.player.facing;
     }
 
@@ -1682,7 +1712,7 @@ impl Game {
             .filter(|(_, e)| e.active)
             .map(|(i, e)| (e.body.pos.y, Some(i)))
             .collect();
-        order.push((self.player.pos.y, None));
+        order.push((self.player_sort_y(), None));
         order.sort_by(|a, b| a.0.total_cmp(&b.0));
         let t = get_time() as f32;
         for (_, idx) in order {
@@ -1697,7 +1727,8 @@ impl Game {
                     // During a melee swing the weapon is drawn along the swing instead.
                     let swinging = self.combat.swing > 0.0;
                     let eq = self.player_equipment_drawn();
-                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &eq, (self.player.facing, col), self.player.pos, Self::effect_tint(&self.world.effects).unwrap_or(WHITE), swinging));
+                    let tint = Self::effect_tint(&self.world.effects).unwrap_or(WHITE);
+                    let drawn = self.draw_seated_player(&eq, tint) || self.player_appearance().is_some_and(|a| self.draw_character(&a, &eq, (self.player.facing, col), self.player.pos, tint, swinging));
                     if !drawn {
                         let r = self.player.rect();
                         draw_rectangle(r.x, r.y - ts * 0.5, r.w, r.h + ts * 0.5, YELLOW);
@@ -1752,6 +1783,7 @@ impl Game {
                 self.draw_clock();
             }
             self.draw_minigame();
+            self.draw_sleep();
             if self.crafting_open() {
                 self.draw_crafting_ui();
             } else if self.shop_open() {
@@ -2121,6 +2153,13 @@ impl ActionHost for Game {
                 };
                 Step::Continue
             }
+            Action::Sleep { hours } => {
+                if self.start_sleep(*hours) {
+                    Step::Block
+                } else {
+                    Step::Continue
+                }
+            }
             Action::Lockpick { difficulty, var } => {
                 // Skill below the difficulty makes it harder (the skill system may be off: 0).
                 let gap = *difficulty as i32 - self.lockpick_level() as i32;
@@ -2190,7 +2229,7 @@ impl ActionHost for Game {
             // Characters that walked up to someone turn to face them.
             self.apply_face_after();
         }
-        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking || self.minigame_open()
+        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking || self.minigame_open() || self.sleeping()
     }
 
     fn script_condition(&mut self, function: &str, ctx: &ActionCtx) -> bool {

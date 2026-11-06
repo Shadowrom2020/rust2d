@@ -92,6 +92,14 @@ impl Renamer<'_> {
         }
     }
 
+    /// Furniture: the cover sprite (a bed's blanket) and the conditions.
+    fn use_spot(&mut self, s: &mut Option<crate::defs::UseSpot>) {
+        if let Some(s) = s {
+            self.fix(RefKind::Sheet, &mut s.cover.sheet);
+            self.conditions(&mut s.conditions);
+        }
+    }
+
     fn recipe(&mut self, d: &mut crate::crafting::RecipeDef) {
         self.fix(RefKind::Item, &mut d.result);
         for s in &mut d.ingredients {
@@ -221,6 +229,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.triggers(&mut d.triggers);
         r.container(&mut d.container);
         r.lock(&mut d.lock);
+        r.use_spot(&mut d.use_spot);
     }
     for d in &mut db.characters {
         r.triggers(&mut d.triggers);
@@ -344,6 +353,7 @@ pub fn refs_of_prop(d: &crate::defs::PropDef) -> Vec<(RefKind, String)> {
     r.triggers(&mut d.triggers);
     r.container(&mut d.container);
     r.lock(&mut d.lock);
+    r.use_spot(&mut d.use_spot);
     r.found.unwrap_or_default()
 }
 

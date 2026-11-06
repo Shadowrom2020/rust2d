@@ -194,7 +194,8 @@ impl Editor {
                 lock: None,
                 default_state: default_state_name(),
                 states: vec![],
-        light: None,
+                light: None,
+                use_spot: None,
             }),
             WKind::Item => db.items.push(ItemDef {
                 id: id.clone(),

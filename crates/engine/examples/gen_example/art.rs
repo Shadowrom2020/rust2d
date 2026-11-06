@@ -2060,6 +2060,146 @@ pub mod p {
     /// An alchemy table (crafting station), on row 9 (added below the older rows so existing
     /// libraries take the larger sheet: their pixels stay the same).
     pub const ALCHEMY: u32 = 72;
+    /// Furniture (row 9, the bed's foot on row 10): a chair, a bench (2x1), a bed (1x2) and
+    /// the bed's blanket alone (1x2: drawn over a sleeper).
+    pub const CHAIR: u32 = 73;
+    pub const BENCH: u32 = 74;
+    pub const BED: u32 = 76;
+    pub const BLANKET: u32 = 77;
+    /// A chair facing up (seen from behind) and its backrest alone (drawn over a sitter).
+    pub const CHAIR_UP: u32 = 78;
+    pub const CHAIR_UP_BACK: u32 = 79;
+    /// A sideways bed (2x1, the head at the left) and its quilt alone.
+    pub const BED_SIDE: u32 = 80;
+    pub const BLANKET_SIDE: u32 = 82;
+    /// Chairs facing left / right (side views).
+    pub const CHAIR_LEFT: u32 = 86;
+    pub const CHAIR_RIGHT: u32 = 87;
+}
+
+/// Chair, bench, bed and the bed's blanket (furniture the player can use).
+fn furniture(c: &mut Canvas) {
+    let n = TS as i32;
+    // Chair (seen from the front): back with two slats, seat, legs.
+    let (x, y) = cell(p::CHAIR);
+    c.at(x, y);
+    // Wide enough that a sitter (drawn over it) leaves the posts and legs in sight.
+    for px in [3, 26] {
+        c.shade_box(px, 1, 3, 29, WOOD); // back posts, down to the floor
+    }
+    for sy in [3, 8] {
+        c.shade_box(6, sy, 20, 3, WOOD); // slats
+    }
+    c.shade_box(2, 17, 28, 5, WOOD); // seat
+    c.hline(2, 17, 28, hex(WOOD[3]));
+    for lx in [3, 26] {
+        c.shade_box(lx, 22, 3, 8, WOOD);
+    }
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.5, 10.0, 1.5);
+    // Bench (2x1): a plank seat with a backrest on stone feet.
+    let (x, y) = cell(p::BENCH);
+    c.at(x, y);
+    for sy in [6, 11] {
+        c.shade_box(4, sy, 56, 3, WOOD);
+    }
+    for px in [6, 55] {
+        c.shade_box(px, 4, 3, 14, WOOD);
+    }
+    c.shade_box(2, 16, 60, 5, WOOD);
+    c.hline(2, 16, 60, hex(WOOD[3]));
+    for lx in [5, 53] {
+        c.shade_box(lx, 21, 6, 9, STONE);
+    }
+    c.auto_outline(2 * n, n, OUTLINE);
+    c.shadow(32.0, 30.5, 26.0, 1.5);
+    // Bed (1x2, 32 x 64): headboard, pillow, sheet and a quilt; the quilt alone is the cover.
+    let quilt = |c: &mut Canvas| {
+        c.shade_box(4, 24, 24, 34, [0x7a1f1f, 0xa83232, 0xc94a4a, 0xe07a6a]);
+        c.hline(4, 24, 24, hex(0xf2e8d8)); // the folded sheet's edge
+        c.hline(4, 25, 24, hex(0xf2e8d8));
+        for k in 0..3 {
+            c.hline(5, 34 + k * 9, 22, hex(0x8a2626)); // quilt seams
+        }
+    };
+    let (x, y) = cell(p::BED);
+    c.at(x, y);
+    c.shade_box(2, 2, 28, 10, WOOD); // headboard
+    c.hline(2, 2, 28, hex(WOOD[3]));
+    c.shade_box(3, 10, 26, 50, [0xc8c0b0, 0xe0d8c8, 0xf2ecdf, 0xffffff]); // mattress + sheet
+    c.shade_box(7, 12, 18, 9, [0xc8c8d0, 0xe0e0e8, 0xf4f4f8, 0xffffff]); // pillow
+    quilt(c);
+    c.shade_box(2, 57, 28, 6, WOOD); // footboard
+    c.auto_outline(n, 2 * n, OUTLINE);
+    // The cover: the same quilt, outlined on its own, drawn over a sleeper.
+    let (x, y) = cell(p::BLANKET);
+    c.at(x, y);
+    quilt(c);
+    c.shade_box(2, 57, 28, 6, WOOD); // the footboard stays in front of the feet
+    c.auto_outline(n, 2 * n, OUTLINE);
+
+    // A chair facing up, seen from behind: the seat beyond, the backrest on the near side
+    // (the backrest alone is the cover: it hides the sitter's lower back).
+    let backrest = |c: &mut Canvas| {
+        for px in [3, 26] {
+            c.shade_box(px, 11, 3, 19, WOOD); // posts down to the floor
+        }
+        for sy in [12, 17] {
+            c.shade_box(6, sy, 20, 3, WOOD); // slats
+        }
+    };
+    let (x, y) = cell(p::CHAIR_UP);
+    c.at(x, y);
+    c.shade_box(4, 6, 24, 7, WOOD); // seat
+    c.hline(4, 6, 24, hex(WOOD[3]));
+    for lx in [5, 24] {
+        c.shade_box(lx, 3, 3, 4, WOOD); // the far legs' tops behind the seat
+    }
+    backrest(c);
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.5, 10.0, 1.5);
+    let (x, y) = cell(p::CHAIR_UP_BACK);
+    c.at(x, y);
+    backrest(c);
+    c.auto_outline(n, n, OUTLINE);
+
+    // Chairs seen from the side: the backrest on the side behind the sitter.
+    for (cellno, back_left) in [(p::CHAIR_LEFT, false), (p::CHAIR_RIGHT, true)] {
+        let (x, y) = cell(cellno);
+        c.at(x, y);
+        let bx = if back_left { 6 } else { 23 };
+        c.shade_box(bx, 3, 3, 27, WOOD); // backrest post, down to the floor
+        c.shade_box(if back_left { 6 } else { 9 }, 6, 17, 3, WOOD); // top rail
+        c.shade_box(5, 17, 22, 4, WOOD); // seat
+        c.hline(5, 17, 22, hex(WOOD[3]));
+        let fx = if back_left { 23 } else { 6 };
+        c.shade_box(fx, 21, 3, 9, WOOD); // front leg
+        c.auto_outline(n, n, OUTLINE);
+        c.shadow(16.0, 30.5, 10.0, 1.5);
+    }
+
+    // A sideways bed (64 x 32, the head at the left) and its quilt alone.
+    let quilt_side = |c: &mut Canvas| {
+        c.shade_box(22, 4, 36, 25, [0x7a1f1f, 0xa83232, 0xc94a4a, 0xe07a6a]);
+        c.vline(22, 4, 25, hex(0xf2e8d8)); // the folded sheet's edge
+        c.vline(23, 4, 25, hex(0xf2e8d8));
+        for k in 0..3 {
+            c.vline(32 + k * 9, 5, 23, hex(0x8a2626));
+        }
+        c.shade_box(58, 2, 5, 28, WOOD); // the footboard
+    };
+    let (x, y) = cell(p::BED_SIDE);
+    c.at(x, y);
+    c.shade_box(1, 0, 6, 31, WOOD); // headboard
+    c.vline(1, 0, 31, hex(WOOD[3]));
+    c.shade_box(6, 3, 54, 27, [0xc8c0b0, 0xe0d8c8, 0xf2ecdf, 0xffffff]); // mattress + sheet
+    c.shade_box(8, 7, 11, 18, [0xc8c8d0, 0xe0e0e8, 0xf4f4f8, 0xffffff]); // pillow
+    quilt_side(c);
+    c.auto_outline(2 * n, n, OUTLINE);
+    let (x, y) = cell(p::BLANKET_SIDE);
+    c.at(x, y);
+    quilt_side(c);
+    c.auto_outline(2 * n, n, OUTLINE);
 }
 
 /// The forest shrine, 96 x 64: a stepped dais, two lamp pillars and a rune-carved monolith with
@@ -2291,9 +2431,9 @@ fn big_props(c: &mut Canvas) {
 }
 
 pub fn props(out: &Path) {
-    // 10 rows: rows 7-8 (the grand shrine) and 9 (the alchemy table) were added later, below
-    // the older cells.
-    let mut c = Canvas::new(TS * 8, TS * 10);
+    // 11 rows: rows 7-8 (the grand shrine), 9 (the alchemy table, furniture) and 10 (the bed's
+    // foot) were added later, below the older cells.
+    let mut c = Canvas::new(TS * 8, TS * 11);
     let n = TS as i32;
     for i in 0..8u32 {
         let (x, y) = cell(i);
@@ -2455,6 +2595,7 @@ pub fn props(out: &Path) {
     c.shade_box(25, 12, 3, 4, STONE);
     c.auto_outline(n, n, OUTLINE);
     c.shadow(16.0, 30.5, 13.0, 1.5);
+    furniture(&mut c);
     big_props(&mut c);
     c.save(&out.join("sprites/props.png"));
 }

@@ -317,6 +317,8 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `stop_schedule(target)` | The character stops following its daily schedule (set in the editor) and stays where it is. Saved. *(queued)* |
+| `sleep(hours)` | The player sleeps (camping, an inn keeper's "Rest"): the screen fades, the clock moves on, HP and mana are restored, timed effects end, then *Woke up* triggers run. Refused with enemies nearby. *(queued, blocks)* |
+| `is_sitting()` / `is_sleeping()` | Whether the player sits on furniture / lies in a bed (or the night is passing). |
 | `lockpick(difficulty, var)` | Plays the lockpicking game (like a lock with that *Lockpicking* difficulty; the player's skill makes it easier) and puts 1 (picked) or 0 into the variable, e.g. `lockpick(2, "vault"); then_call("vault_result");`. *(queued, blocks until it is over)* |
 | `unlock_achievement(id)` | Unlocks an achievement (*Database › Achievements*) for the player: a toast, kept across save games. *(queued)* |
 | `achievement_unlocked(id)` | Whether the player has unlocked an achievement (in any game). |
