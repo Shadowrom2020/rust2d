@@ -93,7 +93,7 @@ impl Audio {
         for e in &errors {
             eprintln!("[audio] {e}");
         }
-        Audio { sounds, music: None, preview: None, errors, enabled: std::env::var_os("RUST2D_MUTE").is_none(), effects: 1.0, music_vol: 1.0, rain: None, rain_vol: 0.0, ambience: 1.0 }
+        Audio { sounds, music: None, preview: None, errors, enabled: std::env::var_os("RUSTPG2D_MUTE").is_none(), effects: 1.0, music_vol: 1.0, rain: None, rain_vol: 0.0, ambience: 1.0 }
     }
 
     pub fn has(&self, id: &str) -> bool {

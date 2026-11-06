@@ -100,7 +100,7 @@ impl Minigame {
 
 /// A seed: fixed for automated play-throughs (their timing must repeat), random otherwise.
 fn seed() -> u32 {
-    if std::env::var_os("RUST2D_AUTOPLAY").is_some() {
+    if std::env::var_os("RUSTPG2D_AUTOPLAY").is_some() {
         0x2545_f491
     } else {
         macroquad::rand::rand() | 1

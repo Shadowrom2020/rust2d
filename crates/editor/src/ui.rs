@@ -65,8 +65,8 @@ pub fn tab(ui: &mut Ui, selected: bool, icon: &str, text: &str) -> Response {
 }
 
 /// Icon of an asset kind (Database tabs, library filters and cards).
-pub fn kind_icon(k: rust2d_engine::refactor::RefKind) -> &'static str {
-    use rust2d_engine::refactor::RefKind;
+pub fn kind_icon(k: rustpg2d_engine::refactor::RefKind) -> &'static str {
+    use rustpg2d_engine::refactor::RefKind;
     match k {
         RefKind::Tileset => ph::GRID_FOUR,
         RefKind::Sheet => ph::IMAGE,

@@ -4,9 +4,9 @@
 
 use anyhow::{bail, Result};
 use egui_macroquad::egui;
-use rust2d_engine::defs::*;
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::project::Project;
+use rustpg2d_engine::defs::*;
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::project::Project;
 
 use crate::app::{Editor, Mode};
 use crate::pixel::Layout;
@@ -67,7 +67,7 @@ pub struct Wizard {
 
 impl Wizard {
     pub fn new(project: &Project) -> Self {
-        let ts = rust2d_engine::project::TILE_SIZE;
+        let ts = rustpg2d_engine::project::TILE_SIZE;
         Wizard {
             kind: WKind::Prop,
             id: String::new(),
@@ -108,7 +108,7 @@ impl Editor {
             bail!("Please enter an id");
         }
         let name = if w.name.trim().is_empty() { id.replace('_', " ") } else { w.name.trim().to_string() };
-        let ts = rust2d_engine::project::TILE_SIZE;
+        let ts = rustpg2d_engine::project::TILE_SIZE;
         let u = ts as f32 / 16.0; // 2: values below are given for the classic 16 px grid
         let db = &self.project.db;
         let taken = match w.kind {
@@ -125,7 +125,7 @@ impl Editor {
             // No image: an empty grid (or a copy) to fill in the structure editor.
             let mut d = match db.structure(&w.copy_of) {
                 Some(src) => src.clone(),
-                None => rust2d_engine::defs::StructureDef { w: w.cells.0.max(1), h: w.cells.1.max(1), ..Default::default() },
+                None => rustpg2d_engine::defs::StructureDef { w: w.cells.0.max(1), h: w.cells.1.max(1), ..Default::default() },
             };
             d.id = id.clone();
             d.name = name;
@@ -234,7 +234,7 @@ impl Editor {
         let Some(mut w) = self.wizard.take() else { return };
         let mut open = true;
         let mut create = false;
-        let ts = rust2d_engine::project::TILE_SIZE;
+        let ts = rustpg2d_engine::project::TILE_SIZE;
         egui::Window::new("New asset").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 for (k, l) in [(WKind::Prop, "Prop"), (WKind::Item, "Item"), (WKind::Tileset, "Tileset"), (WKind::Sheet, "Sprite sheet"), (WKind::Structure, "Structure")] {

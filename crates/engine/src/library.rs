@@ -9,7 +9,7 @@
 //!   file names get a numeric suffix and every reference inside the bundle follows.
 //!
 //! The library itself is an ordinary project folder (without maps) under
-//! `~/.local/share/rust2d/library`, so it is loaded and saved like any project.
+//! `~/.local/share/rustpg2d/library`, so it is loaded and saved like any project.
 //!
 //! Script functions travel with the assets that need them (a spell or skill with a *Script*
 //! effect, triggers that run scripts): bundles carry whole functions by name, and merging
@@ -767,17 +767,19 @@ fn files_of(db: &Database) -> BTreeSet<String> {
     db.tilesets.iter().map(|d| d.image.clone()).chain(db.sheets.iter().map(|d| d.image.clone())).chain(db.sounds.iter().map(|d| d.file.clone())).collect()
 }
 
-/// Folder of the shared asset library: `$RUST2D_LIBRARY`, else
-/// `$XDG_DATA_HOME/rust2d/library`, else `~/.local/share/rust2d/library`.
+/// Folder of the shared asset library: `$RUSTPG2D_LIBRARY`, else
+/// `$XDG_DATA_HOME/rustpg2d/library`, else `~/.local/share/rustpg2d/library`.
 pub fn library_dir() -> PathBuf {
-    if let Some(p) = std::env::var_os("RUST2D_LIBRARY") {
+    if let Some(p) = std::env::var_os("RUSTPG2D_LIBRARY") {
         return PathBuf::from(p);
     }
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_else(|| PathBuf::from("."));
-    data.join("rust2d/library")
+    let dir = data.join("rustpg2d/library");
+    crate::legacy::adopt(&dir, &data.join(crate::legacy::OLD_NAME).join("library"));
+    dir
 }
 
 /// Opens the library at `dir`, creating it (filled with `starter`, a `.r2dpack`) if needed.
@@ -842,7 +844,7 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("rust2d_lib_test_{name}_{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("rustpg2d_lib_test_{name}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p

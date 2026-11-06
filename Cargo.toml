@@ -8,8 +8,8 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-rust2d-engine = { path = "crates/engine" }
-rust2d-packaging = { path = "crates/packaging" }
+rustpg2d-engine = { path = "crates/engine" }
+rustpg2d-packaging = { path = "crates/packaging" }
 macroquad = { version = "0.4.16", features = ["audio"] }
 egui-macroquad = "0.17.3"
 serde = { version = "1", features = ["derive"] }

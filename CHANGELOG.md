@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to rust2d (engine, game runner and editor). Versions follow
+All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
 ## Unreleased
@@ -85,6 +85,23 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 ### Fixes
 - Patrolling (and scheduled) characters plan their way around solid props such as the village
   statue instead of walking into them and getting stuck.
+
+### Maintenance
+- **rust2d is now R(ust)PG2D** (another project already uses the name rust2d). The technical
+  name is `rustpg2d`: binaries `rustpg2d-editor` / `rustpg2d-game`, crates `rustpg2d-engine` /
+  `rustpg2d-packaging`, environment variables `RUSTPG2D_*`, packages
+  `rustpg2d-X.Y.Z-x86_64.AppImage` / `rustpg2d-X.Y.Z.flatpak`, Flatpak id
+  `io.github.Shadowrom2020.rustpg2d` (install it anew; the old Flatpak can be removed),
+  repository `Shadowrom2020/rustpg2d`.
+- Folders move to the new name and are copied over on first use, the old ones are left alone:
+  game settings and achievements (`~/.config/rust2d/<game>` → `~/.config/rustpg2d/<game>`, also
+  for games exported with older versions once they are exported again), the asset library
+  (`~/.local/share/rustpg2d/library`), the editor's recent projects and the AppImage runtime
+  cache. An example copy in `~/rust2d/example_project` keeps being opened there. Save games,
+  projects, maps and `.r2dpack` packages are unchanged.
+- Game exports suggest the Flatpak id `org.rustpg2d.<game>`. To update a game already shipped as a
+  Flatpak, type its old id (`org.rust2d.<game>`) into the export dialog so it stays the same app
+  and its players keep their saves.
 
 ## 0.4.0 — 2026-11-06
 

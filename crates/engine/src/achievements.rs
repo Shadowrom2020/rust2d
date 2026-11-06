@@ -1,7 +1,7 @@
 //! Achievements: definitions (`defs/achievements.ron`) with conditions the game checks while
 //! playing, and the player's unlocked ones. Unlocks belong to the player, not to a save game:
 //! they are kept in `achievements.ron` next to the game's `settings.ron`
-//! (`Settings::dir`; `RUST2D_SETTINGS_DIR` moves both).
+//! (`Settings::dir`; `RUSTPG2D_SETTINGS_DIR` moves both).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -95,8 +95,8 @@ mod tests {
 
     #[test]
     fn progress_file_round_trip() {
-        // (Not through RUST2D_SETTINGS_DIR: the settings test sets it, tests run in parallel.)
-        let path = std::env::temp_dir().join(format!("rust2d_ach_{}/achievements.ron", std::process::id()));
+        // (Not through RUSTPG2D_SETTINGS_DIR: the settings test sets it, tests run in parallel.)
+        let path = std::env::temp_dir().join(format!("rustpg2d_ach_{}/achievements.ron", std::process::id()));
         let _ = std::fs::remove_file(&path);
         assert_eq!(Progress::load_from(&path), Progress::default());
         let mut p = Progress::default();

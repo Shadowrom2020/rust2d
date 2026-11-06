@@ -1,9 +1,9 @@
 //! The map viewport: camera, mouse tools and drawing.
 
 use macroquad::prelude::*;
-use rust2d_engine::entity::{EntityInstance, EntityKind};
-use rust2d_engine::map::{CollisionOverride, Edge, Tile, Zone, ZoneKind};
-use rust2d_engine::render::{self, OVERVIEW_THRESHOLD};
+use rustpg2d_engine::entity::{EntityInstance, EntityKind};
+use rustpg2d_engine::map::{CollisionOverride, Edge, Tile, Zone, ZoneKind};
+use rustpg2d_engine::render::{self, OVERVIEW_THRESHOLD};
 
 use crate::app::{Editor, Mode, Selection, Tool, ZoneTemplate};
 use crate::doc::Objects;
@@ -774,7 +774,7 @@ impl Editor {
         let ts = self.ts();
         // Lighting / weather preview: darkness, lights and the weather's tint (drawn over the map,
         // under the overlays), then the weather's particles.
-        let weather = if self.view.weather { doc.map.weather } else { rust2d_engine::map::Weather::default() };
+        let weather = if self.view.weather { doc.map.weather } else { rustpg2d_engine::map::Weather::default() };
         let base = if self.view.lighting { render::lighting::ambient(doc.map.lighting, self.view.hour) } else { None };
         // Lights only where it is dark (weather alone just tints the daylight), as in the game.
         let lighting = render::weather::tint_ambient(base, weather).map(|a| (a, if base.is_some() { self.preview_lights(&doc.map) } else { Vec::new() }));
@@ -908,7 +908,7 @@ impl Editor {
             let col = if editing { Color::new(0.3, 0.95, 1.0, 1.0) } else { Color::new(0.3, 0.95, 1.0, 0.6) };
             let c = |p: (i32, i32)| vec2((p.0 as f32 + 0.5) * ts, (p.1 as f32 + 0.5) * ts);
             let n = r.points.len();
-            let closes = r.mode == rust2d_engine::entity::PatrolMode::Loop && n > 2;
+            let closes = r.mode == rustpg2d_engine::entity::PatrolMode::Loop && n > 2;
             for k in 0..n.saturating_sub(1) + usize::from(closes) {
                 let (a, b) = (c(r.points[k]), c(r.points[(k + 1) % n]));
                 draw_line(a.x, a.y, b.x, b.y, 2.0 * px, col);
@@ -937,8 +937,8 @@ impl Editor {
         } {
             let editing = self.route_edit.is_some() && self.route_kind == crate::app::RouteKind::Schedule;
             let col = Color::new(1.0, 0.72, 0.25, if editing { 1.0 } else { 0.7 });
-            let c = |s: &rust2d_engine::entity::ScheduleStop| vec2((s.x as f32 + 0.5) * ts, (s.y as f32 + 0.5) * ts);
-            let mut order: Vec<&rust2d_engine::entity::ScheduleStop> = stops.iter().collect();
+            let c = |s: &rustpg2d_engine::entity::ScheduleStop| vec2((s.x as f32 + 0.5) * ts, (s.y as f32 + 0.5) * ts);
+            let mut order: Vec<&rustpg2d_engine::entity::ScheduleStop> = stops.iter().collect();
             order.sort_by(|a, b| a.hour.total_cmp(&b.hour));
             let n = order.len();
             for k in 0..if n > 2 { n } else { n.saturating_sub(1) } {
@@ -1035,7 +1035,7 @@ impl Editor {
                     if self.entity_at(self.hover_world).is_none() {
                         let ghost = Color::new(1.0, 1.0, 1.0, 0.5);
                         if self.place_kind == EntityKind::Character {
-                            self.draw_char_layers(&self.char_layers(&self.place_def, None, rust2d_engine::entity::Facing::Down, 0), p, ghost);
+                            self.draw_char_layers(&self.char_layers(&self.place_def, None, rustpg2d_engine::entity::Facing::Down, 0), p, ghost);
                         } else if let Some(s) = self.def_sprite(self.place_kind, &self.place_def) {
                             self.assets.draw_sprite(&s, 0, p, ghost);
                         }
@@ -1076,9 +1076,9 @@ impl Editor {
                     ZoneKind::Transition { target_map, target_zone } => format!("{} <-> {target_map}:{target_zone}", z.name),
                     ZoneKind::Spawner { character, count, respawn } => {
                         let r = match respawn {
-                            rust2d_engine::map::Respawn::Never => "no respawn".to_string(),
-                            rust2d_engine::map::Respawn::OnEnter => "respawn on enter".to_string(),
-                            rust2d_engine::map::Respawn::After { seconds } => format!("respawn {seconds}s"),
+                            rustpg2d_engine::map::Respawn::Never => "no respawn".to_string(),
+                            rustpg2d_engine::map::Respawn::OnEnter => "respawn on enter".to_string(),
+                            rustpg2d_engine::map::Respawn::After { seconds } => format!("respawn {seconds}s"),
                         };
                         format!("{} [{count}x {character}, {r}]", z.name)
                     }
@@ -1222,7 +1222,7 @@ impl Editor {
 }
 
 /// The tiles of a character's patrol route or schedule stops (None: it has none).
-fn route_points(map: &rust2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind) -> Option<Vec<(i32, i32)>> {
+fn route_points(map: &rustpg2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind) -> Option<Vec<(i32, i32)>> {
     let e = map.entity(uid)?;
     match kind {
         crate::app::RouteKind::Patrol => e.patrol.as_ref().map(|r| r.points.clone()),
@@ -1238,7 +1238,7 @@ enum RouteOp {
 
 /// Adds / moves / removes a patrol waypoint or schedule stop. A new stop starts two hours
 /// after the latest one.
-fn route_edit(map: &mut rust2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind, op: RouteOp) {
+fn route_edit(map: &mut rustpg2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind, op: RouteOp) {
     let Some(e) = map.entities.iter_mut().find(|e| e.uid == uid) else { return };
     match kind {
         crate::app::RouteKind::Patrol => {
@@ -1260,7 +1260,7 @@ fn route_edit(map: &mut rust2d_engine::map::Map, uid: u32, kind: crate::app::Rou
         crate::app::RouteKind::Schedule => match op {
             RouteOp::Add(t) => {
                 let hour = e.schedule.iter().map(|s| s.hour).max_by(f32::total_cmp).map_or(8.0, |h| ((h + 2.0) % 24.0).floor());
-                e.schedule.push(rust2d_engine::entity::ScheduleStop::new(hour, t.0, t.1));
+                e.schedule.push(rustpg2d_engine::entity::ScheduleStop::new(hour, t.0, t.1));
             }
             RouteOp::Move(k, t) => {
                 if let Some(s) = e.schedule.get_mut(k) {
@@ -1280,7 +1280,7 @@ fn route_edit(map: &mut rust2d_engine::map::Map, uid: u32, kind: crate::app::Rou
 impl Editor {
     /// Lights of the map for the lighting preview: tiles (cached, refreshed twice a second) and
     /// placed props, characters and items.
-    fn preview_lights(&mut self, map: &rust2d_engine::map::Map) -> Vec<render::lighting::Light> {
+    fn preview_lights(&mut self, map: &rustpg2d_engine::map::Map) -> Vec<render::lighting::Light> {
         use render::lighting::Light;
         let ts = self.ts();
         let now = get_time();

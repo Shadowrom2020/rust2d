@@ -5,10 +5,10 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use egui_macroquad::egui::{self, Color32};
-use rust2d_engine::library::{AssetRef, Bundle};
-use rust2d_engine::map::{Map, Tile, Zone, ZoneKind};
-use rust2d_engine::project::{CharacterCreation, Project, SexChoice, TILE_SIZE};
-use rust2d_engine::refactor::RefKind;
+use rustpg2d_engine::library::{AssetRef, Bundle};
+use rustpg2d_engine::map::{Map, Tile, Zone, ZoneKind};
+use rustpg2d_engine::project::{CharacterCreation, Project, SexChoice, TILE_SIZE};
+use rustpg2d_engine::refactor::RefKind;
 
 use crate::app::Editor;
 
@@ -36,7 +36,7 @@ impl NewProjectWizard {
     pub fn new(parent: PathBuf) -> Self {
         let name = "My Adventure".to_string();
         NewProjectWizard {
-            folder: rust2d_engine::release::slug(&name),
+            folder: rustpg2d_engine::release::slug(&name),
             name,
             parent: parent.display().to_string(),
             folder_edited: false,
@@ -134,7 +134,7 @@ impl Editor {
                     let mut want: Vec<AssetRef> = STARTER.iter().map(|(k, id)| (*k, id.to_string())).collect();
                     want.extend(CREATOR_SHEETS.iter().map(|s| (RefKind::Sheet, s.to_string())));
                     want.extend(CREATOR_ITEMS.iter().map(|s| (RefKind::Item, s.to_string())));
-                    want.retain(|a| rust2d_engine::library::exists(&lib.db, a));
+                    want.retain(|a| rustpg2d_engine::library::exists(&lib.db, a));
                     let mut b = Bundle::collect(&lib.db, &lib.root, TILE_SIZE, "starter", &want)?;
                     b.rescale(TILE_SIZE)?;
                     let report = b.merge_into(&mut project.db, &dir)?;
@@ -215,7 +215,7 @@ impl Editor {
             egui::Grid::new("np").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                 ui.label("Game name");
                 if ui.add(egui::TextEdit::singleline(&mut w.name).desired_width(300.0)).changed() && !w.folder_edited {
-                    w.folder = rust2d_engine::release::slug(&w.name);
+                    w.folder = rustpg2d_engine::release::slug(&w.name);
                 }
                 ui.end_row();
                 ui.label("Create in");

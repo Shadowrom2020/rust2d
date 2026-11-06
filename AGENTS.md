@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidelines for anyone (people and coding agents) working on rust2d: a Rust 2D top-down RPG
+Guidelines for anyone (people and coding agents) working on R(ust)PG2D: a Rust 2D top-down RPG
 engine (`crates/engine`), the game runner (`crates/game`) and the editor (`crates/editor`).
 
 ## Branching concept
@@ -46,7 +46,7 @@ Note: this repository's main branch is called `master` (not `main`).
    `[workspace.package] version` in `Cargo.toml`, has a `## X.Y.Z — date` section in
    CHANGELOG.md and no `## Unreleased` is left; a hotfix may only raise PATCH.
 5. **Merging into master releases automatically** (`.github/workflows/release.yml`): it builds
-   the rust2d AppImage and Flatpak, tags the merge commit `vX.Y.Z`, publishes a GitHub Release
+   the R(ust)PG2D AppImage and Flatpak, tags the merge commit `vX.Y.Z`, publishes a GitHub Release
    (notes = the CHANGELOG section, with the packages and SHA256SUMS) and opens the pull request
    that merges `master` back into `develop`. Merge that one too.
 6. Push and open pull requests only when asked to; merge only when asked to.
@@ -85,9 +85,9 @@ git checkout develop && git pull --ff-only
 git checkout -b release/0.2.0
 #   set [workspace.package] version = "0.2.0" in Cargo.toml (cargo build updates Cargo.lock),
 #   rename "## Unreleased" in CHANGELOG.md to "## 0.2.0 — YYYY-MM-DD", update "Current version" in README.md
-git commit -am "rust2d 0.2.0"
+git commit -am "R(ust)PG2D 0.2.0"
 git push -u origin release/0.2.0
-gh pr create --base master --title "rust2d 0.2.0" --fill
+gh pr create --base master --title "R(ust)PG2D 0.2.0" --fill
 gh pr merge --merge                          # after CI: Release workflow tags, publishes, opens the back-merge PR
 gh pr merge <back-merge PR> --merge          # master -> develop
 
@@ -130,7 +130,7 @@ first; refuses binaries that need glibc > 2.35).
 CI runs them on every pull request; run them locally before pushing:
 
 ```sh
-cargo build --workspace                      # also rebuilds rust2d-game for editor play-tests
+cargo build --workspace                      # also rebuilds rustpg2d-game for editor play-tests
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
@@ -144,15 +144,15 @@ cargo test --workspace
 ## Commit messages
 
 - A short summary line, then a blank line and bullet points for the notable changes.
-- Release commits on release branches: `rust2d <version>`.
+- Release commits on release branches: `R(ust)PG2D <version>`.
 
 ## Project notes
 
 - Map and definition files must stay loadable by older and newer versions: append new enum
   variants at the end, and give new fields `#[serde(default)]`.
 - Tiles are always 32 px (`project::TILE_SIZE`).
-- Features are verified end to end with scripted runs: `RUST2D_AUTOPLAY` for the game and
-  `RUST2D_EDITOR_SCRIPT` for the editor (see `crates/game/src/main.rs` and
+- Features are verified end to end with scripted runs: `RUSTPG2D_AUTOPLAY` for the game and
+  `RUSTPG2D_EDITOR_SCRIPT` for the editor (see `crates/game/src/main.rs` and
   `crates/editor/src/main.rs` for the commands), plus screenshots. Run destructive tests on a
-  copy of `example_project`, and set `RUST2D_EDITOR_CONFIG` / `RUST2D_LIBRARY` to scratch folders
+  copy of `example_project`, and set `RUSTPG2D_EDITOR_CONFIG` / `RUSTPG2D_LIBRARY` to scratch folders
   so the user's recent-projects list and asset library are not touched.

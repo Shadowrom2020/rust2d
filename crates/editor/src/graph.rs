@@ -11,11 +11,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Pos2, Rect, Sense, Stroke};
-use rust2d_engine::defs::Database;
-use rust2d_engine::entity::EntityKind;
-use rust2d_engine::events::{Action, Cond, Condition, Trigger, TriggerOn};
-use rust2d_engine::map::{Map, ZoneKind};
-use rust2d_engine::script_refs;
+use rustpg2d_engine::defs::Database;
+use rustpg2d_engine::entity::EntityKind;
+use rustpg2d_engine::events::{Action, Cond, Condition, Trigger, TriggerOn};
+use rustpg2d_engine::map::{Map, ZoneKind};
+use rustpg2d_engine::script_refs;
 
 use crate::app::{Editor, Mode, Selection};
 use crate::ui::{self, ph};
@@ -201,7 +201,7 @@ pub fn action_summary(a: &Action) -> String {
         Action::GiveItem { item, count } => format!("give {count}× {item}"),
         Action::TakeItem { item, count } => format!("take {count}× {item}"),
         Action::SetFlag { name, value } => format!("flag {name} = {value}"),
-        Action::SetVar { name, op, value } => format!("var {name} {} {value}", if matches!(op, rust2d_engine::events::VarOp::Add) { "+=" } else { "=" }),
+        Action::SetVar { name, op, value } => format!("var {name} {} {value}", if matches!(op, rustpg2d_engine::events::VarOp::Add) { "+=" } else { "=" }),
         Action::Teleport { map, spawn } => format!("teleport {map}:{spawn}"),
         Action::Emit { name } => format!("emit {name}"),
         Action::RunScript { function } => format!("run {function}()"),
@@ -998,8 +998,8 @@ fn summary(ui: &mut egui::Ui, key: &NodeKey, t: &Trigger, st: &mut GraphState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust2d_engine::entity::EntityInstance;
-    use rust2d_engine::events::Trigger;
+    use rustpg2d_engine::entity::EntityInstance;
+    use rustpg2d_engine::events::Trigger;
 
     fn trig(on: TriggerOn, conditions: Vec<Condition>, actions: Vec<Action>) -> Trigger {
         Trigger { on, conditions, actions, once: false }
@@ -1021,7 +1021,7 @@ mod tests {
         )];
         map.entities.push(e);
         map.triggers = vec![
-            trig(TriggerOn::Custom { name: "bell".into() }, vec![Condition::new(Cond::Var { name: "help".into(), op: rust2d_engine::events::CmpOp::Eq, value: 0 })], vec![Action::Teleport { map: "forest".into(), spawn: "s".into() }]),
+            trig(TriggerOn::Custom { name: "bell".into() }, vec![Condition::new(Cond::Var { name: "help".into(), op: rustpg2d_engine::events::CmpOp::Eq, value: 0 })], vec![Action::Teleport { map: "forest".into(), spawn: "s".into() }]),
             trig(TriggerOn::Custom { name: "lit".into() }, vec![], vec![]),
         ];
         let src = "fn talk() {\n    say(\"Elder\", \"Go east.\");\n    choice(\"Walk?\", [\"Sure\", \"No\"], \"walk\");\n    then_call(\"walk\");\n}\nfn walk() {\n    if get_var(\"walk\") == 0 { emit(\"lit\"); }\n}\nfn unused() {}\n";

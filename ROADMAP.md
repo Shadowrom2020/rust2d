@@ -1,6 +1,6 @@
-# rust2d roadmap
+# R(ust)PG2D roadmap
 
-Planned features of rust2d, grouped into themed releases, with the design decisions and the
+Planned features of R(ust)PG2D, grouped into themed releases, with the design decisions and the
 code hook points already worked out so that a session can start an item without re-exploring the
 codebase. What is shipped is in [CHANGELOG.md](CHANGELOG.md); the rules for branches, versions
 and releases are in [AGENTS.md](AGENTS.md); coding and verification rules in [CLAUDE.md](CLAUDE.md).
@@ -56,9 +56,9 @@ Instructions for every session (people and coding agents) that implements roadma
 10. **Dependencies and packages.** A new crate that links a system library (gilrs → libudev)
     means: the CI apt lines (`ci.yml`, `release.yml`), the README's build prerequisites, a
     check that the release game still needs glibc ≤ 2.34 (`objdump -T target/release/
-    rust2d-game | grep GLIBC_`), the Debian 12 container (`ldd`), and the Flatpak permissions
+    rustpg2d-game | grep GLIBC_`), the Debian 12 container (`ldd`), and the Flatpak permissions
     (`--device`, `--socket`) in `editor/src/package.rs` and `xtask/src/dist.rs`.
-11. **Example content.** Regenerate with `cargo run -p rust2d-engine --example gen_example`
+11. **Example content.** Regenerate with `cargo run -p rustpg2d-engine --example gen_example`
     and commit `example_project/` and `crates/editor/assets/starter.r2dpack` together; new
     entities go at the end of a map function; an example id overrides the starter library's
     (give new example characters their own ids); never touch `example_project/saves/`.
@@ -109,7 +109,7 @@ buffer but writes the rest from the buffer's start again, leaving a short silenc
 sounds start on a buffer boundary, so whole buffers never hit it), with the tail faded into the
 start by an equal-power crossfade (a linear one dipped in loudness). It plays at 0.1–0.3 by
 intensity times the player's new *Options › Ambience volume* (environmental sounds, default
-70 %, `Settings.ambience_volume`); muted with `RUST2D_MUTE`. Music files loop through the same
+70 %, `Settings.ambience_volume`); muted with `RUSTPG2D_MUTE`. Music files loop through the same
 quad-snd code, so their loop point can have the same short gap (*Gapless music loops*, 0.8.0). Particles and sound pause with the world
 (menus). The editor's *Weather preview* is a separate View toggle (cloud icon) next to the
 lighting preview; the map settings have a *Weather* row; the undo snapshot includes it.
@@ -248,7 +248,7 @@ achievements belong to the player, not to a save game.
   `Action::UnlockAchievement { id }` (appended) and script `unlock_achievement(id)` /
   `achievement_unlocked(id)` (`IdKind::Achievement` for completion / renames). Nothing is
   checked on the title screen. Play-tests from the editor use the game's settings folder, so
-  they unlock achievements like a real run; creators can set `RUST2D_SETTINGS_DIR` to keep a
+  they unlock achievements like a real run; creators can set `RUSTPG2D_SETTINGS_DIR` to keep a
   test profile apart, and the page's *Reset* row clears the file.
 - Storage: `achievements.ron` next to `settings.ron` (`Settings::dir`), `{ unlocked: BTreeMap<id,
   unix seconds> }`, saved on every unlock; loaded in `Game::new`.
@@ -336,7 +336,7 @@ leaving the rod's tip (`rod_tip`: fixed offsets of the idle frame in the 32 x 48
 the example's `held_rod` follows); the catch is one weighted entry of the zone's loot table
 (`pick_catch`). Timings: bite after 1–4 s, 0.6 s to strike, reeling 0.3 / s while the tension
 stays under 0.9, the fish pulls in waves, the line snaps at full tension, 10 s to land it. A
-fixed seed under `RUST2D_AUTOPLAY` keeps the spots and waits the same in tests, and the
+fixed seed under `RUSTPG2D_AUTOPLAY` keeps the spots and waits the same in tests, and the
 autoplay `minigame hit|miss|bite` command presses at the right (or wrong) moment.
 
 **Touch points.** `runtime/minigame.rs` (new), `runtime/{mod,locks,input}.rs`, `map/transition.rs`
@@ -906,7 +906,7 @@ the rain.
 
 ## 0.9.0 — Everywhere (platforms and reach)
 
-Theme: rust2d and the games made with it run where the players and creators are: Windows,
+Theme: R(ust)PG2D and the games made with it run where the players and creators are: Windows,
 macOS, the web, and in their language. Postponed from 0.6.0 (2026-11-06) so the gameplay
 releases come first; the design notes are unchanged.
 
@@ -916,7 +916,7 @@ releases come first; the design notes are unchanged.
 `packaging/lib.rs` symlink and executable bit, `release.rs` chmod); Windows paths for saves and
 settings (`release::user_saves_dir`, `Settings::dir`: `%APPDATA%`); `.exe` handling in
 `export::game_binary` and `release::export` (`<slug>-windows.zip`, README text per platform).
-CI builds `rust2d-game.exe` with `x86_64-pc-windows-gnu` in the Packages and Release jobs and
+CI builds `rustpg2d-game.exe` with `x86_64-pc-windows-gnu` in the Packages and Release jobs and
 the toolkit packages ship it next to the Linux runner, so the Linux editor exports Windows games
 (*File → Export game* gains a *Windows* checkbox). Followed by *Editor on Windows* and *macOS
 builds* below.
@@ -935,7 +935,7 @@ example.
   `symlink` (Flatpak) and `set_executable` (AppImage) behind `#[cfg(unix)]` with Windows
   returning "not available on this platform" errors; the export dialog hides AppImage / Flatpak
   there. Paths: a `dirs`-style helper in `engine/src/paths.rs` (new, no crate): config
-  `%APPDATA%\rust2d`, data `%LOCALAPPDATA%\rust2d`, cache `%LOCALAPPDATA%\rust2d\cache`, home
+  `%APPDATA%\rustpg2d`, data `%LOCALAPPDATA%\rustpg2d`, cache `%LOCALAPPDATA%\rustpg2d\cache`, home
   `%USERPROFILE%`; used by `Settings::dir`, `release::user_saves_dir`, `library::library_dir`,
   `files::config_dir`, `example_copy`, the file dialog start folder, `new_project.rs`.
 - Executables: `std::env::consts::EXE_SUFFIX` in `play_with`, `export::game_binary`,
@@ -955,7 +955,7 @@ example.
 - CI: a `windows-latest` job (clippy + test `--locked`; MSVC compiles the `vorbis_rs` C code for
   gen_example) on PRs into master; the Packages and Release jobs add a Windows build
   (`cargo build --release` on `windows-latest`, `cargo xtask dist --windows` zips editor, game,
-  example, LICENSE, README) and upload `rust2d-<version>-windows-x86_64.zip`.
+  example, LICENSE, README) and upload `rustpg2d-<version>-windows-x86_64.zip`.
 - Known gaps noted in the README: no code signing (SmartScreen warning), gamepads through
   Windows.Gaming.Input (gilrs default), file dialogs native.
 
@@ -974,9 +974,9 @@ Windows. From Linux: Wine run of the exes for a `status` smoke test if Wine is i
 macOS from any platform's editor.
 
 **Design.**
-- Paths: `~/Library/Application Support/rust2d` (config and data), `~/Library/Caches/rust2d`
-  in `paths.rs`. Bundle layout: `rust2d.app/Contents/{MacOS/rust2d-editor,
-  MacOS/rust2d-game, Resources/example_project, Info.plist, rust2d.icns}`; `bundled_example`
+- Paths: `~/Library/Application Support/rustpg2d` (config and data), `~/Library/Caches/rustpg2d`
+  in `paths.rs`. Bundle layout: `R(ust)PG2D.app/Contents/{MacOS/rustpg2d-editor,
+  MacOS/rustpg2d-game, Resources/example_project, Info.plist, R(ust)PG2D.icns}`; `bundled_example`
   and `bundled_root` look in `../Resources`. Exported games: `<slug>.app` with the data in
   `Contents/Resources` (`release::bundled_root` checks there first on macOS) zipped as
   `<slug>-macos.zip`.
@@ -997,7 +997,7 @@ macOS from any platform's editor.
 main}.rs`, `xtask/src/dist.rs`, `.github/workflows/*`, README.
 
 **Verify.** CI green on `macos-latest`; the `.app` from CI starts on a Mac (user's or a CI
-smoke test with `RUST2D_AUTOPLAY` under the runner's window server), opens the example and
+smoke test with `RUSTPG2D_AUTOPLAY` under the runner's window server), opens the example and
 exports a game; `cargo test` on macOS.
 
 ### [ ] Web export — `feature/web`

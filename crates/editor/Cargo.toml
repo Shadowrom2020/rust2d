@@ -1,11 +1,11 @@
 [package]
-name = "rust2d-editor"
+name = "rustpg2d-editor"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-rust2d-engine.workspace = true
+rustpg2d-engine.workspace = true
 macroquad.workspace = true
 egui-macroquad.workspace = true
 egui-phosphor = "0.9"
@@ -17,4 +17,4 @@ quick-xml = "0.41"
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 rhai.workspace = true
 # AppImage / Flatpak exports (package.rs).
-rust2d-packaging.workspace = true
+rustpg2d-packaging.workspace = true

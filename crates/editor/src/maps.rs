@@ -1,7 +1,7 @@
 //! Quick map switching and the Transition tool (two-way links between maps, e.g. on roads).
 
 use egui_macroquad::egui::{self, Color32};
-use rust2d_engine::map::{Map, Zone, ZoneKind};
+use rustpg2d_engine::map::{Map, Zone, ZoneKind};
 
 use crate::app::{Editor, Pending, Selection};
 

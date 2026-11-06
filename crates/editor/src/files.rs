@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
 use anyhow::{bail, Context, Result};
-use rust2d_engine::defs::Database;
-use rust2d_engine::map::{Map, Zone, ZoneKind};
-use rust2d_engine::project::{Project, ProjectConfig};
+use rustpg2d_engine::defs::Database;
+use rustpg2d_engine::map::{Map, Zone, ZoneKind};
+use rustpg2d_engine::project::{Project, ProjectConfig};
 
 /// What a file dialog was opened for.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,7 +22,7 @@ pub enum Purpose {
     /// A `.r2dpack` to import into the library or the project.
     ImportPackage { into_library: bool },
     /// Where to write a `.r2dpack` with these assets.
-    ExportPackage { from_library: bool, assets: Vec<rust2d_engine::library::AssetRef> },
+    ExportPackage { from_library: bool, assets: Vec<rustpg2d_engine::library::AssetRef> },
     /// Output folder of File → Export game.
     ExportGameFolder,
     /// Icon picture of the AppImage / Flatpak packages (File → Export game).
@@ -48,7 +48,7 @@ impl PendingDialog {
             }
             let images = ["png", "jpg", "jpeg", "bmp", "gif", "tga"];
             let result = match p {
-                Purpose::OpenProject => d.set_title("Open rust2d project (folder containing project.ron)").pick_folder(),
+                Purpose::OpenProject => d.set_title("Open R(ust)PG2D project (folder containing project.ron)").pick_folder(),
                 Purpose::NewProject => d.set_title("Choose an empty folder for the new project").pick_folder(),
                 Purpose::NewProjectParent => d.set_title("Where to create the new project").pick_folder(),
                 Purpose::TilesetImage(_) => d.set_title("Choose tileset image").add_filter("Images", &images).pick_file(),
@@ -60,8 +60,8 @@ impl PendingDialog {
                     let (name, exts) = crate::import::file_filter(k);
                     d.set_title(format!("Import {}", k.label())).add_filter(name, exts).pick_file()
                 }
-                Purpose::ImportPackage { .. } => d.set_title("Import asset package").add_filter("rust2d asset package", &["r2dpack"]).pick_file(),
-                Purpose::ExportPackage { .. } => d.set_title("Export asset package").add_filter("rust2d asset package", &["r2dpack"]).set_file_name("assets.r2dpack").save_file(),
+                Purpose::ImportPackage { .. } => d.set_title("Import asset package").add_filter("R(ust)PG2D asset package", &["r2dpack"]).pick_file(),
+                Purpose::ExportPackage { .. } => d.set_title("Export asset package").add_filter("R(ust)PG2D asset package", &["r2dpack"]).set_file_name("assets.r2dpack").save_file(),
             };
             let _ = tx.send(result);
         });
@@ -145,13 +145,15 @@ pub fn create_project(dir: &Path) -> Result<()> {
 
 const RECENT_MAX: usize = 8;
 
-/// `$RUST2D_EDITOR_CONFIG`, else `$XDG_CONFIG_HOME/rust2d`, else `~/.config/rust2d`.
+/// `$RUSTPG2D_EDITOR_CONFIG`, else `$XDG_CONFIG_HOME/rustpg2d`, else `~/.config/rustpg2d`.
 fn config_dir() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("RUST2D_EDITOR_CONFIG") {
+    if let Some(p) = std::env::var_os("RUSTPG2D_EDITOR_CONFIG") {
         return Some(PathBuf::from(p));
     }
     let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("rust2d"))
+    let dir = base.join("rustpg2d");
+    rustpg2d_engine::legacy::adopt(&dir.join("recent.ron"), &base.join(rustpg2d_engine::legacy::OLD_NAME).join("recent.ron"));
+    Some(dir)
 }
 
 /// Recently opened projects that still exist, newest first.
@@ -176,20 +178,25 @@ pub fn remember_recent(root: &Path) {
     }
 }
 
-/// The example project shipped with a packaged rust2d (AppImage / Flatpak:
-/// `<prefix>/share/rust2d/example_project`, the editor being `<prefix>/lib/rust2d/rust2d-editor`).
+/// The example project shipped with a packaged R(ust)PG2D (AppImage / Flatpak:
+/// `<prefix>/share/rustpg2d/example_project`, the editor being `<prefix>/lib/rustpg2d/rustpg2d-editor`).
 pub fn bundled_example() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let p = exe.parent()?.parent()?.parent()?.join("share/rust2d/example_project");
+    let p = exe.parent()?.parent()?.parent()?.join("share/rustpg2d/example_project");
     p.join("project.ron").is_file().then_some(p)
 }
 
-/// A writable copy of the bundled example in `~/rust2d/example_project` (made on first use;
+/// A writable copy of the bundled example in `~/rustpg2d/example_project` (made on first use;
 /// an existing copy - maybe edited - is opened as it is).
 pub fn example_copy() -> Result<PathBuf> {
-    let src = bundled_example().context("this rust2d has no bundled example project")?;
+    let src = bundled_example().context("this R(ust)PG2D has no bundled example project")?;
     let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
-    let dst = home.join("rust2d/example_project");
+    let dst = home.join("rustpg2d/example_project");
+    // A copy made before the rename (rust2d) is opened where it is: it may hold the user's edits.
+    let old = home.join(rustpg2d_engine::legacy::OLD_NAME).join("example_project");
+    if !dst.join("project.ron").exists() && old.join("project.ron").exists() {
+        return Ok(old);
+    }
     if !dst.join("project.ron").exists() {
         copy_tree(&src, &dst).with_context(|| format!("copying the example project to {}", dst.display()))?;
     }
@@ -217,7 +224,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("rust2d-test-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("rustpg2d-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

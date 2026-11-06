@@ -12,14 +12,14 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use egui_macroquad::egui;
-use rust2d_engine::defs::{SheetDef, SheetKind};
-use rust2d_engine::imageio::Rgba;
+use rustpg2d_engine::defs::{SheetDef, SheetKind};
+use rustpg2d_engine::imageio::Rgba;
 
 use crate::app::Editor;
 use crate::ui::{self, ph};
 
 /// The project's (fixed) tile size.
-pub const TS: u32 = rust2d_engine::project::TILE_SIZE;
+pub const TS: u32 = rustpg2d_engine::project::TILE_SIZE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImportKind {

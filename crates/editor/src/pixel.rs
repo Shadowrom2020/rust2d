@@ -1,7 +1,7 @@
 //! Pixel editor: draw and edit the project's images (sprite sheets, tilesets, icons).
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, PointerButton, Rect, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions};
-use rust2d_engine::imageio::Rgba;
+use rustpg2d_engine::imageio::Rgba;
 
 use crate::app::Editor;
 use crate::ui::{self, ph};
@@ -450,7 +450,7 @@ impl Editor {
 
     /// Images of the project the pixel editor can open: (label, path, frame size, layout).
     fn pixel_targets(&self) -> Vec<(String, String, (u32, u32), Layout)> {
-        let ts = rust2d_engine::project::TILE_SIZE;
+        let ts = rustpg2d_engine::project::TILE_SIZE;
         let db = &self.project.db;
         let mut out: Vec<_> = db
             .sheets

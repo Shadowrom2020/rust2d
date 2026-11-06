@@ -5,12 +5,12 @@
 //! tab's creator settings.
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, Ui};
-use rust2d_engine::defs::{Appearance, CharacterDef, Database, EquipSlot, SheetKind};
-use rust2d_engine::entity::Facing;
-use rust2d_engine::inventory::ItemStack;
-use rust2d_engine::render::character::{self, Layer};
-use rust2d_engine::render::Assets;
-use rust2d_engine::state::Equipment;
+use rustpg2d_engine::defs::{Appearance, CharacterDef, Database, EquipSlot, SheetKind};
+use rustpg2d_engine::entity::Facing;
+use rustpg2d_engine::inventory::ItemStack;
+use rustpg2d_engine::render::character::{self, Layer};
+use rustpg2d_engine::render::Assets;
+use rustpg2d_engine::state::Equipment;
 
 use crate::app::Editor;
 use crate::ui::ph;
@@ -336,14 +336,14 @@ pub fn default_character(db: &Database, id: &str, name: &str) -> CharacterDef {
     if let Some(outfit) = db.items.iter().find(|d| d.equip_slot() == Some(EquipSlot::Clothing)) {
         equipment.clothing = Some(ItemStack::new(&outfit.id, 1));
     }
-    let u = rust2d_engine::project::TILE_SIZE as f32 / 16.0;
+    let u = rustpg2d_engine::project::TILE_SIZE as f32 / 16.0;
     CharacterDef {
         id: id.into(),
         name: name.into(),
         sheet: String::new(),
         speed: 50.0 * u,
         hitbox: [10.0 * u, 6.0 * u],
-        behavior: rust2d_engine::defs::Behavior::Static,
+        behavior: rustpg2d_engine::defs::Behavior::Static,
         max_hp: 0,
         damage: 0,
         hostile: false,

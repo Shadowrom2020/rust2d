@@ -3,9 +3,9 @@
 //! new structure) and the thumbnail painter shared with the Database and the asset library.
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureId};
-use rust2d_engine::defs::{Database, SpriteRef, StructureDef};
-use rust2d_engine::entity::{EntityInstance, EntityKind};
-use rust2d_engine::project::TILE_SIZE;
+use rustpg2d_engine::defs::{Database, SpriteRef, StructureDef};
+use rustpg2d_engine::entity::{EntityInstance, EntityKind};
+use rustpg2d_engine::project::TILE_SIZE;
 
 use crate::app::{Editor, Tool};
 use crate::ui::{self, ph};
@@ -70,7 +70,7 @@ pub fn paint_structure(
 }
 
 /// Paints a project structure (tilesets and sprites from the editor's textures).
-pub fn paint_project_structure(ui: &egui::Ui, rect: Rect, d: &StructureDef, db: &Database, tex: &crate::widgets::Textures, assets: &rust2d_engine::render::Assets) {
+pub fn paint_project_structure(ui: &egui::Ui, rect: Rect, d: &StructureDef, db: &Database, tex: &crate::widgets::Textures, assets: &rustpg2d_engine::render::Assets) {
     let tileset = |id: &str| {
         let t = tex.tilesets.get(id)?;
         let a = assets.tilesets.get(id)?;
@@ -170,7 +170,7 @@ impl Editor {
     pub fn structure_palette(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Structures");
-            self.add_from_library_button(ui, Some(rust2d_engine::refactor::RefKind::Structure));
+            self.add_from_library_button(ui, Some(rustpg2d_engine::refactor::RefKind::Structure));
         });
         ui.weak("Pick one, then click the map to place it (one undo step) · right-click / Esc: stop placing.");
         ui.horizontal(|ui| {
@@ -414,7 +414,7 @@ impl StructEdit {
     }
 
     /// Applies the current tool at a cell (one cell of a stroke).
-    pub fn apply(&mut self, d: &mut StructureDef, cell: (u32, u32), db: &Database, assets: &rust2d_engine::render::Assets) {
+    pub fn apply(&mut self, d: &mut StructureDef, cell: (u32, u32), db: &Database, assets: &rustpg2d_engine::render::Assets) {
         let (cx, cy) = cell;
         match self.tool {
             StTool::Stamp => {
@@ -424,7 +424,7 @@ impl StructEdit {
                 for dy in 0..sh {
                     for dx in 0..sw {
                         let index = (sy + dy) * t.columns.max(1) + sx + dx;
-                        d.set_tile(self.layer, cx + dx, cy + dy, rust2d_engine::map::Tile::new(slot, index).0);
+                        d.set_tile(self.layer, cx + dx, cy + dy, rustpg2d_engine::map::Tile::new(slot, index).0);
                     }
                 }
             }
@@ -498,7 +498,7 @@ impl StTool {
 
 /// The structure editor: tools and layers on the left, the grid in the middle, the tileset (or
 /// the props) to pick from on the right. Edits `d` in place.
-pub fn structure_editor(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rust2d_engine::render::Assets) {
+pub fn structure_editor(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rustpg2d_engine::render::Assets) {
     if st.hist_of != d.id {
         st.undo.clear();
         st.redo.clear();
@@ -667,7 +667,7 @@ fn sidebar(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit) {
 }
 
 /// Middle column: what a click does, zoom, the grid, the entities.
-fn canvas_column(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rust2d_engine::render::Assets) {
+fn canvas_column(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rustpg2d_engine::render::Assets) {
     ui.horizontal(|ui| {
         let chip = |ui: &mut egui::Ui, text: String, fill: Color32| {
             egui::Frame::new().fill(fill).corner_radius(10.0).inner_margin(egui::Margin::symmetric(8, 2)).show(ui, |ui| {
@@ -735,7 +735,7 @@ fn canvas_column(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, d
 }
 
 /// Right column (Place prop): searchable gallery of the props.
-fn prop_picker(ui: &mut egui::Ui, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rust2d_engine::render::Assets) {
+fn prop_picker(ui: &mut egui::Ui, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rustpg2d_engine::render::Assets) {
     section(ui, "PROPS");
     ui.horizontal(|ui| {
         ui.label(ph::MAGNIFYING_GLASS);
@@ -763,7 +763,7 @@ fn prop_picker(ui: &mut egui::Ui, st: &mut StructEdit, db: &Database, tex: &crat
 
 /// Right column (tile tools): tileset combo and image; click a tile or drag over several to
 /// select the stamp; a large preview of the stamp below.
-fn tileset_palette(ui: &mut egui::Ui, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rust2d_engine::render::Assets) {
+fn tileset_palette(ui: &mut egui::Ui, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rustpg2d_engine::render::Assets) {
     section(ui, "TILESET");
     egui::ComboBox::from_id_salt("st_ts").selected_text(st.tileset.as_str()).width(ui.available_width() - 10.0).show_ui(ui, |ui| {
         for t in &db.tilesets {
@@ -824,7 +824,7 @@ fn tileset_palette(ui: &mut egui::Ui, st: &mut StructEdit, db: &Database, tex: &
 
 /// The structure's grid: visible layers (the others faded), clear marks, collision, props;
 /// paints with the current tool.
-fn structure_canvas(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rust2d_engine::render::Assets) {
+fn structure_canvas(ui: &mut egui::Ui, d: &mut StructureDef, st: &mut StructEdit, db: &Database, tex: &crate::widgets::Textures, assets: &rustpg2d_engine::render::Assets) {
     let ts = TILE_SIZE as f32;
     let fit = ((ui.available_width() - 8.0) / d.w.max(1) as f32).clamp(12.0, 48.0).floor();
     let cell = if st.zoom > 0.0 { st.zoom } else { fit };

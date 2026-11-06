@@ -1,5 +1,5 @@
 //! Linux packages of an exported game (File → Export game), built from the export folder
-//! (`<slug>/<slug>` + `<slug>/data/`) with the shared `rust2d-packaging` crate:
+//! (`<slug>/<slug>` + `<slug>/data/`) with the shared `rustpg2d-packaging` crate:
 //! `<slug>-x86_64.AppImage` and `<slug>.flatpak`. Inside both the game sits in `lib/<slug>/`
 //! next to its `data/`, so it finds the game the same way as in the plain export; saves go to
 //! the player's data folder (in Flatpak's sandbox: `~/.var/app/<app id>/data/<slug>/saves`).
@@ -7,20 +7,20 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::project::Project;
-use rust2d_engine::release::{DATA_DIR, ENGINE_LICENSE, ENGINE_LICENSE_FILE};
-use rust2d_packaging::{AppSpec, Entry, Source};
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::project::Project;
+use rustpg2d_engine::release::{DATA_DIR, ENGINE_LICENSE, ENGINE_LICENSE_FILE};
+use rustpg2d_packaging::{AppSpec, Entry, Source};
 
-pub use rust2d_packaging::{check_app_id, flatpak_available, glibc_needed, FLATPAK_RUNTIMES};
+pub use rustpg2d_packaging::{check_app_id, flatpak_available, glibc_needed, FLATPAK_RUNTIMES};
 
-/// A Flatpak application id for a game: `org.rust2d.<slug with underscores>`.
+/// A Flatpak application id for a game: `org.rustpg2d.<slug with underscores>`.
 pub fn default_app_id(slug: &str) -> String {
     let mut s: String = slug.chars().map(|c| if c == '-' { '_' } else { c }).collect();
     if s.starts_with(|c: char| c.is_ascii_digit()) {
         s.insert_str(0, "game_");
     }
-    format!("org.rust2d.{s}")
+    format!("org.rustpg2d.{s}")
 }
 
 /// The game's icon: a PNG chosen by the creator (any size) or the player character.
@@ -32,7 +32,7 @@ pub fn icon(project: &Project, custom: &str) -> Result<Vec<u8>> {
         Rgba::decode(&bytes).with_context(|| format!("the icon {} isn't a PNG image", p.display()))?;
         return Ok(bytes);
     }
-    rust2d_packaging::hero_icon(project).unwrap_or_else(rust2d_packaging::emblem).encode()
+    rustpg2d_packaging::hero_icon(project).unwrap_or_else(rustpg2d_packaging::emblem).encode()
 }
 
 /// The package contents of an exported game.
@@ -41,7 +41,7 @@ fn game_spec(folder: &Path, slug: &str, name: &str, app_id: &str, runtime: &str,
     let mut spec = AppSpec {
         command: slug.into(),
         name: name.into(),
-        comment: "A role-playing game made with rust2d".into(),
+        comment: "A role-playing game made with R(ust)PG2D".into(),
         categories: "Game;RolePlaying;".into(),
         app_id: app_id.into(),
         runtime: runtime.into(),
@@ -50,7 +50,7 @@ fn game_spec(folder: &Path, slug: &str, name: &str, app_id: &str, runtime: &str,
         finish_args: ["--share=ipc", "--socket=x11", "--socket=pulseaudio", "--device=all"].map(String::from).to_vec(),
         files: vec![
             Entry { dest: format!("{lib}/{slug}"), src: Source::Path(folder.join(slug)), exec: true },
-            // The engine's license (the game runner is rust2d); the game's own license is its creator's choice.
+            // The engine's license (the game runner is R(ust)PG2D); the game's own license is its creator's choice.
             Entry { dest: format!("share/licenses/{slug}/{ENGINE_LICENSE_FILE}"), src: Source::Bytes(ENGINE_LICENSE.as_bytes().to_vec()), exec: false },
         ],
         bin: vec![(slug.into(), format!("{lib}/{slug}"))],
@@ -64,14 +64,14 @@ fn game_spec(folder: &Path, slug: &str, name: &str, app_id: &str, runtime: &str,
 /// Builds `out_dir/<slug>-x86_64.AppImage` from the export `folder`.
 pub fn appimage(folder: &Path, slug: &str, name: &str, icon: &[u8], out_dir: &Path) -> Result<PathBuf> {
     let path = out_dir.join(format!("{slug}-x86_64.AppImage"));
-    rust2d_packaging::appimage(&game_spec(folder, slug, name, &default_app_id(slug), FLATPAK_RUNTIMES[0], icon)?, &path)?;
+    rustpg2d_packaging::appimage(&game_spec(folder, slug, name, &default_app_id(slug), FLATPAK_RUNTIMES[0], icon)?, &path)?;
     Ok(path)
 }
 
 /// Builds `out_dir/<slug>.flatpak` from the export `folder`.
 pub fn flatpak(folder: &Path, slug: &str, name: &str, app_id: &str, runtime: &str, icon: &[u8], out_dir: &Path) -> Result<PathBuf> {
     let path = out_dir.join(format!("{slug}.flatpak"));
-    rust2d_packaging::flatpak_bundle(&game_spec(folder, slug, name, app_id, runtime, icon)?, &path)?;
+    rustpg2d_packaging::flatpak_bundle(&game_spec(folder, slug, name, app_id, runtime, icon)?, &path)?;
     Ok(path)
 }
 
@@ -81,22 +81,22 @@ mod tests {
 
     #[test]
     fn app_ids() {
-        assert_eq!(default_app_id("knight-tales"), "org.rust2d.knight_tales");
-        assert_eq!(default_app_id("2d-quest"), "org.rust2d.game_2d_quest");
+        assert_eq!(default_app_id("knight-tales"), "org.rustpg2d.knight_tales");
+        assert_eq!(default_app_id("2d-quest"), "org.rustpg2d.game_2d_quest");
         assert!(check_app_id(&default_app_id("knight-tales")).is_ok());
     }
 
     #[test]
     fn icons() {
-        use rust2d_engine::defs::Database;
-        use rust2d_engine::project::ProjectConfig;
-        let tmp = std::env::temp_dir().join(format!("rust2d_icon_test_{}", std::process::id()));
+        use rustpg2d_engine::defs::Database;
+        use rustpg2d_engine::project::ProjectConfig;
+        let tmp = std::env::temp_dir().join(format!("rustpg2d_icon_test_{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let p = Project { root: tmp.clone(), config: ProjectConfig::new("Test"), db: Database::default() };
         // No player character: the emblem.
         let png = icon(&p, "").unwrap();
         let img = Rgba::decode(&png).unwrap();
-        assert_eq!((img.w, img.h), (rust2d_packaging::ICON, rust2d_packaging::ICON));
+        assert_eq!((img.w, img.h), (rustpg2d_packaging::ICON, rustpg2d_packaging::ICON));
         // A picture of the creator's choice is used as it is (relative to the project).
         let own = Rgba::new(64, 64).encode().unwrap();
         std::fs::write(tmp.join("icon.png"), &own).unwrap();
@@ -109,17 +109,17 @@ mod tests {
 
     #[test]
     fn game_layout() {
-        let tmp = std::env::temp_dir().join(format!("rust2d_game_spec_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("rustpg2d_game_spec_test_{}", std::process::id()));
         let folder = tmp.join("knight-tales");
         std::fs::create_dir_all(folder.join("data/maps")).unwrap();
         std::fs::write(folder.join("knight-tales"), b"\x7fELF").unwrap();
         std::fs::write(folder.join("data/maps/start.map"), b"map").unwrap();
         std::fs::write(folder.join("README.txt"), b"readme").unwrap();
-        let s = game_spec(&folder, "knight-tales", "Knight Tales", "org.rust2d.knight_tales", "25.08", b"png").unwrap();
+        let s = game_spec(&folder, "knight-tales", "Knight Tales", "org.rustpg2d.knight_tales", "25.08", b"png").unwrap();
         let dests: Vec<(&str, bool)> = s.files.iter().map(|e| (e.dest.as_str(), e.exec)).collect();
         assert_eq!(
             dests,
-            [("lib/knight-tales/knight-tales", true), ("share/licenses/knight-tales/rust2d-LICENSE.txt", false), ("lib/knight-tales/data/maps/start.map", false)],
+            [("lib/knight-tales/knight-tales", true), ("share/licenses/knight-tales/rustpg2d-LICENSE.txt", false), ("lib/knight-tales/data/maps/start.map", false)],
             "the game, the engine's license and the data; no README"
         );
         assert_eq!(s.bin, [("knight-tales".to_string(), "lib/knight-tales/knight-tales".to_string())]);

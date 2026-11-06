@@ -1,4 +1,4 @@
-//! The Asset Library window: `rust2d-editor --library [DIR]` runs the editor in library mode on
+//! The Asset Library window: `rustpg2d-editor --library [DIR]` runs the editor in library mode on
 //! the shared asset library (a project-like folder). It reuses the Database forms, the pixel
 //! editor and the new-asset wizard to edit and create library assets in place; the Browse view
 //! (`library_ui.rs`) imports, exports and removes. The main editor starts it as a separate
@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use egui_macroquad::egui::{self, Color32};
-use rust2d_engine::library::{self, AssetRef};
-use rust2d_engine::refactor::RefKind;
+use rustpg2d_engine::library::{self, AssetRef};
+use rustpg2d_engine::refactor::RefKind;
 
 use crate::app::{Editor, Mode, Pending};
 use crate::database::Tab;
@@ -56,10 +56,10 @@ impl Editor {
             Err(e) => return self.set_status(format!("Cannot start the Asset Library window: {e}")),
         };
         let mut cmd = std::process::Command::new(exe);
-        cmd.arg("--library").env_remove("RUST2D_EDITOR_SCRIPT");
+        cmd.arg("--library").env_remove("RUSTPG2D_EDITOR_SCRIPT");
         // Testing hook: a script for the library window.
-        if let Ok(s) = std::env::var("RUST2D_LIBRARY_SCRIPT") {
-            cmd.env("RUST2D_EDITOR_SCRIPT", s);
+        if let Ok(s) = std::env::var("RUSTPG2D_LIBRARY_SCRIPT") {
+            cmd.env("RUSTPG2D_EDITOR_SCRIPT", s);
         }
         match cmd.spawn() {
             Ok(c) => {

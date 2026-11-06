@@ -1,6 +1,6 @@
-# Scripting in rust2d
+# Scripting in R(ust)PG2D
 
-rust2d games are mostly built in the editor: maps, characters, items, triggers and their
+R(ust)PG2D games are mostly built in the editor: maps, characters, items, triggers and their
 actions. **Scripts** are for everything the editor's actions can't express on their own:
 conversations that remember what was said, counters, quests with conditions, scripted skills
 and spells, traps and other effects.
@@ -103,7 +103,7 @@ A condition should only look at the game, not change it. Actions it queues (`say
 
 ## Immediate and queued functions
 
-This is the most important rule of rust2d scripting.
+This is the most important rule of R(ust)PG2D scripting.
 
 - **Immediate** functions read or change the game state at once, while the function runs:
   `flag`, `set_flag`, `get_var`, `set_var`, `add_var`, `item_count`, `has_item`, `give_item`,

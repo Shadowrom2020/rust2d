@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use rust2d_engine::entity::EntityInstance;
-use rust2d_engine::events::Trigger;
-use rust2d_engine::map::{EdgeLinks, Map, Tile, Zone};
-use rust2d_engine::render::{Assets, Overview};
+use rustpg2d_engine::entity::EntityInstance;
+use rustpg2d_engine::events::Trigger;
+use rustpg2d_engine::map::{EdgeLinks, Map, Tile, Zone};
+use rustpg2d_engine::render::{Assets, Overview};
 
 /// Everything on a map that isn't tile data.
 #[derive(Clone, PartialEq)]
@@ -18,9 +18,9 @@ pub struct Objects {
     pub next_uid: u32,
     pub background: [u8; 3],
     pub music: String,
-    pub lighting: rust2d_engine::map::MapLighting,
+    pub lighting: rustpg2d_engine::map::MapLighting,
     pub fog: bool,
-    pub weather: rust2d_engine::map::Weather,
+    pub weather: rustpg2d_engine::map::Weather,
 }
 
 impl Objects {
@@ -267,7 +267,7 @@ impl MapDoc {
 
     /// Places a structure with its top-left corner at tile `(x, y)` as one undo step. Returns
     /// the uids of the entities it added.
-    pub fn place_structure(&mut self, def: &rust2d_engine::defs::StructureDef, x: i32, y: i32, assets: &Assets) -> Vec<u32> {
+    pub fn place_structure(&mut self, def: &rustpg2d_engine::defs::StructureDef, x: i32, y: i32, assets: &Assets) -> Vec<u32> {
         self.end_stroke();
         let before = Objects::of(&self.map);
         self.place_recorded(def, x, y, before, "structure", assets)
@@ -277,11 +277,11 @@ impl MapDoc {
     /// collision overrides (back to the tileset's) and the entities whose feet are inside
     /// (the same ones `StructureDef::capture` copies). Zones stay.
     pub fn clear_region(&mut self, rect: (u32, u32, u32, u32), assets: &Assets) {
-        use rust2d_engine::defs::StructureDef;
+        use rustpg2d_engine::defs::StructureDef;
         self.end_stroke();
         let before = Objects::of(&self.map);
         let (x, y, w, h) = rect;
-        let ts = rust2d_engine::project::TILE_SIZE as f32;
+        let ts = rustpg2d_engine::project::TILE_SIZE as f32;
         let r = macroquad::math::Rect::new(x as f32 * ts, y as f32 * ts, w as f32 * ts, h as f32 * ts);
         self.map.entities.retain(|e| !(e.x >= r.x && e.x < r.right() && e.y >= r.y && e.y < r.bottom()));
         let n = (w * h) as usize;
@@ -297,7 +297,7 @@ impl MapDoc {
 
     /// Places `def` and records the tile, collision and object changes since `before` as one
     /// `Edit::Group`.
-    fn place_recorded(&mut self, def: &rust2d_engine::defs::StructureDef, x: i32, y: i32, before: Objects, tag: &'static str, assets: &Assets) -> Vec<u32> {
+    fn place_recorded(&mut self, def: &rustpg2d_engine::defs::StructureDef, x: i32, y: i32, before: Objects, tag: &'static str, assets: &Assets) -> Vec<u32> {
         let p = def.place(&mut self.map, x, y);
         let mut group: Vec<Edit> = Vec::new();
         for (layer, changes) in p.tiles.into_iter().enumerate().filter(|(_, c)| !c.is_empty()) {
@@ -371,10 +371,10 @@ impl MapDoc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust2d_engine::entity::{EntityInstance, EntityKind};
+    use rustpg2d_engine::entity::{EntityInstance, EntityKind};
 
     fn assets() -> Assets {
-        Assets::empty(rust2d_engine::project::TILE_SIZE as f32)
+        Assets::empty(rustpg2d_engine::project::TILE_SIZE as f32)
     }
 
     #[test]
@@ -509,10 +509,10 @@ mod tests {
             src.layers[0].set(x, 1, Tile::new(slot, 6));
             src.layers[1].set(x, 0, Tile::new(slot, 9));
         }
-        src.set_collision(1, 1, rust2d_engine::map::CollisionOverride::Walkable);
+        src.set_collision(1, 1, rustpg2d_engine::map::CollisionOverride::Walkable);
         let uid = src.alloc_uid();
         src.entities.push(EntityInstance::new(uid, EntityKind::Prop, "barrel", 48.0, 63.0));
-        let def = rust2d_engine::defs::StructureDef::capture(&src, "s", "S", (0, 0, 3, 2), true);
+        let def = rustpg2d_engine::defs::StructureDef::capture(&src, "s", "S", (0, 0, 3, 2), true);
 
         let mut d = MapDoc::new(Map::new("t", 8, 8), &a);
         let tree = d.map.tileset_slot("forest");
@@ -527,13 +527,13 @@ mod tests {
         assert!(!d.is_dirty());
         d.redo(&a);
         assert_eq!(d.map.entities.len(), 1);
-        assert_eq!(d.map.collision_at(3, 4), rust2d_engine::map::CollisionOverride::Walkable);
+        assert_eq!(d.map.collision_at(3, 4), rustpg2d_engine::map::CollisionOverride::Walkable);
     }
 
     #[test]
     fn cut_and_paste_a_region() {
-        use rust2d_engine::defs::StructureDef;
-        use rust2d_engine::map::CollisionOverride;
+        use rustpg2d_engine::defs::StructureDef;
+        use rustpg2d_engine::map::CollisionOverride;
         let a = assets();
         let mut d = MapDoc::new(Map::new("t", 10, 10), &a);
         let slot = d.map.tileset_slot("terrain");

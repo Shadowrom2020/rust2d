@@ -1,4 +1,4 @@
-//! Developer play-tests (`rust2d-game --dev`, what the editor starts): script hot reload and
+//! Developer play-tests (`rustpg2d-game --dev`, what the editor starts): script hot reload and
 //! the in-game console.
 //!
 //! - **Hot reload**: the mtimes and sizes of `scripts/*.rhai` are checked twice a second; on a
@@ -72,7 +72,7 @@ impl Dev {
         let mut d = Dev { on, next_check: 0.5, ..Default::default() };
         if on {
             d.watch = snapshot(scripts);
-            d.print("rust2d developer console - type help, F4 closes");
+            d.print("R(ust)PG2D developer console - type help, F4 closes");
         }
         d
     }

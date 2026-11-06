@@ -9,9 +9,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use rust2d_engine::defs::{Database, TileAnim, TilesetDef};
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::map::{CollisionOverride, Map, TileLayer, Tile, Zone, ZoneKind};
+use rustpg2d_engine::defs::{Database, TileAnim, TilesetDef};
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::map::{CollisionOverride, Map, TileLayer, Tile, Zone, ZoneKind};
 
 use super::{sanitize, unique_id, write_new, TS};
 
@@ -540,7 +540,7 @@ fn repack(img: &Rgba, ts: &Tileset) -> Rgba {
     out
 }
 
-/// Builds the rust2d map: tilesets are written into `<root>/tilesets/` and added to `db`
+/// Builds the R(ust)PG2D map: tilesets are written into `<root>/tilesets/` and added to `db`
 /// (never overwriting anything), the map is returned (not saved yet).
 pub fn convert(p: &Parsed, name: &str, root: &Path, db: &mut Database) -> Result<(Map, Report)> {
     if p.width == 0 || p.height == 0 || p.tile_w == 0 {
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn converts_to_a_map() {
-        let root = std::env::temp_dir().join(format!("rust2d_tiled_test_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("rustpg2d_tiled_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let p = parse_file(&fixtures().join("tiny.tmx")).unwrap();
