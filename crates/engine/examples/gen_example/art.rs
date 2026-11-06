@@ -2092,6 +2092,8 @@ pub mod p {
     pub const MUSHROOMS_PICKED: u32 = 97;
     /// A smelter (crafting station: ore and coal into ingots), 1x2.
     pub const SMELTER: u32 = 98;
+    /// An anvil on a tree-stump block (crafting station: ingots into weapons, armor, tools).
+    pub const ANVIL: u32 = 99;
 }
 
 /// The coal vein, the herb bush and the mushroom patch (full and picked), the smelter.
@@ -2163,6 +2165,17 @@ fn gathering_props(c: &mut Canvas) {
     }
     c.auto_outline(n, 2 * n, OUTLINE);
     c.shadow(16.0, 62.5, 13.0, 1.5);
+    // Anvil: an iron horn-and-face block on a wooden stump.
+    let (x, y) = cell(p::ANVIL);
+    c.at(x, y);
+    c.shade_box(9, 20, 14, 10, WOOD); // stump
+    c.hline(9, 20, 14, hex(WOOD[3]));
+    c.shade_box(12, 15, 8, 5, IRON); // waist
+    c.shade_box(5, 9, 22, 6, [0x24242c, 0x3c3c48, 0x5c5c6a, 0x8a8a98]); // face
+    c.hline(5, 9, 22, hex(0xb0b0bc));
+    c.stroke(5.0, 11.0, 1.5, 12.5, 2.2, hex(0x3c3c48)); // horn
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.0, 11.0, 1.5);
 }
 
 /// Ore veins: a rock with ore flecks in the vein's color, and the mined-out rubble.
@@ -2795,8 +2808,13 @@ pub mod it {
     pub const COPPER_INGOT: u32 = 49;
     pub const IRON_INGOT: u32 = 50;
     pub const SILVER_INGOT: u32 = 51;
+    /// Blacksmithing: the smith's hammer, an iron sword and a fine one (a better result of the
+    /// same recipe at a higher Smithing level).
+    pub const HAMMER: u32 = 52;
+    pub const IRON_SWORD: u32 = 53;
+    pub const FINE_SWORD: u32 = 54;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 52;
+    pub const COUNT: u32 = 55;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -3165,6 +3183,29 @@ pub fn items(out: &Path) {
                 for (fx, fy, r) in [(12.0, 17.0, 2.6), (18.0, 13.0, 2.2), (19.0, 20.0, 2.0), (10.0, 21.0, 1.6)] {
                     c.shade_disc(fx, fy, r, ore);
                 }
+            }
+            it::HAMMER => {
+                // A heavy iron head on a short haft.
+                c.stroke(8.0, 28.0, 19.0, 12.0, 1.8, hex(WOOD[1]));
+                c.stroke(8.5, 27.5, 18.5, 12.5, 0.7, hex(WOOD[3]));
+                c.shade_box(13, 4, 14, 9, IRON);
+                c.hline(13, 4, 14, hex(IRON[3]));
+                c.rect(24, 5, 3, 7, hex(IRON[2]));
+            }
+            it::IRON_SWORD | it::FINE_SWORD => {
+                // A longer blade than the short sword; the fine one gleams with a gold guard and
+                // a blue gem in the pommel.
+                let fine = i == it::FINE_SWORD;
+                let blade = if fine { [0x5f6b73, 0xb8c8d4, 0xe2ecf4, 0xffffff] } else { [0x4a4a52, 0x7c8088, 0xa8acb4, 0xd8dce0] };
+                for k in 0..20 {
+                    c.rect(6 + k, 24 - k, 3, 3, hex(blade[1]));
+                    c.px(7 + k, 24 - k, hex(blade[3]));
+                }
+                c.rect(26, 2, 3, 3, hex(blade[2]));
+                let guard = if fine { GOLD[2] } else { IRON[2] };
+                c.stroke(2.0, 19.0, 12.0, 29.0, 1.6, hex(guard));
+                c.stroke(2.0, 29.0, 5.0, 26.0, 1.8, hex(WOOD[1]));
+                c.disc(1.8, 30.2, 2.0, hex(if fine { 0x4fc3f7 } else { IRON[3] }));
             }
             it::MORTAR => {
                 // A stone bowl with a wooden pestle leaning in it.

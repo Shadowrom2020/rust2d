@@ -16,6 +16,11 @@ All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and edi
   **Mortar and Pestle** (Tilda) and a new **Alchemy** skill for Antidotes (1) and Swiftness
   Potions (2, was Arcana 1); herb bushes and mushroom patches by the forest path are picked by
   hand and grow back by the next morning. Ore, ingots and rubies sell at Tilda's.
+- **Blacksmithing**: recipes can make **better results** at higher levels of their skill
+  (`RecipeDef.quality`; the crafting window shows the next step), and equipped items can be
+  ingredients (upgrades). Example: an **anvil** in the Workshop with a Smith's Hammer and the
+  tongs: Iron Sword (a Fine Iron Sword from Smithing 2), Iron Helmet, Chainmail, arrows,
+  pickaxe and a Short Sword upgrade; the **Smithing** skill; Tilda sells the hammer.
 - Example: **the Workshop**, a new map north of the village (a road through the tree line): a
   crafting testing ground with a supply chest of tools, a herb garden with an alchemy table, a
   quarry with every vein and a smelter, a bed to pass the night, and signs.

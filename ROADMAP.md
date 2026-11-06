@@ -156,7 +156,7 @@ Gathering / Regrows sections, the Gathering skill effect and the recipe's Tools 
 old saves without `day` / `changed_at`, the clock across days, gathering props in RON, tools
 needed but not used up.
 
-### [ ] Blacksmithing — `feature/blacksmithing` (follows *Mining*)
+### [x] Blacksmithing — `feature/blacksmithing` (follows *Mining*)
 
 **Goal.** An anvil forges ingots into weapons, armor and tools (smelting ore into ingots exists
 since *Mining and gathering*: the example's smelter by the mine, coal as fuel, smith's tongs).
@@ -173,6 +173,14 @@ since *Mining and gathering*: the example's smelter by the mine, coal as fuel, s
 - Optional: a forge whose "lit" state is a light source and needs coal to light (the example's
   smelter glows all the time).
 
+**Decided while building.** Quality is `RecipeDef.quality: Vec<QualityStep { level, result }>`
+measured on the recipe's `skill` (`result_for(world)`: the highest step reached; `craft` and
+`fits` use it, the crafting window shows the result and the next step as a hint, the editor a
+*Better results* list). Upgrades needed nothing new: ingredients already come from the
+inventory and then the equipment (`take_item`). No forge: smelting is the smelter's. The
+example's anvil stands in the Workshop's quarry next to the smelter (no smithy in the village
+yet: the blacksmith NPC comes with *NPC routines*).
+
 **Touch points.** `crafting.rs` (`quality`), `runtime/crafting_ui.rs`, gen_example (smithy map
 part, forge / anvil / ingot / coal art, recipes), README.
 
@@ -180,9 +188,12 @@ part, forge / anvil / ingot / coal art, recipes), README.
 routines*), forge and anvil, recipes for an iron sword, helmet, chainmail, arrows and the
 pickaxe itself.
 
-**Verify.** Autoplay: smelt iron ore, forge a sword (`inv`), the Smithing level gives the fine
-sword; the forge's light at night (screenshot); without a hammer the anvil recipe shows it
-missing.
+**Verify (done).** Autoplay in the Workshop: without hammer and tongs every anvil recipe is
+missing; with them two iron ingots make an Iron Sword; at Smithing 2 the same recipe makes a
+Fine Iron Sword, and the upgrade recipe turns the Short Sword and an ingot into one; screenshots
+of the anvil window (tools, skill needs, "Smithing 2: Fine Iron Sword"), the anvil by the smelter
+and the recipe's Better results in the editor. Unit test: quality steps and an equipped item as
+ingredient.
 
 ### [ ] Farming — `feature/farming` (follows *Mining*: days, timed states)
 

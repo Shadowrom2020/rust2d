@@ -30,6 +30,17 @@ pub struct RecipeDef {
     /// or in the inventory.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
+    /// Better results at higher levels of `skill` (a *Fine Iron Sword* is its own item): the
+    /// highest step the player's level reaches replaces `result`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quality: Vec<QualityStep>,
+}
+
+/// From skill level `level` on, a recipe makes `result` instead (`RecipeDef::quality`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QualityStep {
+    pub level: u32,
+    pub result: String,
 }
 
 /// Item id -> tool kind (`Database::tool_kinds`), to tell which tools the player has.
@@ -58,7 +69,16 @@ pub enum Missing {
 
 impl RecipeDef {
     pub fn new(id: &str, result: &str, count: u32, ingredients: Vec<ItemStack>, station: &str) -> Self {
-        RecipeDef { id: id.into(), result: result.into(), count, ingredients, station: station.into(), skill: String::new(), level: 0, tools: Vec::new() }
+        RecipeDef { id: id.into(), result: result.into(), count, ingredients, station: station.into(), skill: String::new(), level: 0, tools: Vec::new(), quality: Vec::new() }
+    }
+
+    /// The item it makes for the player now: the best quality step their skill reaches.
+    pub fn result_for(&self, world: &WorldState) -> &str {
+        if self.skill.is_empty() {
+            return &self.result;
+        }
+        let have = world.skill_level(&self.skill);
+        self.quality.iter().filter(|q| q.level <= have && !q.result.is_empty()).max_by_key(|q| q.level).map_or(self.result.as_str(), |q| q.result.as_str())
     }
 
     /// What is missing to make it once (None = it can be made).
@@ -87,10 +107,11 @@ impl RecipeDef {
         if let Some(m) = self.missing(world, kinds) {
             return Err(m);
         }
+        let result = self.result_for(world).to_string();
         for s in self.ingredients.iter().filter(|s| !s.item.is_empty()) {
             world.take_item(&s.item, s.count);
         }
-        Ok(world.give_item(&self.result, self.count.max(1)))
+        Ok(world.give_item(&result, self.count.max(1)))
     }
 
     /// Whether the result would fit into the inventory once the ingredients are used up.
@@ -99,7 +120,7 @@ impl RecipeDef {
         for s in self.ingredients.iter().filter(|s| !s.item.is_empty()) {
             w.take_item(&s.item, s.count);
         }
-        w.give_item(&self.result, self.count.max(1)) == 0
+        w.give_item(self.result_for(world), self.count.max(1)) == 0
     }
 }
 
@@ -137,6 +158,25 @@ mod tests {
         w.take_item("smith_hammer", 1);
         *w.equipment.slot_mut(crate::defs::EquipSlot::Tool) = Some(ItemStack::new("smith_hammer", 1));
         assert!(has_tool(&w, &kinds, "Hammer"));
+    }
+
+    #[test]
+    fn quality_steps_and_upgrades() {
+        let mut r = RecipeDef { skill: "smithing".into(), level: 0, ..RecipeDef::new("sword", "iron_sword", 1, vec![ItemStack::new("ingot", 2)], "anvil") };
+        r.quality = vec![QualityStep { level: 2, result: "fine_sword".into() }, QualityStep { level: 4, result: "master_sword".into() }];
+        let mut w = WorldState::default();
+        w.give_item("ingot", 6);
+        assert_eq!(r.result_for(&w), "iron_sword");
+        w.skills.insert("smithing".into(), 3);
+        assert_eq!(r.result_for(&w), "fine_sword");
+        assert_eq!(r.craft(&mut w, &ToolKinds::new()), Ok(0));
+        assert_eq!((w.item_count("fine_sword"), w.item_count("iron_sword")), (1, 0));
+        // An equipped item can be an ingredient (upgrading it).
+        let up = RecipeDef::new("up", "fine_sword", 1, vec![ItemStack::new("sword", 1), ItemStack::new("ingot", 1)], "anvil");
+        *w.equipment.slot_mut(crate::defs::EquipSlot::Weapon) = Some(ItemStack::new("sword", 1));
+        assert_eq!(up.missing(&w, &ToolKinds::new()), None);
+        assert_eq!(up.craft(&mut w, &ToolKinds::new()), Ok(0));
+        assert_eq!(w.equipment.get(crate::defs::EquipSlot::Weapon), None);
     }
 
     #[test]
