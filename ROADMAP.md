@@ -434,6 +434,73 @@ Options row *Language*; the editor exports a translation template. Large but mec
 - Gapless music loops: quad-snd (macroquad's mixer) leaves a short silence where a looped sound
   ends inside a mix buffer. The rain avoids it with a length of whole buffers; music files would
   need padding to whole buffers when loaded (decode, pad, re-encode) or a fixed quad-snd.
+- **Schedules across maps and with furniture** (improves *NPC schedules* of 0.5.0): a scheduled
+  character can go to another map (into its house, the shop, the tavern) and use furniture
+  there: sleep in a bed, sit on a chair or bench, stand at a counter. Ideas so far:
+  - *Stops on other maps*: `ScheduleStop.map: String` (`#[serde(default)]`, "" = the
+    character's own map). To get there the character walks to a portal / transition zone of
+    its map leading to that map (the nearest one, found by `target_map`), then leaves: on its
+    home map it is `away` (as *inside* stops today). Where everyone is lives in the save game,
+    e.g. `WorldState.npc_whereabouts: BTreeMap<String /* home map */, BTreeMap<u32 /* uid */,
+    String /* map */>>` (serde default), so the other map knows its visitors.
+  - *Visitors*: building a map's entities adds the characters whose current stop is on this map
+    (their instance comes from the home map: load it through the map cache, or keep a copy of
+    the instance in the whereabouts entry). They get a runtime uid range of their own like
+    dropped items (`DROPPED_UID_BASE`), their triggers, look and items come along, and state
+    changes are saved under the home map's uid. Arriving while the player is there: they appear
+    at the portal's arrival spawn and walk to the stop; leaving: they walk to the portal of their
+    next stop and disappear. Maps the player isn't on aren't simulated (as today: placed at the
+    stop of the hour on entering).
+  - *Furniture*: `PropDef.use_spot: Option<UseSpot { offset: (f32, f32), facing, pose: Sit |
+    Lie | Stand }>` (serde default; editor: Database › Props, with a preview of the spot), and a
+    stop that names a prop instead of a tile (`ScheduleStop.prop: String`, an entity name on
+    the stop's map; the tile is then the spot in front of it). Arrived, the character snaps to
+    the spot and takes the pose: *Sit* draws the paperdoll a few pixels lower with the legs
+    clipped (like the swimming item's clipped frame), *Lie* draws it rotated 90° on the bed with
+    the bed's optional "occupied" state on top (a blanket overlay, so the prop decides what
+    covers the sleeper), *Stand* only faces the furniture (counters, anvils, shelves). The prop
+    isn't solid for its user while in use; a used prop is skipped by others (first come).
+  - *Interaction*: talking to a sleeping character runs its triggers as usual, with a new
+    condition `Cond::Activity { target, pose }` (appended; "is asleep") for "Zzz..." lines, or
+    a default "is asleep" toast when no trigger matches; waking it is up to the creator
+    (`stop_schedule`, a dialog). `status` lists `pose=` per scheduled character.
+  - *Example*: Tomas sleeps in a bed in the elder's house instead of vanishing at the door;
+    Tilda sits behind her counter by day and goes upstairs (or home) at night; a bench on the
+    village green for the afternoon. Needs a bed (with an "occupied" state), a chair and a
+    bench prop in the generator.
+  - *Verify*: autoplay at 20:30 follows Tomas through the door (`status` on the house map
+    shows him walking in, then `pose=lie`), save / load at night keeps him in bed, entering the
+    house at noon shows nobody; screenshots of sitting and sleeping.
+- **The player uses furniture** (builds on the `UseSpot` of the idea above; either can come
+  first): sit on chairs and benches, sleep in beds.
+  - *Using*: interacting with a prop that has a use spot (E / right-click, nothing else on the
+    tile in front) puts the player on the spot in its pose, drawn like a character's (sit: lower
+    with clipped legs, lie: rotated with the bed's "occupied" overlay). A movement key, Cancel or
+    an attack stands the player up at the tile in front of the prop. The prop's own *Interact*
+    triggers run first; the spot is used only when none of them ran (so a bed can still have a
+    "Sleep here?" dialog). Taken spots (an NPC sits there) refuse with a toast. Not saved: a
+    loaded game starts standing. `status` prints `pose=`; autoplay `press e` at a chair works.
+  - *Sitting*: cosmetic plus a small rest bonus (HP / mana regenerate faster while sitting, a
+    project setting, default ×2), no attacks; the camera stays.
+  - *Sleeping*: a bed asks "Sleep until morning?" (or *for N hours*: `UseSpot.sleep_until`
+    hour, default 7). Yes: fade out, the clock jumps, HP and mana are restored, timed effects
+    run out, spawners with *Respawn after* timers advance, scheduled characters are placed at
+    their new stops (`place_on_schedule` for every one), the weather and lighting follow the
+    hour; fade in, the player gets up beside the bed. Refused while hostile characters are in
+    sight ("You can't sleep with enemies nearby") and in cut-scenes. Optional conditions on the
+    spot (`UseSpot.conditions`, the condition editor; e.g. a paid inn room: flag `room_paid`)
+    with a refusal text.
+  - *Events and scripts*: `TriggerOn::Sleep` (appended; map and prop triggers, after waking: a
+    dream, an ambush, a quest stage), `Action::Sleep { hours }` / script `sleep(hours)` to rest
+    without a bed (camping, an inn keeper's "Rest" choice), `is_sitting()` / `is_sleeping()` in
+    conditions via `Cond::Script` or a `Cond::Activity { target: "player", pose }` shared with
+    the NPC idea. An autosave after waking (like map changes).
+  - *Example*: the bed in the elder's house (sleep until 7:00, free), Tilda's inn-style "Rest
+    (10 coins)" choice using `sleep(8)`, benches and chairs to sit on in the village and the
+    shop.
+  - *Verify*: autoplay `press e` at a chair → `pose=sit`, `hold left` stands up; at the bed at
+    22:00 with 5 HP: the choice, `press e` → `time=07:00`, full HP, Tomas at his 07:00 stop;
+    with a slime in sight the toast and no time jump; screenshots of sitting and sleeping.
 
 ## Shipped
 
