@@ -1474,6 +1474,13 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             ui.weak("(negative = damage; on a healing item set to 'Use on: Player or companion' it heals whom the player chooses)");
         }
+        Action::Mood { target, mood } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "mood", |ui| {
+                ui.add(egui::TextEdit::singleline(mood).desired_width(120.0).hint_text("worried"));
+            });
+            ui.weak("(the portrait of that mood, from the character's definition, until changed or the event ends; empty = its usual portrait)");
+        }
         Action::OpenCompanion { target } => {
             target_field(ui, id, target, refs);
             ui.weak("(a companion: its window with its gear and bag opens after the event, e.g. after a dialog's \"Let me see your gear\")");

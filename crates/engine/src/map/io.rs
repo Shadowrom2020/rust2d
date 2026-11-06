@@ -276,6 +276,11 @@ mod tests {
             ..Default::default()
         });
         m.entities.push(chest);
+        // A placed character's own portrait lives in the map's RON part.
+        let uid = m.alloc_uid();
+        let mut tilda = EntityInstance::new(uid, EntityKind::Character, "merchant", 3.0, 4.0);
+        tilda.portrait = Some(crate::defs::SpriteRef::new("portraits", 2));
+        m.entities.push(tilda);
         let bytes = encode(&m).unwrap();
         let back = decode(&bytes).unwrap();
         assert_eq!((back.width, back.height), (1024, 1024));

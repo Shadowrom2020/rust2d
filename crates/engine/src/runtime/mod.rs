@@ -141,6 +141,8 @@ struct RtEntity {
     damage: i32,
     invuln: f32,
     flash: f32,
+    /// The placed character's own portrait (`EntityInstance::portrait`).
+    portrait: Option<crate::defs::SpriteRef>,
     /// HP the last hit took (a character drinks a potion before the next one would fell it).
     last_hit: i32,
     /// Seconds before it uses another item it carries.
@@ -250,6 +252,8 @@ pub struct Game {
     leave_hold: f32,
     /// A companion window to open once the running event is over (`Action::OpenCompanion`).
     pending_companion: Option<u32>,
+    /// Moods of characters' portraits (definition id -> mood) while an event runs.
+    moods: std::collections::HashMap<String, String>,
     /// The open "Heal whom?" choice.
     heal_pick: Option<healing::HealPick>,
     /// The open companion orders menu (G).
@@ -362,6 +366,7 @@ impl Game {
             leaving: None,
             leave_hold: 0.0,
             pending_companion: None,
+            moods: Default::default(),
             heal_pick: None,
             order_menu: None,
             comp_win: None,
@@ -479,6 +484,7 @@ impl Game {
             damage,
             invuln: 0.0,
             last_hit: 0,
+            portrait: None,
             item_cd: 0.0,
             flash: 0.0,
             knock: Vec2::ZERO,
@@ -559,6 +565,7 @@ impl Game {
         );
         rt.count = count;
         rt.light = e.light.clone();
+        rt.portrait = e.portrait.clone();
         if e.kind == EntityKind::Character {
             if let Some(loot) = &e.loot {
                 rt.loot = loot.clone();
@@ -1126,6 +1133,10 @@ impl Game {
         let queued = std::mem::replace(&mut self.runner, runner);
         self.runner.append(queued);
         self.update_leaving(dt);
+        // Moods last as long as the event that set them.
+        if !self.moods.is_empty() && !self.runner.busy() && !self.ui.dialog_open() {
+            self.moods.clear();
+        }
         self.update_cutscene(dt);
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
@@ -2029,6 +2040,10 @@ impl ActionHost for Game {
             }
             Action::CompanionOrder { target, order } => {
                 self.order_companion(target, order, ctx.owner);
+                Step::Continue
+            }
+            Action::Mood { target, mood } => {
+                self.set_mood(target, mood, ctx.owner);
                 Step::Continue
             }
             Action::OpenCompanion { target } => {

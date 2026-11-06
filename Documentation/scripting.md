@@ -296,6 +296,8 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `say(text)` | Shows a dialog box and waits for the player. *(queued, blocks)* |
 | `say(speaker, text)` | Dialog with a speaker name. The dialog shows the speaker's portrait when the name fits a character: `"{player}"` (or the player's name) for the hero's own lines, a character on the map or a character definition otherwise (*Dialog portraits* in the README). *(queued, blocks)* |
 | `say(entity, text)` | Dialog with an entity's name as speaker: `say(SELF, "…")`. *(queued, blocks)* |
+| `say(speaker, text, options)` | The same with options: `#{ mood: "worried" }` shows the speaker's portrait for that mood (a *Moods* entry of its character definition) for this line, e.g. `say("Elder Rowan", "The lights are back...", #{ mood: "worried" });`. Also `say(SELF, text, options)`. *(queued, blocks)* |
+| `mood(target, mood)` | A character's portrait shows that mood (its definition's mood portrait) from now on, until changed or the running event is over; `""` = its usual portrait. `target`: a character on the map, or a character definition's id or name. *(queued)* |
 | `choice(text, options, var)` | Asks a question with answers `["Yes", "No"]`; the chosen index (0 = first) goes into variable `var`. *(queued, blocks)* |
 | `wait(seconds)` | Pauses the queue. *(queued, blocks)* |
 | `then_call(function)` | Calls another script function when the queue gets there. *(queued)* |

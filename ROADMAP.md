@@ -287,7 +287,7 @@ bag; the dialog's "Let me see your gear" opens the window; with *can't be given 
 stays with the player. Screenshots of the window, the toasts, the HUD ammo and the editor
 checkbox. Unit test: what items do (`scan`).
 
-### [ ] Portrait images — `feature/portrait-images`
+### [x] Portrait images — `feature/portrait-images`
 
 **Goal.** Creators give characters a drawn portrait; without one the automatic head-and-shoulders
 rendering of *Dialog portraits* stays.
@@ -306,16 +306,31 @@ rendering of *Dialog portraits* stays.
   (a 64 x 64 frame on a `portraits` sheet, opened in the pixel editor); import of a PNG as a
   portrait. Library export carries the sheet (`refs_of_character`), renames follow (`refactor.rs`).
 
+**Decided while building.** `Action::Dialog` keeps its shape (version-1 maps decode actions with
+postcard): moods come from a new appended `Action::Mood { target, mood }` (*Set mood*), kept in
+`Game::moods` (definition id -> mood) until changed or the running event is over; the script
+`say(name, text, #{ mood })` queues Mood, the line and a reset, `mood(name, m)` sets one. The
+player: `ProjectConfig.player_portrait`, else the player character's portrait; no per-body
+portraits for the character creator yet. `Assets::draw_sprite_fit` draws a portrait of any
+size keeping its shape; `draw_entity_portrait` serves the HUD rows. No separate PNG import:
+an image added as a sprite sheet (*File › Import › Sprite sheet*) can be chosen as a portrait.
+
 **Touch points.** `defs.rs`, `map/io.rs` (Meta), `events/mod.rs` (`mood`), `runtime/portraits.rs`,
 `script.rs` (`say` options), `refactor.rs`, editor `database.rs`, `widgets.rs`, `pixel.rs`,
 gen_example (portrait art), README, scripting.md.
 
-**Example.** Drawn portraits for the elder (with a *worried* mood in the intro) and Tilda; the
+**Example.** Drawn portraits for the elder (with a *worried* mood while he speaks of the lights) and Tilda; the
 others keep the automatic one, to show both.
 
-**Verify.** The elder's dialog shows his image, the guard's the bust (screenshots); the intro's
-worried line shows the mood image; clearing the field falls back; library export of the elder
-includes the portrait sheet (unit test in `library.rs`).
+**Verify (done).** Autoplay on a scratch copy: talking to the elder shows his drawn portrait,
+then the worried one for the "strange lights" line (Set mood in his trigger); `say("Tilda", …)`
+shows her placed instance's own portrait, `say("Town Guard", …)` the automatic bust, `say("Elder
+Rowan", "Hm...", #{ mood: "worried" })` the worried one (screenshots). Editor: the Portrait
+section with Clear / Edit art / New blank portrait / Moods (screenshot); `newframe` on the
+villager adds frame 3 of `portraits` (a new row) and opens the pixel editor. Unit tests: old
+characters have no portrait, `refs_of_character` carries the portrait and mood sheets, sheet
+renames reach definitions, the player portrait and placed characters, the map round trip keeps
+a placed character's portrait.
 
 ## 0.7.0 — Trades and town life
 

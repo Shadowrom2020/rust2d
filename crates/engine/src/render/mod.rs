@@ -336,6 +336,18 @@ impl Assets {
     }
 
     /// Draws a frame scaled into `dest` (screen UI, icons).
+    /// Draws a sprite (its whole cell block) scaled into `r` keeping its shape: centered,
+    /// standing on the bottom edge. Returns false if the sheet is unknown.
+    pub fn draw_sprite_fit(&self, sprite: &crate::defs::SpriteRef, r: Rect) -> bool {
+        let Some(s) = self.sheets.get(&sprite.sheet) else { return false };
+        let (w, h) = sprite.cells();
+        let src = s.region(sprite.frame, w, h);
+        let scale = (r.w / src.w).min(r.h / src.h);
+        let (dw, dh) = (src.w * scale, src.h * scale);
+        draw_texture_ex(&s.texture, (r.x + (r.w - dw) / 2.0).round(), (r.bottom() - dh).round(), WHITE, DrawTextureParams { source: Some(src), dest_size: Some(vec2(dw, dh)), ..Default::default() });
+        true
+    }
+
     pub fn draw_frame_in(&self, sheet: &str, frame: u32, dest: Rect, tint: Color) -> bool {
         let Some(s) = self.sheets.get(sheet) else { return false };
         draw_texture_ex(

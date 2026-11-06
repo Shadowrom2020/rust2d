@@ -2300,6 +2300,24 @@ impl Editor {
                             }
                         });
                     });
+                    // A drawn portrait just for this one (dialogs, the companion HUD).
+                    egui::CollapsingHeader::new(ui::t(ph::USER_SQUARE, "Portrait")).default_open(e.portrait.is_some()).show(ui, |ui| {
+                        match &mut e.portrait {
+                            Some(p) => {
+                                widgets::sprite_field(ui, &format!("ent_portrait{}", e.uid), p, &self.tex, &self.assets, db, false);
+                                if ui.button("Use the definition's").clicked() {
+                                    e.portrait = None;
+                                }
+                            }
+                            None => {
+                                ui.weak(if d.portrait.is_empty() { "The head and shoulders of its look (the definition has no drawn portrait)." } else { "The definition's portrait." });
+                                if ui.button("Own portrait…").on_hover_text("Give just this placed character its own drawn portrait").clicked() {
+                                    e.portrait = Some(d.portrait.clone());
+                                    widgets::request_chooser(&format!("ent_portrait{}", e.uid));
+                                }
+                            }
+                        }
+                    });
                 }
                 if e.kind == EntityKind::Character {
                     ui.separator();

@@ -251,6 +251,13 @@ pub struct SpriteRef {
     pub h: u32,
 }
 
+impl SpriteRef {
+    /// No sprite chosen.
+    pub fn is_empty(&self) -> bool {
+        self.sheet.is_empty()
+    }
+}
+
 fn one_cell() -> u32 {
     1
 }
@@ -878,6 +885,12 @@ pub struct CharacterDef {
     /// As a companion it can't be given gear (a wolf, a slime); it still carries items.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gear_locked: bool,
+    /// A drawn portrait for dialogs and the HUD (empty = the head and shoulders of its model).
+    #[serde(default, skip_serializing_if = "SpriteRef::is_empty")]
+    pub portrait: SpriteRef,
+    /// Portraits for moods ("worried", "angry", ...), shown while a dialog sets that mood.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub moods: std::collections::BTreeMap<String, SpriteRef>,
 }
 
 /// One line of a loot table: `item` drops with `chance` percent, `min..=max` of them.

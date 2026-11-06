@@ -121,6 +121,9 @@ pub struct EntityInstance {
     /// Characters: carried items instead of the definition's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inventory: Option<Vec<crate::inventory::ItemStack>>,
+    /// The placed character's own portrait (None = its definition's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portrait: Option<crate::defs::SpriteRef>,
 }
 
 fn yes() -> bool {
@@ -260,6 +263,7 @@ impl EntityInstance {
             inventory: None,
             patrol: None,
             schedule: Vec::new(),
+            portrait: None,
             loot: None,
         }
     }

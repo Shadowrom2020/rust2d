@@ -360,6 +360,8 @@ pub fn default_character(db: &Database, id: &str, name: &str) -> CharacterDef {
         equipment,
         inventory: Vec::new(),
         gear_locked: false,
+        portrait: Default::default(),
+        moods: Default::default(),
     }
 }
 
