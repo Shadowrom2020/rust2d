@@ -466,7 +466,7 @@ impl Editor {
 
     pub fn pixel_ui(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("px_left").resizable(true).default_width(270.0).show(ctx, |ui| {
-            egui::ScrollArea::vertical().id_salt("px_left_scroll").show(ui, |ui| self.pixel_side(ui, false));
+            egui::ScrollArea::vertical().id_salt("px_left_scroll").auto_shrink(false).show(ui, |ui| self.pixel_side(ui, false));
         });
         egui::CentralPanel::default().show(ctx, |ui| self.pixel_canvas(ui));
         self.pixel_keys(ctx);

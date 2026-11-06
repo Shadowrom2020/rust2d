@@ -56,6 +56,10 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
 - Database › Tilesets (also in the Asset Library window): the tile grid could only be seen in a
   thin strip at the end of the form, and the scrollbar stopped before the tileset's last rows.
   The grid is now part of the form (it scrolls only sideways for very wide images).
+- Lists and panels (the Database lists, the script file list, the map's left panel and
+  inspector, the Project form, the pixel editor's side panel, the library grid) shrank to their
+  widest entry: the scrollbar sat right after the longest name and the mouse wheel did nothing
+  over the empty space next to it. They now fill their panel.
 
 ## 0.3.0 — 2026-11-06
 

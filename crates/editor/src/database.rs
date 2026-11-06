@@ -162,7 +162,7 @@ fn list_ui<T: Clone>(
         }
     });
     ui.separator();
-    egui::ScrollArea::vertical().id_salt("db_list").show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("db_list").auto_shrink(false).show(ui, |ui| {
         for (i, it) in items.iter().enumerate() {
             if ui.selectable_label(*sel == i, label(it)).clicked() {
                 *sel = i;
@@ -1619,7 +1619,7 @@ fn sound_form(ui: &mut egui::Ui, d: &mut SoundDef, cx: &mut Cx) {
 }
 
 fn project_ui(ed: &mut Editor, ui: &mut egui::Ui) {
-    egui::ScrollArea::vertical().id_salt("project_scroll").show(ui, |ui| project_form(ed, ui));
+    egui::ScrollArea::vertical().id_salt("project_scroll").auto_shrink(false).show(ui, |ui| project_form(ed, ui));
 }
 
 fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
@@ -1927,7 +1927,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     egui::SidePanel::left("scripts_left").default_width(220.0).show_inside(ui, |ui| {
         let st = &mut ed.db;
         ui.weak("Click a file or one of its functions to edit it.");
-        egui::ScrollArea::vertical().id_salt("script_files").max_height(ui.available_height() - 40.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("script_files").auto_shrink(false).max_height(ui.available_height() - 40.0).show(ui, |ui| {
             for f in &files {
                 let name = f.file_name().unwrap().to_string_lossy().to_string();
                 let current = st.script_file.as_ref() == Some(f);
