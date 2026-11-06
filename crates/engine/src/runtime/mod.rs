@@ -15,6 +15,7 @@ mod skills;
 mod lights;
 mod creator;
 mod patrol;
+mod schedule;
 mod progression;
 mod paperdoll;
 mod npc_items;
@@ -144,6 +145,10 @@ struct RtEntity {
     unlocked: bool,
     /// Patrol route and progress (characters with a route).
     patrol: Option<patrol::Patrol>,
+    /// Daily routine (placed characters with a schedule).
+    schedule: Option<schedule::Schedule>,
+    /// Gone indoors at a schedule stop: inactive until the next stop (saved as active).
+    away: bool,
     /// What the character drops when defeated.
     loot: Vec<crate::defs::LootEntry>,
     /// Light of this placed entity instead of its definition's.
@@ -426,6 +431,8 @@ impl Game {
             unlocked: false,
             state: 0,
             patrol: None,
+            schedule: None,
+            away: false,
             loot: match (kind, self.project.db.character(def)) {
                 (EntityKind::Character, Some(d)) => d.loot.clone(),
                 _ => Vec::new(),
@@ -512,6 +519,11 @@ impl Game {
                         let p = rt.patrol.get_or_insert_with(Default::default);
                         p.restore(ps);
                     }
+                    if !e.schedule.is_empty() {
+                        let mut s = schedule::Schedule::new(e.schedule.clone());
+                        s.on = !st.is_some_and(|s| s.schedule_off);
+                        rt.schedule = Some(s);
+                    }
                 }
                 rt.unlocked = st.is_some_and(|s| s.unlocked);
                 if let Some(d) = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten() {
@@ -545,6 +557,10 @@ impl Game {
         let tile_lights = render::lighting::tile_lights(&map, &self.project.db, ts);
         let old = std::mem::replace(&mut self.loaded, Loaded { map, solid, entities, tile_lights });
         self.restore_unlocked();
+        // Scheduled characters are where their day has taken them.
+        for i in 0..self.loaded.entities.len() {
+            self.place_on_schedule(i);
+        }
         if !old.map.name.is_empty() && old.map.name != self.loaded.map.name {
             self.cache.push_front(old.map);
             self.cache.truncate(MAP_CACHE);
@@ -641,6 +657,25 @@ impl Game {
             return true;
         }
         self.loaded.solid[(ty as u32 * m.width + tx as u32) as usize]
+    }
+
+    /// Tiles taken by active solid entities that pass `keep` (any real overlap of the hitbox
+    /// blocks a tile: small hitboxes sit at the bottom of their tile). For path finding.
+    fn solid_entity_tiles(&self, keep: impl Fn(&RtEntity) -> bool) -> std::collections::HashSet<crate::path::TilePos> {
+        let ts = self.ts();
+        let mut occupied = std::collections::HashSet::new();
+        for e in self.loaded.entities.iter().filter(|e| e.active && e.solid && keep(e)) {
+            let r = e.body.rect();
+            for ty in (r.y / ts).floor() as i32..=((r.y + r.h) / ts).floor() as i32 {
+                for tx in (r.x / ts).floor() as i32..=((r.x + r.w) / ts).floor() as i32 {
+                    let inner = Rect::new(tx as f32 * ts + 2.0, ty as f32 * ts + 2.0, ts - 4.0, ts - 4.0);
+                    if r.overlaps(&inner) {
+                        occupied.insert((tx, ty));
+                    }
+                }
+            }
+        }
+        occupied
     }
 
     fn rect_blocked(&self, r: Rect, ignore: Option<u32>, check_player: bool) -> bool {
@@ -837,7 +872,8 @@ impl Game {
         }
         let state = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten().map(|d| d.state_name(e.state).to_string());
         let st = EntityState {
-            active: e.active,
+            // Indoors at a schedule stop is not inactive (the schedule brings it out again).
+            active: e.active || e.away,
             frame: e.frame,
             x: e.body.pos.x,
             y: e.body.pos.y,
@@ -846,6 +882,7 @@ impl Game {
             unlocked: e.unlocked,
             state,
             patrol: e.patrol.as_ref().map(|p| p.state()),
+            schedule_off: e.schedule.as_ref().is_some_and(|s| !s.on),
         };
         let map = self.loaded.map.name.clone();
         let uid = e.uid;
@@ -1314,6 +1351,11 @@ impl Game {
         let ts = self.ts();
         for i in 0..self.loaded.entities.len() {
             let e = &self.loaded.entities[i];
+            if e.away && !frozen {
+                // Indoors: only the clock brings it out.
+                self.schedule_step(i, dt);
+                continue;
+            }
             if !e.active || e.kind != EntityKind::Character {
                 continue;
             }
@@ -1346,8 +1388,15 @@ impl Game {
                 continue;
             }
             let dt = dt * f;
-            if self.chase(i, dt) || self.patrol_step(i, dt) {
+            if self.chase(i, dt) {
                 continue;
+            }
+            match self.schedule_step(i, dt) {
+                Some(true) => continue,
+                // At its stop: wander around it (or stand), patrol routes wait.
+                Some(false) => {}
+                None if self.patrol_step(i, dt) => continue,
+                None => {}
             }
             let e = &self.loaded.entities[i];
             let radius = match e.behavior {
@@ -1396,7 +1445,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1420,6 +1469,7 @@ impl Game {
             self.loaded.map.lighting.mode,
             self.lights().len(),
             self.patrol_status(),
+            self.schedule_status(),
             {
                 let ts = self.ts();
                 let here = self.loaded.entities.iter().filter(|e| e.active && e.uid >= crate::state::DROPPED_UID_BASE);
@@ -1814,6 +1864,7 @@ impl ActionHost for Game {
             Action::SetActive { target, active } => {
                 if let Some(i) = self.entity_index(target, ctx.owner) {
                     self.loaded.entities[i].active = *active;
+                    self.loaded.entities[i].away = false;
                     self.persist(i);
                 }
                 Step::Continue
@@ -1833,6 +1884,13 @@ impl ActionHost for Game {
             }
             Action::Quest { quest, op, stage } => {
                 self.quest_changed(quest, *op, *stage);
+                Step::Continue
+            }
+            Action::Schedule { target, active } => {
+                match self.entity_index(target, ctx.owner) {
+                    Some(i) if self.loaded.entities[i].schedule.is_some() => self.set_schedule(i, *active),
+                    _ => eprintln!("Schedule: '{target}' is not a character with a schedule on this map"),
+                }
                 Step::Continue
             }
             Action::SetTime { hour } => {

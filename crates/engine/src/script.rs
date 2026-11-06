@@ -421,6 +421,8 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         c.actions.push(Action::Patrol { target: t.into(), active: true, points })
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
+    engine.register_fn("follow_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: true })));
+    engine.register_fn("stop_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: false })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
     // The HUD (status frame, clock, quick bar, buttons), e.g. for cut-scenes.
     engine.register_fn("hide_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: false })));
@@ -803,6 +805,9 @@ mod tests {
                 Action::Patrol { target: "self".into(), active: true, points: vec![] },
             ]
         );
+        host.load_source(r#"fn day() { stop_schedule("mira"); follow_schedule("mira"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "day", None);
+        assert_eq!(actions, vec![Action::Schedule { target: "mira".into(), active: false }, Action::Schedule { target: "mira".into(), active: true }]);
     }
 
     #[test]

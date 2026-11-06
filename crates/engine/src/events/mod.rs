@@ -497,6 +497,8 @@ pub enum Action {
     /// Weather of a map ("" = the current one); `None` = back to the map's own weather. Kept
     /// in the save game.
     SetWeather { map: String, weather: Option<crate::map::Weather> },
+    /// Makes a character follow its daily schedule again (`active`) or stop following it.
+    Schedule { target: TargetName, active: bool },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -597,6 +599,7 @@ impl Action {
             Action::CureEffect { .. } => "Cure effect",
             Action::Shake { .. } => "Shake the screen",
             Action::SetWeather { .. } => "Set weather",
+            Action::Schedule { .. } => "Schedule",
         }
     }
 
@@ -657,6 +660,7 @@ impl Action {
             Action::CureEffect { target: "player".into(), kind: Some(crate::effects::EffectKind::Poison) },
             Action::Shake { seconds: 0.5, strength: 1.5 },
             Action::SetWeather { map: s(), weather: Some(crate::map::Weather::new(crate::map::WeatherKind::Rain, 0.6)) },
+            Action::Schedule { target: "self".into(), active: false },
         ]
     }
 }

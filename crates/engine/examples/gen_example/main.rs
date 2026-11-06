@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use rust2d_engine::defs::*;
 use rust2d_engine::effects::{EffectKind, EffectSpec};
-use rust2d_engine::entity::{EntityInstance, EntityKind};
+use rust2d_engine::entity::{EntityInstance, EntityKind, Facing, ScheduleStop};
 use rust2d_engine::events::*;
 use rust2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
 use rust2d_engine::audio::wav_bytes;
@@ -446,7 +446,21 @@ fn village() -> Map {
     v.name = "mira".into();
     v.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "mira_talk".into() }])];
     let v2 = b.entity(EntityKind::Character, "villager", 34, 14);
-    v2.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Villager", "Lovely weather today, isn't it, {sir|miss}?")])];
+    // Tomas has a daily schedule (map inspector: Daily schedule): the shop in the morning, the
+    // duck pond at noon, the big pond in the afternoon, home (inside the elder's house, whose
+    // door is at 20,7) at night. What he says depends on the time (Time of day condition).
+    v2.name = "tomas".into();
+    v2.schedule = vec![
+        ScheduleStop::new(7.0, 34, 14),
+        ScheduleStop { facing: Some(Facing::Down), ..ScheduleStop::new(12.0, 22, 23) },
+        ScheduleStop { facing: Some(Facing::Down), ..ScheduleStop::new(16.0, 9, 23) },
+        ScheduleStop { facing: Some(Facing::Up), inside: true, ..ScheduleStop::new(20.5, 20, 7) },
+    ];
+    let daytime = |from: f32, to: f32| cond(Cond::TimeBetween { from, to });
+    v2.triggers = vec![
+        trig(TriggerOn::Interact, vec![daytime(6.0, 18.0)], vec![dialog("Tomas", "Lovely weather today, isn't it, {sir|miss}?")]),
+        trig(TriggerOn::Interact, vec![daytime(18.0, 6.0)], vec![dialog("Tomas", "Getting late, {sir|miss}. I'll be heading home soon - the elder keeps the door open for me.")]),
+    ];
     b.entity(EntityKind::Item, "apple", 8, 12);
     b.entity(EntityKind::Item, "apple", 37, 21);
 

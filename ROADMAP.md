@@ -133,13 +133,36 @@ volume 0) showed no ALSA underruns; the Options page shows
 *Ambience volume* (screenshot) and saves `ambience_volume`; older settings files get the
 default. Not checked by ear: the rain sound itself (tests run muted).
 
-### [ ] NPC schedules — `feature/schedules`
+### [x] NPC schedules — `feature/schedules`
 
 **Design.** `EntityInstance.schedule: Vec<Stop { hour, x, y }>` (same map): at each hour the NPC
 walks to the stop with the patrol machinery (`patrol_step`, A*) and waits there; the editor edits
 stops on the map like patrol routes. Night lines use the existing `TimeBetween` condition.
 
-**Verify.** `settime` jumps, `status` shows the NPC at the stop; screenshot.
+**Decided while building.** `ScheduleStop { hour, x, y, facing: Option<Facing>, inside: bool }`
+(`entity.rs`, `current_stop`: the latest started stop, the last of the day carries over
+midnight). `runtime/schedule.rs`: the walking part of `patrol_step` became `walk_to_tile` with a
+`Walker` (path + stuck time) shared by both. At its stop the definition's behaviour applies
+(Wander wanders around the stop; a patrol route is ignored while a schedule is followed).
+*Inside* stops make the character inactive with a runtime `away` flag (saved as active, so the
+schedule brings it out again; *Set active* clears it). Entering a map (and loading a save)
+places scheduled characters at their current stop. `Action::Schedule { target, active }`
+(appended) and `stop_schedule` / `follow_schedule` pause and resume it
+(`EntityState.schedule_off`). Path planning for patrols and schedules now also avoids tiles
+under solid props (`solid_entity_tiles`, shared with click-to-walk): the village statue trapped
+Tomas. Editor: `RouteKind` makes the route click editing work for both; stop rows with a time
+field (typed `7:30` or dragged in quarter hours), facing and *inside*.
+
+**Verify (done).** Autoplay on a scratch copy with crafted saves: at 09:00 Tomas stands at the
+07:00 stop; `settime 12` → `schedule=["tomas:12:00(walking)…"]`, at the duck pond after ~20 s
+(screenshot); at 20:30 he walks around the statue to the elder's door and goes inside
+(`(inside)`, screenshots); F5 at night, `settime 9` (he comes out), F9 → inside again; at 19:00
+talking to him gives the night line (screenshot); `console stop_schedule("tomas")` →
+`(stopped)`, kept through F5 / F9, `follow_schedule` → walking. Editor: `scheduleedit on`, a
+`click` adds a 22:00 stop, `stop 4 hour 22.5` / `inside on` / `facing left`, `drag` moves it,
+right-click removes it, `undo`; screenshots of the inspector rows and the dashed loop with time
+labels. Not checked by script: typing a time into the egui field and the facing combo (the
+`stop` command sets the same fields).
 
 ### [ ] Companions — `feature/companions`
 
