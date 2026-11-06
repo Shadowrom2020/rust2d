@@ -266,10 +266,10 @@ impl Assets {
     /// Like [`draw_frame_colored`](Self::draw_frame_colored), scaled into `dest` (portraits).
     /// Like [`draw_frame_colored`](Self::draw_frame_colored), centered at `center` and rotated
     /// by `angle` radians (clockwise on screen): characters lying in a sideways bed.
-    pub fn draw_frame_colored_rotated(&self, sheet: &str, frame: u32, center: Vec2, angle: f32, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
+    pub fn draw_frame_colored_rotated(&self, sheet: &str, frame: u32, center: Vec2, angle: f32, (skin, hair): (Option<[u8; 3]>, Option<[u8; 3]>), tint: Color) -> bool {
         let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
         let pos = vec2((center.x - s.frame_w / 2.0).round(), (center.y - s.frame_h / 2.0).round());
-        draw_texture_ex(&tex, pos.x, pos.y, WHITE, DrawTextureParams { source: Some(s.src_rect(frame)), rotation: angle, ..Default::default() });
+        draw_texture_ex(&tex, pos.x, pos.y, tint, DrawTextureParams { source: Some(s.src_rect(frame)), rotation: angle, ..Default::default() });
         true
     }
 
@@ -336,6 +336,18 @@ impl Assets {
     }
 
     /// Draws a frame scaled into `dest` (screen UI, icons).
+    /// Draws a sprite (its whole cell block) scaled into `r` keeping its shape: centered,
+    /// standing on the bottom edge. Returns false if the sheet is unknown.
+    pub fn draw_sprite_fit(&self, sprite: &crate::defs::SpriteRef, r: Rect) -> bool {
+        let Some(s) = self.sheets.get(&sprite.sheet) else { return false };
+        let (w, h) = sprite.cells();
+        let src = s.region(sprite.frame, w, h);
+        let scale = (r.w / src.w).min(r.h / src.h);
+        let (dw, dh) = (src.w * scale, src.h * scale);
+        draw_texture_ex(&s.texture, (r.x + (r.w - dw) / 2.0).round(), (r.bottom() - dh).round(), WHITE, DrawTextureParams { source: Some(src), dest_size: Some(vec2(dw, dh)), ..Default::default() });
+        true
+    }
+
     pub fn draw_frame_in(&self, sheet: &str, frame: u32, dest: Rect, tint: Color) -> bool {
         let Some(s) = self.sheets.get(sheet) else { return false };
         draw_texture_ex(

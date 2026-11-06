@@ -295,7 +295,7 @@ impl Game {
                 };
                 let center = seat.pos + head * fh / 2.0;
                 for l in self.character_layers(&a, eq, Facing::Down, 0, false) {
-                    self.assets.draw_frame_colored_rotated(&l.sheet, l.frame, center, angle, l.skin, l.hair);
+                    self.assets.draw_frame_colored_rotated(&l.sheet, l.frame, center, angle, (l.skin, l.hair), WHITE);
                 }
             }
             Pose::Stand => {

@@ -207,6 +207,11 @@ fn light(mut d: ItemDef, l: LightSpec) -> ItemDef {
     d
 }
 
+/// A healing item the player can also use on a companion (they choose whom to heal).
+fn for_allies(d: ItemDef) -> ItemDef {
+    ItemDef { use_on: rustpg2d_engine::defs::UseTarget::Choose, ..d }
+}
+
 /// A scroll or book that teaches a spell when used.
 fn teach(mut d: ItemDef, spell: &str) -> ItemDef {
     d.teaches = spell.into();
@@ -436,7 +441,10 @@ fn village() -> Map {
             TriggerOn::Interact,
             vec![not(flag("quest_accepted"))],
             vec![
-                dialog("Elder Rowan", "Ah, a traveller! Welcome to Emberbrook, {player}. Strange lights have been seen in Whisperwood, east of here."),
+                dialog("Elder Rowan", "Ah, a traveller! Welcome to Emberbrook, {player}."),
+                // Set mood: his "worried" portrait until the mood is cleared (or the talk ends).
+                Action::Mood { target: "self".into(), mood: "worried".into() },
+                dialog("Elder Rowan", "Strange lights have been seen in Whisperwood, east of here."),
                 Action::Choice {
                     speaker: "Elder Rowan".into(),
                     text: "Would you investigate the old shrine for us?".into(),
@@ -448,6 +456,7 @@ fn village() -> Map {
                     then: vec![
                         Action::SetFlag { name: "quest_accepted".into(), value: true },
                         quest("strange_lights", QuestOp::Start, 0),
+                        Action::Mood { target: "self".into(), mood: String::new() },
                         dialog("Elder Rowan", "Wonderful! The gate key is in the chest in my house, just north of here."),
                     ],
                     otherwise: vec![dialog("Elder Rowan", "I understand. Come back if you change your mind.")],
@@ -607,6 +616,8 @@ fn shop() -> Map {
     // Tilda behind her counter, with her own stock and prices.
     let merchant = b.entity(EntityKind::Character, "merchant_f", 6, 3);
     merchant.name = "tilda".into();
+    // Her own drawn portrait (placed characters can override their definition's).
+    merchant.portrait = Some(SpriteRef::new("portraits", art::portrait::TILDA));
     merchant.facing = rustpg2d_engine::entity::Facing::Down;
     merchant.shop = Some(ShopSpec {
         title: "Tilda's Wares".into(),
@@ -626,6 +637,7 @@ fn shop() -> Map {
             ShopEntry { unlimited: true, ..ShopEntry::new("torch", 0, 0) },
             ShopEntry::new("wooden_shield", 1, 0),
             ShopEntry::new("scroll_heal", 2, 0),
+            ShopEntry::new("bandage", 6, 0),
             ShopEntry::new("antidote", 5, 0),
             ShopEntry::new("elixir_strength", 2, 0),
             ShopEntry::new("swiftness", 2, 0),
@@ -1137,6 +1149,9 @@ fn database() -> Database {
         appearance: Appearance { body: body.into(), ..Default::default() },
         equipment: Default::default(),
         inventory: Vec::new(),
+        gear_locked: false,
+        portrait: Default::default(),
+        moods: Default::default(),
     };
     let item = |id: &str, name: &str, desc: &str, frame: u32, consumable: bool, on_use: Vec<Trigger>| ItemDef {
         id: id.into(),
@@ -1153,6 +1168,7 @@ fn database() -> Database {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -1261,6 +1277,8 @@ fn database() -> Database {
             SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_chain", "sprites/ov_chain.png", 32, 48) },
             SheetDef::new("props", "sprites/props.png", 32, 32),
             SheetDef::new("items", "sprites/items.png", 32, 32),
+            // Drawn dialog portraits (Database > Characters > Portrait): the elder, Tilda.
+            SheetDef::new("portraits", "sprites/portraits.png", 64, 64),
             // Spell effects (the Fireball script).
             SheetDef::new("fireball", "sprites/fireball.png", 32, 32),
             SheetDef::new("explosion", "sprites/explosion.png", 64, 64),
@@ -1270,22 +1288,14 @@ fn database() -> Database {
         items: vec![
             stack(item("key", "Gate Key", "An old iron key. Opens the east gate.", it::KEY, false, vec![]), 1),
             stack(item("bronze_key", "Bronze Key", "Opens a chest somewhere in Whisperwood.", it::BRONZE_KEY, false, vec![]), 5),
-            stack(item(
+            stack(for_allies(item(
                 "potion",
                 "Red Potion",
                 "Restores 3 hearts.",
                 it::POTION,
                 true,
-                use_trig(vec![
-                    Action::If {
-                        conditions: vec![cond(Cond::PlayerHp { op: CmpOp::Ge, value: 12 })],
-                        then: vec![dialog("", "You're already at full health. You drink it anyway.")],
-                        otherwise: vec![],
-                    },
-                    Action::Heal { amount: 6 },
-                    Action::SetVar { name: "potions_drunk".into(), op: VarOp::Add, value: 1 },
-                ]),
-            ), 10),
+                use_trig(vec![Action::Heal { amount: 6 }, Action::SetVar { name: "potions_drunk".into(), op: VarOp::Add, value: 1 }]),
+            )), 10),
             item("coin", "Coin", "Shiny gold coins.", it::COIN, false, use_trig(vec![Action::RunScript { function: "count_coins".into() }])),
             stack(item("apple", "Apple", "Crunchy and sweet. Restores 1 heart.", it::APPLE, true, use_trig(vec![Action::Heal { amount: 2 }])), 20),
             weapon(
@@ -1296,6 +1306,8 @@ fn database() -> Database {
                 stack(item("crossbow", "Crossbow", "Slow but powerful, uses bolts.", it::CROSSBOW, false, vec![]), 1),
                 Weapon::ranged(3, 1.1, Ranged { projectile: sprite("items", it::BOLT_SHOT), speed: 320.0 * R, range: 10.0, ammo: "bolts".into() }),
             ),
+            // Healing items set to "Player or companion": with a companion along the player chooses.
+            stack(for_allies(item("bandage", "Bandage", "Linen for wounds: restores 1 heart. Use it on yourself or a companion.", it::BANDAGE, true, use_trig(vec![Action::Heal { amount: 2 }]))), 10),
             stack(item("arrows", "Arrows", "Ammunition for the bow.", it::ARROWS, false, vec![]), 50),
             stack(item("bolts", "Bolts", "Ammunition for the crossbow.", it::BOLTS, false, vec![]), 30),
             // Melee weapons: balanced sword, long narrow spear, slow heavy axe.
@@ -1454,7 +1466,12 @@ fn database() -> Database {
         ],
         characters: vec![
             hero,
-            ch("elder", "Elder", "", 40.0, Behavior::Static),
+            // A drawn portrait with a "worried" mood (the other characters show their bust).
+            CharacterDef {
+                portrait: sprite("portraits", art::portrait::ELDER),
+                moods: [("worried".to_string(), sprite("portraits", art::portrait::ELDER_WORRIED))].into_iter().collect(),
+                ..ch("elder", "Elder", "", 40.0, Behavior::Static)
+            },
             ch("villager", "Villager", "", 35.0, Behavior::Wander { radius: 3.0 }),
             // The guard can be hurt (he can come along as a companion: guard_talk()).
             CharacterDef { max_hp: 8, ..ch("guard", "Town Guard", "", 40.0, Behavior::Static) },
@@ -1481,6 +1498,7 @@ fn database() -> Database {
     // Trade values (merchants use them unless their stock sets a price).
     for (id, v) in [
         ("potion", 15),
+        ("bandage", 4),
         ("apple", 3),
         ("bow", 40),
         ("crossbow", 70),
@@ -1781,8 +1799,12 @@ fn intro_cutscene() {
 // stop_following(target) sends it home; is_companion(name) tells.
 fn guard_talk() {
     if is_companion("guard") {
-        choice("Shall I go back to my post, {player}?", ["Yes, thank you", "No, stay with me"], "guard_leave");
-        then_call("guard_answer");
+        // Orders (also from the orders menu, G): order(name, "attack" | "defend" | "passive" |
+        // "stay" | "follow"); order_of(name) / is_staying(name) tell what it does now.
+        let wait = if is_staying("guard") { "Come along again" } else { "Wait here" };
+        let fight = if order_of("guard") == "passive" { "Fight with me again" } else { "Stay out of fights" };
+        choice("What is it, {player}?", [wait, fight, "Let me see your gear", "Go back to your post", "Nothing"], "guard_cmd");
+        then_call("guard_orders");
     } else if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
         stop_patrol("guard");
@@ -1795,13 +1817,35 @@ fn guard_talk() {
     }
 }
 
-fn guard_answer() {
-    if is_companion("guard") {
-        if get_var("guard_leave") == 0 {
-            say("Guard", "Back to the road, then. Good luck, {player}!");
-            stop_following("guard");
+fn guard_orders() {
+    let cmd = get_var("guard_cmd");
+    if cmd == 0 {
+        if is_staying("guard") {
+            say("Guard", "Right behind you.");
+            order("guard", "follow");
+        } else {
+            say("Guard", "I'll hold this spot.");
+            order("guard", "stay");
         }
-    } else if get_var("guard_join") == 0 {
+    } else if cmd == 1 {
+        if order_of("guard") == "passive" {
+            say("Guard", "Finally! Let them come.");
+            order("guard", "attack");
+        } else {
+            say("Guard", "I'll keep my spear down, then.");
+            order("guard", "passive");
+        }
+    } else if cmd == 2 {
+        // open_companion(name): the companion's window (gear, bag) after the dialog.
+        open_companion("guard");
+    } else if cmd == 3 {
+        say("Guard", "Back to the road, then. Good luck, {player}!");
+        stop_following("guard");
+    }
+}
+
+fn guard_answer() {
+    if get_var("guard_join") == 0 {
         say("Guard", "Lead the way, {player}!");
         follow("guard");
     }
@@ -1943,6 +1987,7 @@ fn main() {
     slime(&out);
     props(&out);
     items(&out);
+    portraits(&out);
     fireball(&out);
     explosion(&out);
     magic_burst(&out);
@@ -1999,6 +2044,8 @@ fn main() {
         progression: rustpg2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
         // Dialog boxes show the speaker's portrait (found from the speaker's name).
         dialog_portraits: true,
+        companion_down: Default::default(),
+        player_portrait: Default::default(),
         },
         db: database(),
     };

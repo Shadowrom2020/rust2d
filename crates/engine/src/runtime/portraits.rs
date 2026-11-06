@@ -5,7 +5,7 @@
 use macroquad::prelude::*;
 
 use super::Game;
-use crate::defs::Appearance;
+use crate::defs::{Appearance, SpriteRef};
 use crate::entity::{EntityKind, Facing};
 use crate::state::Equipment;
 
@@ -82,6 +82,76 @@ impl Game {
         }
     }
 
+    /// The definition id behind a speaker (moods and drawn portraits belong to definitions).
+    fn speaker_def(&self, s: &Speaker) -> Option<String> {
+        match s {
+            Speaker::Player => Some(self.project.config.player.clone()).filter(|p| !p.is_empty()),
+            Speaker::Entity(uid) => self.loaded.entities.iter().find(|e| e.uid == *uid).map(|e| e.def.clone()),
+            Speaker::Def(id) => Some(id.clone()),
+        }
+    }
+
+    /// The drawn portrait a speaker shows now, if it has one: its mood's, the placed
+    /// character's own, its definition's (the player: the project's player portrait first).
+    fn portrait_image(&self, s: &Speaker) -> Option<SpriteRef> {
+        let def = self.speaker_def(s).and_then(|id| self.project.db.character(&id));
+        if let Some(d) = def {
+            if let Some(m) = self.moods.get(&d.id).and_then(|m| d.moods.get(m)).filter(|m| !m.is_empty()) {
+                return Some(m.clone());
+            }
+        }
+        match s {
+            Speaker::Player if !self.project.config.player_portrait.is_empty() => return Some(self.project.config.player_portrait.clone()),
+            Speaker::Entity(uid) => {
+                if let Some(p) = self.loaded.entities.iter().find(|e| e.uid == *uid).and_then(|e| e.portrait.clone()).filter(|p| !p.is_empty()) {
+                    return Some(p);
+                }
+            }
+            _ => {}
+        }
+        def.map(|d| d.portrait.clone()).filter(|p| !p.is_empty())
+    }
+
+    /// A character's portrait for the HUD rows: its drawn one, else its head and shoulders.
+    pub(super) fn draw_entity_portrait(&self, uid: u32, r: Rect) {
+        let s = Speaker::Entity(uid);
+        if let Some(p) = self.portrait_image(&s) {
+            if self.assets.draw_sprite_fit(&p, r) {
+                return;
+            }
+        }
+        if let Some((a, eq)) = self.speaker_look(&s) {
+            self.draw_bust(&a, &eq, r);
+        }
+    }
+
+    /// `Action::Mood`: the mood of a character on the map (or a definition by id / name).
+    pub(super) fn set_mood(&mut self, target: &str, mood: &str, owner: Option<u32>) {
+        // A dialog speaker as written: "{self}", "{uid:N}", "{player}" or a name.
+        let uid = match target.trim() {
+            "{self}" => owner,
+            t if t.starts_with("{uid:") => t[5..].trim_end_matches('}').parse().ok(),
+            _ => None,
+        };
+        let target = if target.trim() == "{player}" { self.project.config.player.clone() } else { target.to_string() };
+        let def = uid
+            .and_then(|u| self.loaded.entities.iter().find(|e| e.uid == u).map(|e| e.def.clone()))
+            .or_else(|| self.entity_index(&target, owner).map(|i| self.loaded.entities[i].def.clone()))
+            .or_else(|| {
+                let db = &self.project.db;
+                db.character(&target).or_else(|| db.characters.iter().find(|d| names_match(&d.name, &target))).map(|d| d.id.clone())
+            });
+        let Some(def) = def else {
+            eprintln!("[events] Set mood: no character '{target}'");
+            return;
+        };
+        if mood.trim().is_empty() {
+            self.moods.remove(&def);
+        } else {
+            self.moods.insert(def, mood.trim().to_string());
+        }
+    }
+
     /// The look and gear a portrait shows.
     fn speaker_look(&self, s: &Speaker) -> Option<(Appearance, Equipment)> {
         match s {
@@ -94,22 +164,28 @@ impl Game {
         }
     }
 
+    /// Head and shoulders of a character, scaled into `r` (bottom-aligned, centered).
+    pub(super) fn draw_bust(&self, a: &Appearance, eq: &Equipment, r: Rect) {
+        let (fw, fh) = self.character_frame_size(a);
+        let part = if (fw, fh) == (32.0, 48.0) { BUST } else { Rect::new(0.0, 0.0, 1.0, 0.6) };
+        let (pw, ph) = (fw * part.w, fh * part.h);
+        let scale = (r.w / pw).min(r.h / ph);
+        let (w, h) = (pw * scale, ph * scale);
+        let dest = Rect::new(r.x + (r.w - w) / 2.0, r.bottom() - h, w, h);
+        for l in self.character_layers(a, eq, Facing::Down, 0, false) {
+            self.assets.draw_frame_part_in(&l.sheet, l.frame, part, dest, l.skin, l.hair);
+        }
+    }
+
     /// Draws the open dialog's portrait (after the dialog box).
     pub(super) fn draw_dialog_portrait(&self) {
         let (Some(r), Some(s)) = (self.ui.portrait_rect, &self.portrait) else { return };
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.45));
-        if let Some((a, eq)) = self.speaker_look(s) {
+        let drawn = self.portrait_image(s).is_some_and(|p| self.assets.draw_sprite_fit(&p, Rect::new(r.x + 3.0, r.y + 3.0, r.w - 6.0, r.h - 6.0)));
+        if let Some((a, eq)) = self.speaker_look(s).filter(|_| !drawn) {
             // Head and shoulders, scaled to the square (weapons are left out: they'd poke in).
             let eq = Equipment { weapon: None, offhand: None, tool: None, ..eq };
-            let (fw, fh) = self.character_frame_size(&a);
-            let part = if (fw, fh) == (32.0, 48.0) { BUST } else { Rect::new(0.0, 0.0, 1.0, 0.6) };
-            let (pw, ph) = (fw * part.w, fh * part.h);
-            let scale = (r.w - 8.0) / pw.max(ph);
-            let (w, h) = (pw * scale, ph * scale);
-            let dest = Rect::new(r.x + (r.w - w) / 2.0, r.bottom() - h, w, h);
-            for l in self.character_layers(&a, &eq, Facing::Down, 0, false) {
-                self.assets.draw_frame_part_in(&l.sheet, l.frame, part, dest, l.skin, l.hair);
-            }
+            self.draw_bust(&a, &eq, Rect::new(r.x + 4.0, r.y + 4.0, r.w - 8.0, r.h - 4.0));
         }
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, Color::new(0.85, 0.72, 0.38, 1.0));
     }

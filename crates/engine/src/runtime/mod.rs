@@ -4,12 +4,14 @@ mod achievements;
 mod ai;
 mod charwin;
 mod combat;
+mod companion_ui;
 mod companions;
 mod cutscene;
 mod dev;
 mod effects;
 mod equipment;
 mod furniture;
+mod healing;
 mod fx;
 mod inventory_ui;
 mod journal;
@@ -23,11 +25,13 @@ mod schedule;
 mod progression;
 mod paperdoll;
 mod npc_items;
+mod npc_use;
 mod shop_ui;
 mod crafting_ui;
 mod locks;
 mod menu;
 mod minigame;
+mod orders;
 pub mod input;
 mod mouse;
 mod spawner;
@@ -137,6 +141,12 @@ struct RtEntity {
     damage: i32,
     invuln: f32,
     flash: f32,
+    /// The placed character's own portrait (`EntityInstance::portrait`).
+    portrait: Option<crate::defs::SpriteRef>,
+    /// HP the last hit took (a character drinks a potion before the next one would fell it).
+    last_hit: i32,
+    /// Seconds before it uses another item it carries.
+    item_cd: f32,
     knock: Vec2,
     /// Ranged attack for hostile shooters.
     weapon: Option<Weapon>,
@@ -236,6 +246,22 @@ pub struct Game {
     portrait: Option<portraits::Speaker>,
     /// The furniture the player uses, the sleep sequence, and the bed a Sleep action lies in.
     seat: Option<furniture::Seat>,
+    /// A map change waiting for the answer to "Leave … behind?" (knocked-down companions).
+    leaving: Option<(String, Arrival)>,
+    /// Seconds before leaving the map may ask again (after "Stay").
+    leave_hold: f32,
+    /// A companion window to open once the running event is over (`Action::OpenCompanion`).
+    pending_companion: Option<u32>,
+    /// Moods of characters' portraits (definition id -> mood) while an event runs.
+    moods: std::collections::HashMap<String, String>,
+    /// The open "Heal whom?" choice.
+    heal_pick: Option<healing::HealPick>,
+    /// The open companion orders menu (G).
+    order_menu: Option<orders::OrderMenu>,
+    /// The open companion window (its gear and bag).
+    comp_win: Option<companion_ui::CompanionWin>,
+    /// Bottom of the player's HUD panel as last drawn (the companions' rows go below it).
+    hud_bottom: std::cell::Cell<f32>,
     sleeping: Option<furniture::Sleeping>,
     bed: Option<u32>,
     journal: journal::Journal,
@@ -337,6 +363,14 @@ impl Game {
             minigame: None,
             portrait: None,
             seat: None,
+            leaving: None,
+            leave_hold: 0.0,
+            pending_companion: None,
+            moods: Default::default(),
+            heal_pick: None,
+            order_menu: None,
+            comp_win: None,
+            hud_bottom: std::cell::Cell::new(80.0),
             sleeping: None,
             bed: None,
             journal: Default::default(),
@@ -449,6 +483,9 @@ impl Game {
             hostile,
             damage,
             invuln: 0.0,
+            last_hit: 0,
+            portrait: None,
+            item_cd: 0.0,
             flash: 0.0,
             knock: Vec2::ZERO,
             weapon,
@@ -528,6 +565,7 @@ impl Game {
         );
         rt.count = count;
         rt.light = e.light.clone();
+        rt.portrait = e.portrait.clone();
         if e.kind == EntityKind::Character {
             if let Some(loot) = &e.loot {
                 rt.loot = loot.clone();
@@ -650,8 +688,22 @@ impl Game {
 
     /// Starts a fade-out; the map switches when the screen is black.
     pub fn transition(&mut self, map: &str, arrival: Arrival) {
-        if matches!(self.fade, Fade::Out { .. }) {
+        if matches!(self.fade, Fade::Out { .. }) || self.leaving.is_some() {
             return;
+        }
+        // Knocked-down companions can't come along: ask first (once; "Stay" holds still a moment
+        // so walking into the map's edge doesn't ask again at once).
+        // (Loading a save isn't leaving: the companions come from the save.)
+        let leaving_map = !map.is_empty() && map != self.loaded.map.name && !self.resuming;
+        if leaving_map && !self.downed_companions().is_empty() {
+            if self.leave_hold > 0.0 {
+                return;
+            }
+            self.ask_leave_behind(map, arrival);
+            return;
+        }
+        if leaving_map {
+            self.companions_follow_again();
         }
         self.fade = Fade::Out { t: 0.0, map: map.to_string(), arrival };
     }
@@ -969,6 +1021,14 @@ impl Game {
         if self.update_sleep(dt) {
             return;
         }
+        // Choosing whom to heal pauses the world (Esc cancels it instead of opening the menu).
+        if self.update_heal_pick() {
+            return;
+        }
+        // So does the companions' orders menu (G).
+        if self.update_order_menu() {
+            return;
+        }
         if self.update_menu(can_open) {
             return;
         }
@@ -1029,7 +1089,10 @@ impl Game {
         self.ui.text_speed = self.settings.text_speed;
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
-        let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
+        // The companion window takes all input while open.
+        let comp = allow_windows && self.update_companion_window();
+        let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows && !comp);
+        let (shop_key, shop_mouse) = (shop_key || comp, shop_mouse || comp);
         // The crafting window works like the trade window (they never are open together).
         let (craft_key, craft_mouse) = self.update_crafting_ui(allow_windows && !self.shop.is_open());
         let (shop_key, shop_mouse) = (shop_key || craft_key, shop_mouse || craft_mouse);
@@ -1045,7 +1108,12 @@ impl Game {
                 self.ui.toast("Interface hidden - press H to show it".into());
             }
         }
-        let (shop_key, shop_mouse) = (shop_key || hide_key, shop_mouse);
+        // G / LB: the companions' orders (only while nothing else is open).
+        let cmd_key = self.maybe_open_order_menu(allow_windows && !input.consumed && !shop_key && !hide_key && !self.modal() && !self.aiming());
+        // A click on a companion's HUD row opens its window.
+        let row_click = !shop_mouse && allow_windows && !self.modal() && !self.aiming() && self.click_companion_row();
+        let (shop_key, shop_mouse) = (shop_key, shop_mouse || row_click);
+        let (shop_key, shop_mouse) = (shop_key || hide_key || cmd_key, shop_mouse);
         let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.skills_open(), input.consumed || shop_key);
         let (k_key, k_mouse) = self.update_skills_ui(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.journal_open(), input.consumed || shop_key || j_key);
         let (j_key, j_mouse) = (j_key || k_key, j_mouse || k_mouse);
@@ -1064,6 +1132,11 @@ impl Game {
         // of characters a 'Damage area' defeats) went to the stand-in runner: keep them.
         let queued = std::mem::replace(&mut self.runner, runner);
         self.runner.append(queued);
+        self.update_leaving(dt);
+        // Moods last as long as the event that set them.
+        if !self.moods.is_empty() && !self.runner.busy() && !self.ui.dialog_open() {
+            self.moods.clear();
+        }
         self.update_cutscene(dt);
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
@@ -1264,6 +1337,11 @@ impl Game {
     }
 
     fn interact_entity(&mut self, i: usize) {
+        if self.is_down(i) {
+            let name = self.entity_display_name(self.loaded.entities[i].uid).unwrap_or_default();
+            self.ui.toast(format!("{name} is out cold. Heal them to get them back up."));
+            return;
+        }
         {
             let uid = self.loaded.entities[i].uid;
             match self.loaded.entities[i].kind {
@@ -1397,6 +1475,15 @@ impl Game {
                 return;
             }
         }
+        // A healing item asks whom to heal while companions are around.
+        if self.start_heal_pick(healing::HealSource::Item(item.to_string())) {
+            return;
+        }
+        self.use_item_now(item);
+    }
+
+    /// Uses an item on the player / the prop in front (its *UseItem* triggers).
+    fn use_item_now(&mut self, item: &str) {
         let ev = GameEvent::UseItem { item: item.to_string() };
         let mut fired = false;
         if let Some(i) = self.facing_entity() {
@@ -1443,6 +1530,8 @@ impl Game {
                 self.loaded.entities[i].body.moving = false;
                 continue;
             }
+            // Characters drink a potion they carry when it's critical (and so on).
+            self.npc_use_items(i, dt);
             if self.entity_knockback(i, dt) {
                 continue;
             }
@@ -1510,7 +1599,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} aim={} orders={} compwin={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1547,6 +1636,9 @@ impl Game {
             self.achievements_status(),
             self.minigame_status(),
             self.pose_status(),
+            self.heal_pick_status(),
+            self.order_menu_status(),
+            self.companion_win_status(),
             self.shop_status(),
             self.crafting_status(),
             self.loaded.map.name,
@@ -1780,17 +1872,21 @@ impl Game {
         if !self.on_title() {
             if !self.ui_hidden {
                 self.draw_hud();
+                self.draw_companion_rows();
                 self.draw_clock();
             }
             self.draw_minigame();
             self.draw_sleep();
-            if self.crafting_open() {
+            if self.companion_win_open() {
+                self.draw_companion_window();
+            } else if self.crafting_open() {
                 self.draw_crafting_ui();
             } else if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
-            } else {
+            } else if !self.heal_picking() && !self.order_menu_open() {
+                // (While choosing whom to heal, the window steps aside for the map.)
                 self.draw_window_frame();
                 if self.skills_open() {
                     self.draw_skills_ui();
@@ -1799,6 +1895,8 @@ impl Game {
                 }
             }
             self.draw_world_map();
+            self.draw_heal_pick();
+            self.draw_order_menu();
         }
         if !self.on_title() {
             self.draw_aim_cursor();
@@ -1834,6 +1932,7 @@ impl Game {
         let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { Self::effect_tint(&e.effects).unwrap_or(WHITE) };
         let drawn = match e.kind {
             EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE)),
+            EntityKind::Character if e.companion.as_ref().is_some_and(|l| l.down.is_some()) => self.draw_downed(e),
             EntityKind::Character => db.character(&e.def).is_some() && {
                 let col = if e.body.moving { (e.body.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
                 self.draw_character(&e.appearance, &e.equipment, (e.body.facing, col), e.body.pos, tint, false)
@@ -1933,6 +2032,25 @@ impl ActionHost for Game {
             }
             Action::Heal { amount } => {
                 self.heal(*amount);
+                Step::Continue
+            }
+            Action::HealCharacter { target, amount } => {
+                self.heal_character(target, *amount, ctx.owner);
+                Step::Continue
+            }
+            Action::CompanionOrder { target, order } => {
+                self.order_companion(target, order, ctx.owner);
+                Step::Continue
+            }
+            Action::Mood { target, mood } => {
+                self.set_mood(target, mood, ctx.owner);
+                Step::Continue
+            }
+            Action::OpenCompanion { target } => {
+                match self.entity_index(target, ctx.owner).filter(|&i| self.loaded.entities[i].companion.is_some()) {
+                    Some(i) => self.pending_companion = Some(self.loaded.entities[i].uid),
+                    None => eprintln!("[events] Open companion window: '{target}' is no companion here"),
+                }
                 Step::Continue
             }
             Action::SetLocked { target, locked } => {

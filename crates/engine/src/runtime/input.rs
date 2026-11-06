@@ -507,12 +507,14 @@ pub enum Act {
     QuickSave,
     QuickLoad,
     Debug,
+    /// The companions' orders menu.
+    Command,
 }
 
 impl Act {
     pub const QUICK: [Act; 8] = [Act::Quick1, Act::Quick2, Act::Quick3, Act::Quick4, Act::Quick5, Act::Quick6, Act::Quick7, Act::Quick8];
 
-    pub const ALL: [Act; 35] = [
+    pub const ALL: [Act; 36] = [
         Act::Up,
         Act::Down,
         Act::Left,
@@ -529,6 +531,7 @@ impl Act {
         Act::Map,
         Act::Journal,
         Act::HideUi,
+        Act::Command,
         Act::Drop,
         Act::Use,
         Act::TakeAll,
@@ -588,6 +591,7 @@ impl Act {
             Act::QuickSave => "quick_save",
             Act::QuickLoad => "quick_load",
             Act::Debug => "debug",
+            Act::Command => "command",
         }
     }
 
@@ -633,6 +637,7 @@ impl Act {
             Act::QuickSave => "Quick save",
             Act::QuickLoad => "Quick load",
             Act::Debug => "Debug overlay",
+            Act::Command => "Companion orders",
         }
     }
 
@@ -646,7 +651,9 @@ impl Act {
     fn places(self) -> u8 {
         match self {
             Act::Up | Act::Down | Act::Left | Act::Right | Act::Run => 1 | 2 | 4,
-            Act::Confirm | Act::Character | Act::NextTab | Act::PrevTab => 1 | 2,
+            Act::Confirm | Act::Character | Act::NextTab => 1 | 2,
+            // LB only switches tabs in an open window (it gives companion orders in play).
+            Act::PrevTab => 2,
             Act::Quick1 | Act::Quick2 | Act::Quick3 | Act::Quick4 | Act::Quick5 | Act::Quick6 | Act::Quick7 | Act::Quick8 => 1 | 2,
             Act::Drop | Act::Use | Act::TakeAll => 2,
             Act::Map => 1 | 4,
@@ -694,6 +701,7 @@ impl Act {
             Act::QuickSave => &[K::F5],
             Act::QuickLoad => &[K::F9],
             Act::Debug => &[K::F3],
+            Act::Command => &[K::G],
         }
     }
 
@@ -720,6 +728,7 @@ impl Act {
             Act::ZoomIn => &[Pad::Rb],
             Act::ZoomOut => &[Pad::Lb],
             Act::MapCenter => &[Pad::South],
+            Act::Command => &[Pad::Lb],
             _ => &[],
         }
     }

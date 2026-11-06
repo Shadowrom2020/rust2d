@@ -231,7 +231,7 @@ impl Game {
     }
 
     pub(super) fn inventory_open(&self) -> bool {
-        self.inv.is_open() || self.shop.is_open() || self.crafting.is_open() || self.journal.is_open() || self.skills_open()
+        self.inv.is_open() || self.shop.is_open() || self.crafting.is_open() || self.journal.is_open() || self.skills_open() || self.companion_win_open()
     }
 
     fn container_name(&self, uid: u32) -> String {
@@ -346,6 +346,9 @@ impl Game {
 
     /// Screen center of a slot (for automated play-throughs): side "player", "chest" or "equip".
     pub fn slot_screen_pos(&self, side: &str, i: usize) -> Option<Vec2> {
+        if self.companion_win_open() {
+            return self.comp_slot_pos(side, i);
+        }
         let side = match side {
             "chest" => Side::Container,
             "equip" => Side::Equip,

@@ -359,6 +359,9 @@ pub fn default_character(db: &Database, id: &str, name: &str) -> CharacterDef {
         appearance: Appearance { body: first(SheetKind::Body), hair: first(SheetKind::Hair), ..Default::default() },
         equipment,
         inventory: Vec::new(),
+        gear_locked: false,
+        portrait: Default::default(),
+        moods: Default::default(),
     }
 }
 

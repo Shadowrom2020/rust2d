@@ -1472,7 +1472,36 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "hit points", |ui| {
                 ui.add(egui::DragValue::new(amount).range(-99..=99));
             });
-            ui.weak("(negative = damage)");
+            ui.weak("(negative = damage; on a healing item set to 'Use on: Player or companion' it heals whom the player chooses)");
+        }
+        Action::Mood { target, mood } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "mood", |ui| {
+                ui.add(egui::TextEdit::singleline(mood).desired_width(120.0).hint_text("worried"));
+            });
+            ui.weak("(the portrait of that mood, from the character's definition, until changed or the event ends; empty = its usual portrait)");
+        }
+        Action::OpenCompanion { target } => {
+            target_field(ui, id, target, refs);
+            ui.weak("(a companion: its window with its gear and bag opens after the event, e.g. after a dialog's \"Let me see your gear\")");
+        }
+        Action::CompanionOrder { target, order } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "order", |ui| {
+                egui::ComboBox::from_id_salt(format!("{id}/order")).selected_text(order.as_str()).show_ui(ui, |ui| {
+                    for o in ["attack", "defend", "passive", "stay", "follow"] {
+                        ui.selectable_value(order, o.to_string(), o);
+                    }
+                });
+            });
+            ui.weak("(a companion by name, \"self\" or \"all\"; attack / defend / passive = how it fights, stay = wait here, follow = come along again)");
+        }
+        Action::HealCharacter { target, amount } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "hit points", |ui| {
+                ui.add(egui::DragValue::new(amount).range(-99..=99));
+            });
+            ui.weak("(\"player\", \"self\" or a character's name; negative = damage)");
         }
         Action::If { conditions, then, otherwise } => {
             ui.label("If all of:");

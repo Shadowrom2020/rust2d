@@ -45,24 +45,6 @@
                 ),
                 conditions: [],
                 actions: [
-                    If(
-                        conditions: [
-                            (
-                                cond: PlayerHp(
-                                    op: Ge,
-                                    value: 12,
-                                ),
-                                negate: false,
-                            ),
-                        ],
-                        then: [
-                            Dialog(
-                                speaker: "",
-                                text: "You\'re already at full health. You drink it anyway.",
-                            ),
-                        ],
-                        otherwise: [],
-                    ),
                     Heal(
                         amount: 6,
                     ),
@@ -79,6 +61,7 @@
         armor: None,
         max_stack: 10,
         value: 15,
+        use_on: Choose,
     ),
     (
         id: "coin",
@@ -199,6 +182,35 @@
         max_stack: 1,
         value: 70,
         held: "held_crossbow",
+    ),
+    (
+        id: "bandage",
+        name: "Bandage",
+        description: "Linen for wounds: restores 1 heart. Use it on yourself or a companion.",
+        icon: (
+            sheet: "items",
+            frame: 40,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 2,
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 4,
+        use_on: Choose,
     ),
     (
         id: "arrows",

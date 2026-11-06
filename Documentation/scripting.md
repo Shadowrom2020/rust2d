@@ -286,6 +286,7 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `player_x()` / `player_y()` | Position in tiles (fractional; the feet). |
 | `player_facing()` | `"up"`, `"down"`, `"left"` or `"right"`. |
 | `heal(amount)` | Restores hit points; a negative amount hurts the player. *(queued)* |
+| `heal_npc(name, amount)` | Restores a character's hit points (a companion, any character with HP; `"player"` = the player); a negative amount hurts it. *(queued)* |
 | `current_map()` | Name of the current map. |
 
 ### Dialogs and flow
@@ -295,6 +296,8 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `say(text)` | Shows a dialog box and waits for the player. *(queued, blocks)* |
 | `say(speaker, text)` | Dialog with a speaker name. The dialog shows the speaker's portrait when the name fits a character: `"{player}"` (or the player's name) for the hero's own lines, a character on the map or a character definition otherwise (*Dialog portraits* in the README). *(queued, blocks)* |
 | `say(entity, text)` | Dialog with an entity's name as speaker: `say(SELF, "…")`. *(queued, blocks)* |
+| `say(speaker, text, options)` | The same with options: `#{ mood: "worried" }` shows the speaker's portrait for that mood (a *Moods* entry of its character definition) for this line, e.g. `say("Elder Rowan", "The lights are back...", #{ mood: "worried" });`. Also `say(SELF, text, options)`. *(queued, blocks)* |
+| `mood(target, mood)` | A character's portrait shows that mood (its definition's mood portrait) from now on, until changed or the running event is over; `""` = its usual portrait. `target`: a character on the map, or a character definition's id or name. *(queued)* |
 | `choice(text, options, var)` | Asks a question with answers `["Yes", "No"]`; the chosen index (0 = first) goes into variable `var`. *(queued, blocks)* |
 | `wait(seconds)` | Pauses the queue. *(queued, blocks)* |
 | `then_call(function)` | Calls another script function when the queue gets there. *(queued)* |
@@ -329,6 +332,10 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `stop_following(target)` | The companion leaves: on its own map it stays where it is, elsewhere it goes back to where it is placed. *(queued)* |
 | `is_companion(name)` | Whether the character with that name follows the player. |
 | `companion_count()` | How many companions follow the player. |
+| `order(target, order)` | Tells a companion (or `"all"`) what to do, like the player's orders menu (G): `"attack"` (fight enemies near the player, the default), `"defend"` (only what hunts the player or the companion), `"passive"` (no fighting, back away from enemies), `"stay"` (wait where it is, fighting what comes close) or `"follow"`. Saved. *(queued)* |
+| `order_of(name)` | How a companion fights: `"attack"`, `"defend"` or `"passive"` (`""` if no companion has that name). |
+| `is_staying(name)` | Whether a companion was told to stay where it is. |
+| `open_companion(target)` | Opens a companion's window — its gear and bag next to the player's inventory — once the running event is over, e.g. after a dialog's "Let me see your gear". *(queued)* |
 | `follow_schedule(target)` | The character follows its daily schedule again: it heads for the stop of the current hour. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 | `defeated_count(character)` | How many characters of a definition the player has defeated (the bestiary's count), e.g. `defeated_count("slime")`. |

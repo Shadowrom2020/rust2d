@@ -519,6 +519,19 @@ pub enum Action {
     /// The player sleeps `hours` (camping, an inn's "Rest"): the screen fades, the clock jumps,
     /// HP and mana are restored; blocks until the player is awake again.
     Sleep { hours: f32 },
+    /// Heals a character (negative = hurts it): `"player"`, `"self"` or a character's name. On
+    /// an item's *on use* the player's choice of target replaces a plain *Heal player*.
+    HealCharacter { target: TargetName, amount: i32 },
+    /// Tells a companion (or "all" of them) what to do: "attack", "defend", "passive" (how it
+    /// fights), "stay" (wait here) or "follow".
+    CompanionOrder { target: TargetName, order: String },
+    /// Opens a companion's window (its gear and bag next to the player's inventory) once the
+    /// running event is over.
+    OpenCompanion { target: TargetName },
+    /// Sets the mood a character's portrait shows (one of its definition's mood portraits; ""
+    /// = its usual one) until changed or the running event is over. `target`: a character on
+    /// the map, or a character definition's id or name.
+    Mood { target: TargetName, mood: String },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -625,6 +638,10 @@ impl Action {
             Action::UnlockAchievement { .. } => "Unlock achievement",
             Action::Lockpick { .. } => "Lockpicking game",
             Action::Sleep { .. } => "Sleep",
+            Action::HealCharacter { .. } => "Heal character",
+            Action::CompanionOrder { .. } => "Companion order",
+            Action::OpenCompanion { .. } => "Open companion window",
+            Action::Mood { .. } => "Set mood",
         }
     }
 
@@ -691,6 +708,10 @@ impl Action {
             Action::UnlockAchievement { id: s() },
             Action::Lockpick { difficulty: 1, var: "picked".into() },
             Action::Sleep { hours: 8.0 },
+            Action::HealCharacter { target: "self".into(), amount: 2 },
+            Action::CompanionOrder { target: "self".into(), order: "stay".into() },
+            Action::OpenCompanion { target: "self".into() },
+            Action::Mood { target: "self".into(), mood: "worried".into() },
         ]
     }
 }

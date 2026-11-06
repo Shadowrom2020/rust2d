@@ -278,6 +278,21 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         speaker: if entity < 0 { String::new() } else { format!("{{uid:{entity}}}") },
         text: text.into()
     })));
+    // say(speaker, "...", #{ mood: "worried" }): the line with a mood portrait of the speaker.
+    fn say_with(c: &mut Ctx, speaker: String, text: &str, opts: &rhai::Map) {
+        let mood = opts.get("mood").map(|m| m.to_string()).unwrap_or_default();
+        if !mood.is_empty() {
+            c.actions.push(Action::Mood { target: speaker.clone(), mood });
+        }
+        c.actions.push(Action::Dialog { speaker: speaker.clone(), text: text.into() });
+        if opts.contains_key("mood") {
+            c.actions.push(Action::Mood { target: speaker, mood: String::new() });
+        }
+    }
+    engine.register_fn("say", with!(ctx, |c, speaker: &str, text: &str, opts: rhai::Map| say_with(&mut c, speaker.into(), text, &opts)));
+    engine.register_fn("say", with!(ctx, |c, entity: i64, text: &str, opts: rhai::Map| say_with(&mut c, if entity < 0 { String::new() } else { format!("{{uid:{entity}}}") }, text, &opts)));
+    // mood(name, "worried"): the character's portrait shows that mood until changed ("" = usual).
+    engine.register_fn("mood", with!(ctx, |c, t: &str, m: &str| c.actions.push(Action::Mood { target: t.into(), mood: m.into() })));
     engine.register_fn("choice", with!(ctx, |c, text: &str, options: Array, var: &str| {
         let options = options.into_iter().map(|o| o.to_string()).collect();
         c.actions.push(Action::Choice { speaker: String::new(), text: text.into(), options, var: var.into() })
@@ -454,6 +469,11 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("stop_following", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: false })));
     engine.register_fn("is_companion", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name)));
     engine.register_fn("companion_count", with!(ctx, |c| c.world.companions.len() as i64));
+    // Orders: order("guard", "defend" | "attack" | "passive" | "stay" | "follow"), "all" = every companion.
+    engine.register_fn("order", with!(ctx, |c, t: &str, o: &str| c.actions.push(Action::CompanionOrder { target: t.into(), order: o.into() })));
+    engine.register_fn("order_of", with!(ctx, |c, name: &str| c.world.companions.iter().find(|m| m.name == name).map_or(String::new(), |m| m.order.id().to_string())));
+    engine.register_fn("open_companion", with!(ctx, |c, t: &str| c.actions.push(Action::OpenCompanion { target: t.into() })));
+    engine.register_fn("is_staying", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name && m.post.is_some())));
     engine.register_fn("follow_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: true })));
     engine.register_fn("stop_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: false })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
@@ -502,6 +522,8 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     engine.register_fn("wait", with!(ctx, |c, s: Dynamic| c.actions.push(Action::Wait { seconds: num(&s) })));
     engine.register_fn("emit", with!(ctx, |c, n: &str| c.actions.push(Action::Emit { name: n.into() })));
     engine.register_fn("heal", with!(ctx, |c, n: i64| c.actions.push(Action::Heal { amount: n as i32 })));
+    // A character ("player" works too): companions, friendly characters, enemies (negative hurts).
+    engine.register_fn("heal_npc", with!(ctx, |c, t: &str, n: i64| c.actions.push(Action::HealCharacter { target: t.into(), amount: n as i32 })));
     engine.register_fn("set_locked", with!(ctx, |c, t: &str, locked: bool| c.actions.push(Action::SetLocked {
         target: t.into(),
         locked
@@ -850,7 +872,7 @@ mod tests {
         let actions = host.call(&mut WorldState::default(), "party", None);
         assert_eq!(actions, vec![Action::Companion { target: "guard".into(), join: true }, Action::Companion { target: "self".into(), join: false }]);
         let mut w = WorldState::default();
-        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
+        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None, down: None, order: Default::default(), post: None });
         assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
     }
 

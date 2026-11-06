@@ -77,176 +77,6 @@ Instructions for every session (people and coding agents) that implements roadma
     notes live on in the CHANGELOG and the code), `cargo xtask check-version release/X.Y.Z`,
     pull request into master, merge after the four checks, merge the back-merge pull request.
 
-## 0.6.0 — The party (companions and faces)
-
-Theme: companions become real party members (the player heals them, picks them up when they
-fall, gives them orders and gear), and characters can have drawn portraits. Builds on
-*Companions* and *Dialog portraits* of 0.5.0.
-
-### [ ] Healing companions — `feature/heal-companions`
-
-**Goal.** Spells, scrolls and potions can heal a companion, not only the player, and the HUD
-shows how the companions are doing.
-
-**Design.**
-- *Target choice*: a *Heal* spell (`SpellEffect::Heal`) and consumable items whose *on use*
-  heals (`Action::Heal`) ask whom to heal while a companion is on the map: the aiming mode of
-  bolts (`update_aim` in `runtime/skills.rs`) with friendly targets: click / select the player or
-  a companion (keyboard and pad: Left / Right cycles, Confirm heals, Cancel aborts and refunds
-  nothing used yet). With no companion on the map it heals the player at once, as today. Items
-  get `ItemDef.use_on: UseTarget { Player, Ally, Choose }` (serde default `Player`) so a potion
-  can be the player's only or offered to companions; heal scrolls are consumable items with
-  `Choose`.
-- *Actions and scripts*: `Action::Heal` gains `target: String` (`#[serde(default)]`, "" = the
-  player; old maps keep healing the player; the variant keeps its index, the field is new), so
-  *Heal* actions on a named character work; script `heal_npc("guard", 4)`. `heal_area`
-  (`runtime/fx.rs`) already heals friendly characters and stays. Companion HP is written back
-  with `sync_companion_hp`.
-- *HUD*: under the player's hearts, one small row per companion: the head from the portrait
-  bust (`portraits.rs` `BUST`, `draw_frame_part_in`) and an HP bar; while choosing a heal target
-  the chosen row is highlighted and rows are clickable. Hidden with the HUD (`H`).
-- `status()`: `companions=` already has HP; add `aim=heal:<target>` while choosing.
-
-**Touch points.** `defs.rs` (`UseTarget`, `ItemDef.use_on`), `events/mod.rs` (`Heal.target`),
-`runtime/{skills,companions,combat,mod,inventory_ui}.rs`, a HUD part in `runtime/ui.rs` or
-`companions.rs`, `script.rs` (`heal_npc`), editor `widgets.rs` (Heal target field) and
-`database.rs` (item *Use on*), `script_editor.rs`, README, scripting.md.
-
-**Example.** The guard companion; Tilda sells a *Healing Scroll* (`Choose`); the red potion
-becomes `Choose`.
-
-**Verify.** Autoplay from a crafted save with the guard at 3/8: use a potion → target choice
-(`aim=heal:player`), Right, Confirm → `companions=` guard 7/8, the player's HP unchanged; the Heal
-spell the same; without a companion the potion heals at once; screenshot of the HUD rows and
-the choice. Unit test: an old map's `Heal { amount }` loads with an empty target.
-
-### [ ] Knocked-down companions — `feature/downed-companions` (follows *Healing companions*)
-
-**Goal.** At 0 HP a companion falls and stays down until healed, instead of limping home.
-
-**Design.**
-- Down: drawn lying (the furniture's rotated drawing, `draw_frame_colored_rotated`, facing
-  Left) and greyed; it stays where it fell, isn't hunted or hit (`companion_targets` and enemy
-  AI skip it), doesn't follow or fight. `Companion.down: bool` (serde default) keeps it in save
-  games; `status()` prints `down` in `companions=`.
-- Getting up: any heal on it (potion / scroll / spell via *Healing companions*, `heal_npc`,
-  `heal_area`) gets it up with the healed HP. A project setting `ProjectConfig.companion_down:
-  DownRule { StaysDown, GetsUp { seconds }, GoesHome }` (serde default `StaysDown`; `GoesHome`
-  = today's `dismiss(i, true)`), in *Project settings*.
-- Leaving the map with a downed companion asks "Leave {name} behind?" (yes = it goes home as
-  dismissed, no = stay); a defeat of the player ignores downed companions (the defeat menu as
-  today). Talking to a downed companion shows "{name} is out cold." unless a trigger matches.
-
-**Touch points.** `state.rs` (`Companion.down`), `project.rs` (`DownRule`),
-`runtime/{companions,combat,mod,maps,furniture}.rs` (the rotated drawing made reusable for
-characters), editor *Project settings*, README.
-
-**Example.** Nothing new beyond the guard; the setting stays at *stays down*.
-
-**Verify.** Autoplay: `call` a script that damages the guard to 0 → `down`, a slime next to him
-doesn't attack him, he stays when the player walks away; a potion on him → up with its HP and
-following; save / load while down keeps him down at his place; leaving the map asks; screenshot
-of him lying. Unit test: old saves without `down`.
-
-### [ ] Commands for companions — `feature/companion-orders`
-
-**Goal.** The player tells companions how to behave: attack, defend, stay passive or wait.
-
-**Design.**
-- *Orders*: *Attack* (today: fight hostiles near the player), *Defend* (only fight what attacks
-  the player or this companion, stay close), *Passive* (never fight, keep out of reach: move
-  away from the nearest hostile within 3 tiles, behind the player), *Stay* (wait here, fight
-  what comes within 2 tiles; *Follow* ends it). `Companion.order: Order` (serde default
-  `Attack`), saved.
-- *Giving them*: `Act::Command` (key `G`, pad `RB`; rebindable, in the Controls page) opens a
-  small menu (game UI, ASCII) listing the orders, with the companion to address first when
-  there are several (or *All*). Script `order("guard", "stay")`, `order_of("guard")`;
-  `Action::CompanionOrder { target, order }` (appended) so a companion's dialog can offer them.
-- *Behaviour*: `companion_fight` filters targets by the order (Defend: hostiles whose AI target
-  is the player or this companion; Passive: none). *Stay* skips following and keeps a `post`
-  position; leaving the map with a staying companion: it comes along (project setting
-  `stay_follows_across_maps`, default true) — no dialog. The HUD row of *Healing companions*
-  shows the order as a letter (A / D / P / S).
-
-**Touch points.** `state.rs` (`Order`), `runtime/{companions,input,menu or ui}.rs`,
-`events/mod.rs`, `script.rs`, `script_refs.rs` (no ids: the name is a character name like
-`follow`), editor `widgets.rs`, `script_editor.rs`, README (controls table), scripting.md.
-
-**Example.** The guard's dialog after joining offers "Wait here" / "Follow me" / "Stay out of
-fights" via `order`.
-
-**Verify.** Autoplay: `press g` + menu choices → `status` `companions=["guard:8/8:stay@…"]`;
-*Passive*: a slime next to him isn't attacked (its HP unchanged after 5 s); *Defend* ignores a
-slime that hasn't noticed the player; *Stay* keeps him put while the player walks off; save /
-load keeps the orders; screenshot of the menu.
-
-### [ ] Companion inventory — `feature/companion-inventory`
-
-**Goal.** The player equips companions with gear and hands them items they use on their own.
-
-**Design.**
-- *Groundwork that exists*: NPCs wear equipment and carry items (`RtEntity.equipment` /
-  `inventory`, `npc_equip` / `npc_unequip` / `give_item_to`, saved per placed character in
-  `WorldState.npc_items`, which companions already use with their home map / uid), and their
-  weapon and defense follow their gear (`npc_items::apply_gear`).
-- *Window*: a *Companion* tab in the character window (`charwin.rs`; Tab cycles; a companion
-  picker in the tab when there are several) showing the companion's paperdoll with its slots
-  and its carried items next to the player's inventory grid, like the container window: drag or
-  click items across (`slot` / `slotdrag` autoplay commands extend to it, `wintab companion`).
-  Script `open_companion("guard")` for a "Let me see your gear" dialog choice. Gear that the
-  body sheet can't show still counts. `CharacterDef.gear_locked` (serde default false) refuses
-  gear (a wolf companion).
-- *Using items on their own*: consumables in a companion's bag are used when they help: heal
-  items below 40 % HP (one at a time, 5 s cooldown), cures when poisoned or burning, buff items
-  when a hostile hunts within 5 tiles. What an item does comes from its `on_use` actions,
-  executed with the companion as the target (`Action::Heal.target` from *Healing companions*;
-  effects get a target the same way). A toast: "Guard drinks a Red Potion".
-- *Ammo*: ranged companions use ammo from their bag (`Ranged.ammo`, as the player does) and
-  close in to melee (or stay back with *Passive*) when out of it; the HUD row shows low ammo.
-- *Rules*: given items belong to the companion; dismissed or downed companions keep them.
-- Later (not in this item): companions learning spells from scrolls.
-
-**Touch points.** `runtime/{charwin,inventory_ui,companions,npc_items,combat}.rs`, `defs.rs`
-(`gear_locked`), `script.rs`, game `main.rs` (autoplay), README, scripting.md.
-
-**Example.** The guard can be given the bow and arrows; a second potion in the guard's quest
-reward to try it.
-
-**Verify.** Autoplay: give the guard a potion and arrows via the tab (`slot` / `slotdrag`),
-damage him below 40 % → he drinks it (`companions=` HP rises, his bag shrinks, toast); equip a
-bow on him → he shoots and his arrows run down; save / load keeps his bag; screenshot of the
-tab.
-
-### [ ] Portrait images — `feature/portrait-images`
-
-**Goal.** Creators give characters a drawn portrait; without one the automatic head-and-shoulders
-rendering of *Dialog portraits* stays.
-
-**Design.**
-- *Data*: `CharacterDef.portrait: SpriteRef` and the placed character's own in the map's RON
-  `Meta` (empty = automatic), serde defaults; *moods*: `CharacterDef.moods: BTreeMap<String,
-  SpriteRef>` picked by a dialog's `mood` (`say("Elder Rowan", "...", #{ mood: "worried" })`;
-  `Action::Dialog` gains `mood` with a serde default). The player: `ProjectConfig.player_portrait`
-  or, with the character creator, one per playable body (`SheetDef.portrait`).
-- *Drawing*: `find_speaker` stays; `draw_dialog_portrait` draws the image (any frame size,
-  scaled to fit with nearest-neighbour filtering) when there is one, else the bust. The HUD
-  rows of *Healing companions* use it too.
-- *Editor*: *Portrait* field (sprite chooser with a preview at dialog size and *Clear* =
-  automatic) in *Database › Characters* and the placed-character inspector; *New blank portrait*
-  (a 64 x 64 frame on a `portraits` sheet, opened in the pixel editor); import of a PNG as a
-  portrait. Library export carries the sheet (`refs_of_character`), renames follow (`refactor.rs`).
-
-**Touch points.** `defs.rs`, `map/io.rs` (Meta), `events/mod.rs` (`mood`), `runtime/portraits.rs`,
-`script.rs` (`say` options), `refactor.rs`, editor `database.rs`, `widgets.rs`, `pixel.rs`,
-gen_example (portrait art), README, scripting.md.
-
-**Example.** Drawn portraits for the elder (with a *worried* mood in the intro) and Tilda; the
-others keep the automatic one, to show both.
-
-**Verify.** The elder's dialog shows his image, the guard's the bust (screenshots); the intro's
-worried line shows the mood image; clearing the field falls back; library export of the elder
-includes the portrait sheet (unit test in `library.rs`).
-
 ## 0.7.0 — Trades and town life
 
 Theme: the player gathers, smiths, farms and cooks, and the townsfolk visibly live their days
@@ -681,6 +511,14 @@ Options row *Language*; the editor exports a translation template. Large but mec
 ## Shipped
 
 See [CHANGELOG.md](CHANGELOG.md) for the details of every release.
+
+### 0.6.0 — The party (2026-11-06)
+
+- [x] Healing companions — `feature/heal-companions`
+- [x] Knocked-down companions — `feature/downed-companions`
+- [x] Commands for companions — `feature/companion-orders`
+- [x] Companion inventory (characters use the items they carry) — `feature/companion-inventory`
+- [x] Portrait images — `feature/portrait-images`
 
 ### 0.5.0 — Living world and adventure (2026-11-06)
 

@@ -2,7 +2,7 @@
 //!
 //! Strings inside Rhai scripts are not rewritten.
 
-use crate::defs::Database;
+use crate::defs::{Database, SpriteRef};
 use crate::entity::EntityKind;
 use crate::events::{Action, Cond, Condition, Trigger, TriggerOn};
 use crate::map::{Map, ZoneKind};
@@ -36,7 +36,17 @@ struct Renamer<'a> {
 
 impl Renamer<'_> {
     /// A placed entity (on a map or inside a structure).
+    fn portraits(&mut self, p: &mut SpriteRef, moods: &mut std::collections::BTreeMap<String, SpriteRef>) {
+        self.fix(RefKind::Sheet, &mut p.sheet);
+        for s in moods.values_mut() {
+            self.fix(RefKind::Sheet, &mut s.sheet);
+        }
+    }
+
     fn entity(&mut self, e: &mut crate::entity::EntityInstance) {
+        if let Some(p) = &mut e.portrait {
+            self.fix(RefKind::Sheet, &mut p.sheet);
+        }
         let k = match e.kind {
             EntityKind::Prop => RefKind::Prop,
             EntityKind::Character => RefKind::Character,
@@ -238,6 +248,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.loot(&mut d.loot);
         r.look(&mut d.appearance);
         r.gear(&mut d.equipment, &mut d.inventory);
+        r.portraits(&mut d.portrait, &mut d.moods);
     }
     for d in &mut db.structures {
         r.structure(d);
@@ -256,6 +267,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.conditions(&mut d.conditions);
     }
     r.fix(RefKind::Character, &mut config.player);
+    r.fix(RefKind::Sheet, &mut config.player_portrait.sheet);
     let cc = &mut config.creation;
     for s in [&mut cc.body_male, &mut cc.body_female].into_iter().chain(&mut cc.hair_styles).chain(&mut cc.beards) {
         r.fix(RefKind::Sheet, s);
@@ -375,13 +387,14 @@ pub fn refs_of_character(d: &crate::defs::CharacterDef) -> Vec<(RefKind, String)
     r.loot(&mut d.loot);
     r.look(&mut d.appearance);
     r.gear(&mut d.equipment, &mut d.inventory);
+    r.portraits(&mut d.portrait, &mut d.moods);
     r.found.unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::defs::{ItemDef, SpriteRef};
+    use crate::defs::ItemDef;
     use crate::entity::EntityInstance;
     use crate::map::{EdgeLink, Zone};
 
@@ -484,6 +497,7 @@ mod tests {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),
@@ -499,6 +513,8 @@ mod tests {
         skills: Default::default(),
         progression: Default::default(),
         dialog_portraits: true,
+        companion_down: Default::default(),
+        player_portrait: Default::default(),
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);
@@ -539,4 +555,29 @@ mod tests {
         assert_eq!(c.inventory[0].item, "pear");
         assert_eq!(db.items[0].held, "held_blade");
     }
+
+    #[test]
+    fn portraits_travel_and_follow_renames() {
+        use crate::defs::{CharacterDef, SpriteRef};
+        let mut c: CharacterDef = ron::from_str(r#"(id: "elder", name: "Elder")"#).unwrap();
+        assert!(c.portrait.is_empty() && c.moods.is_empty(), "old characters have none");
+        c.portrait = SpriteRef::new("faces", 0);
+        c.moods.insert("worried".into(), SpriteRef::new("faces_moods", 1));
+        // Library export carries the portrait sheets.
+        let refs = refs_of_character(&c);
+        assert!(refs.contains(&(RefKind::Sheet, "faces".into())) && refs.contains(&(RefKind::Sheet, "faces_moods".into())));
+        // Renaming a sheet updates definitions, the player portrait and placed characters.
+        let mut db = crate::defs::Database { characters: vec![c], ..Default::default() };
+        let mut config = ProjectConfig { player_portrait: SpriteRef::new("faces", 2), ..ProjectConfig::new("t") };
+        assert_eq!(rename_in_db(&mut db, &mut config, RefKind::Sheet, "faces", "portraits"), 2);
+        assert_eq!(db.characters[0].portrait.sheet, "portraits");
+        assert_eq!(config.player_portrait.sheet, "portraits");
+        let mut map = Map::new("m", 4, 4);
+        let mut e = EntityInstance::new(1, EntityKind::Character, "elder", 16.0, 16.0);
+        e.portrait = Some(SpriteRef::new("faces", 3));
+        map.entities.push(e);
+        assert_eq!(rename_in_map(&mut map, RefKind::Sheet, "faces", "portraits"), 1);
+        assert_eq!(map.entities[0].portrait.as_ref().unwrap().sheet, "portraits");
+    }
+
 }

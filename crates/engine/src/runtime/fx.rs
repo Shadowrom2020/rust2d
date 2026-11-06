@@ -100,8 +100,12 @@ impl Game {
         if self.player.pos.distance(center) <= r {
             self.heal(amount);
         }
-        for e in self.loaded.entities.iter_mut().filter(|e| e.active && !e.hostile && e.max_hp > 0 && e.body.pos.distance(center) <= r) {
-            e.hp = (e.hp + amount).min(e.max_hp);
+        for i in 0..self.loaded.entities.len() {
+            let e = &mut self.loaded.entities[i];
+            if e.active && !e.hostile && e.max_hp > 0 && e.body.pos.distance(center) <= r {
+                e.hp = (e.hp + amount).min(e.max_hp);
+                self.companion_healed(i);
+            }
         }
     }
 

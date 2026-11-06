@@ -164,8 +164,12 @@ fn intro_cutscene() {
 // stop_following(target) sends it home; is_companion(name) tells.
 fn guard_talk() {
     if is_companion("guard") {
-        choice("Shall I go back to my post, {player}?", ["Yes, thank you", "No, stay with me"], "guard_leave");
-        then_call("guard_answer");
+        // Orders (also from the orders menu, G): order(name, "attack" | "defend" | "passive" |
+        // "stay" | "follow"); order_of(name) / is_staying(name) tell what it does now.
+        let wait = if is_staying("guard") { "Come along again" } else { "Wait here" };
+        let fight = if order_of("guard") == "passive" { "Fight with me again" } else { "Stay out of fights" };
+        choice("What is it, {player}?", [wait, fight, "Let me see your gear", "Go back to your post", "Nothing"], "guard_cmd");
+        then_call("guard_orders");
     } else if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
         stop_patrol("guard");
@@ -178,13 +182,35 @@ fn guard_talk() {
     }
 }
 
-fn guard_answer() {
-    if is_companion("guard") {
-        if get_var("guard_leave") == 0 {
-            say("Guard", "Back to the road, then. Good luck, {player}!");
-            stop_following("guard");
+fn guard_orders() {
+    let cmd = get_var("guard_cmd");
+    if cmd == 0 {
+        if is_staying("guard") {
+            say("Guard", "Right behind you.");
+            order("guard", "follow");
+        } else {
+            say("Guard", "I'll hold this spot.");
+            order("guard", "stay");
         }
-    } else if get_var("guard_join") == 0 {
+    } else if cmd == 1 {
+        if order_of("guard") == "passive" {
+            say("Guard", "Finally! Let them come.");
+            order("guard", "attack");
+        } else {
+            say("Guard", "I'll keep my spear down, then.");
+            order("guard", "passive");
+        }
+    } else if cmd == 2 {
+        // open_companion(name): the companion's window (gear, bag) after the dialog.
+        open_companion("guard");
+    } else if cmd == 3 {
+        say("Guard", "Back to the road, then. Good luck, {player}!");
+        stop_following("guard");
+    }
+}
+
+fn guard_answer() {
+    if get_var("guard_join") == 0 {
         say("Guard", "Lead the way, {player}!");
         follow("guard");
     }

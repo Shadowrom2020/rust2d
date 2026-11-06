@@ -3,6 +3,49 @@
 All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.6.0 — 2026-11-06
+
+### Gameplay
+- **Healing companions**: a *Heal* spell or a healing item set to *Use on: Player or companion*
+  asks whom to heal while companions are on the map: a "heal whom?" bar pauses the game; one
+  click on a name in the bar, the character or its HUD row heals at once (Left / Right and E
+  work too; Esc cancels, nothing is spent). Items can
+  also be *for companions only*. Companions get HUD rows with their head and HP under the
+  player's panel. New action **Heal character** and script `heal_npc(name, amount)`.
+- **Knocked-down companions**: at 0 HP a companion falls and lies where it fell (greyed, *DOWN*
+  in its HUD row) instead of going home; enemies ignore it and any heal gets it back up. Leaving
+  the map asks "Leave … behind?" (it then limps home); save games keep it down in its place.
+  *Project settings → Companions at 0 HP*: stays down until healed (default), gets up after N
+  seconds with 1 HP, or goes home at once (the old behaviour).
+- **Companion orders**: G (pad LB) opens a menu that pauses the game: *Attack* (the default),
+  *Defend* (only what hunts the player or the companion), *Passive* (no fighting, backs away),
+  *Stay here* / *Follow me*, for one companion or all. Orders are saved and shown in the HUD
+  rows; a staying companion catches up on a map change. New action **Companion order** and
+  scripts `order(name, order)`, `order_of(name)`, `is_staying(name)`; the guard's dialog in the
+  example offers *Wait here* / *Stay out of fights*.
+- **Companion inventory**: a companion window (its HUD row, *Gear...* in the orders menu, or
+  `open_companion(name)` / the **Open companion window** action) shows its gear, its bag and the
+  player's inventory: hand items over and back, equip it (weapons and armor change how it
+  fights). Characters use the items they carry themselves (companions, other NPCs and enemies):
+  healing when their health is critical (35 % or less, or one more hit like the last would fell
+  them), cures when poisoned or burning, buffs in a fight; a bow the player gave them shoots arrows from
+  their bag (the HUD row counts them). Characters can be marked *can't be given gear*. The
+  guard's dialog in the example offers "Let me see your gear".
+- **Portrait images**: characters can have a drawn portrait (*Database → Characters → Portrait*,
+  a placed character's own in the inspector, the player's in *Project*) shown in dialogs and the
+  companions' HUD rows instead of the automatic bust; *New blank portrait* opens the pixel editor
+  on a 64 x 64 frame. **Moods**: more portraits per character by name, shown with
+  `say(name, text, #{ mood: "worried" })`, the new **Set mood** action or `mood(name, mood)`.
+  The example's elder (calm and worried) and Tilda have drawn portraits.
+- Gamepad: LB no longer opens the character window from the map (RB and Y do); it opens the
+  companion orders.
+- Example: the Red Potion and a new **Bandage** (Tilda, 6 coins) work on the guard. The Red
+  Potion no longer says "You're already at full health" (it may be meant for someone else).
+
+### Fixes
+- Loading a save while a companion was knocked down no longer asks "Leave … behind?".
+- Healing friendly characters with *Heal area* now keeps a companion's new HP in the save game.
+
 ## 0.5.0 — 2026-11-06
 
 ### Gameplay

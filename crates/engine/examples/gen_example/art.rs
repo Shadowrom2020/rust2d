@@ -1795,6 +1795,7 @@ pub fn clothing_item(id: &str, name: &str, description: &str, icon_sheet: &str, 
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
     }
 }
 
@@ -2650,8 +2651,10 @@ pub mod it {
     pub const ROD: u32 = 37;
     pub const TROUT: u32 = 38;
     pub const BOOT: u32 = 39;
+    /// A rolled linen bandage (heals the player or a companion).
+    pub const BANDAGE: u32 = 40;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 40;
+    pub const COUNT: u32 = 41;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -3000,6 +3003,20 @@ pub fn items(out: &Path) {
                 c.px(22, 17, hex(0x6fa8dc)); // a drip
                 c.px(22, 18, hex(0x6fa8dc));
             }
+            it::BANDAGE => {
+                // A roll of linen with its loose end trailing off, marked with a red cross.
+                let linen = [0x9e9a90, 0xcfcac0, 0xece8de, 0xffffff];
+                c.shade_box(14, 18, 14, 5, linen); // the loose end
+                c.shade_disc(12.0, 15.0, 8.5, linen);
+                c.shade_disc(12.0, 15.0, 3.0, [0x8a857a, 0xb0aa9e, 0xcfcac0, 0xe6e2d8]);
+                for k in [7, 10] {
+                    c.px(k, 9, hex(linen[0]));
+                    c.px(k + 9, 20, hex(linen[1]));
+                }
+                c.rect(23, 18, 2, 5, hex(0xd32f2f));
+                c.rect(21, 19, 6, 2, hex(0xd32f2f));
+                c.hline(14, 23, 14, hex(linen[0]));
+            }
             it::HERB => {
                 // A sprig with three pairs of leaves and a tied stem.
                 let leaf = [0x1b5e20, 0x2e7d32, 0x43a047, 0x81c784];
@@ -3162,4 +3179,118 @@ pub fn explosion(out: &Path) {
         }
     }
     c.save(&out.join("sprites/explosion.png"));
+}
+
+// ------------------------------------------------------------------ portraits
+
+/// Frames of `sprites/portraits.png` (64 x 64 each).
+pub mod portrait {
+    pub const ELDER: u32 = 0;
+    pub const ELDER_WORRIED: u32 = 1;
+    pub const TILDA: u32 = 2;
+    pub const COUNT: u32 = 3;
+    pub const SIZE: u32 = 64;
+}
+
+/// Drawn dialog portraits: the elder (calm and worried) and Tilda the merchant, head and
+/// shoulders on a dusky backdrop.
+pub fn portraits(out: &Path) {
+    const S: i32 = portrait::SIZE as i32;
+    let mut c = Canvas::new(portrait::SIZE * portrait::COUNT, portrait::SIZE);
+    let skin = [0x9c6b48, 0xc98f63, 0xe8b88a, 0xf6d3b0];
+    for k in 0..portrait::COUNT {
+        let c = c.at(k * portrait::SIZE, 0);
+        // Backdrop: a soft vignette.
+        let bg = if k == portrait::TILDA { [0x1f2a22, 0x2c3b30, 0x3b5040, 0x4a6250] } else { [0x1c1f2e, 0x282c40, 0x363b55, 0x444a68] };
+        for y in 0..S {
+            for x in 0..S {
+                let (dx, dy) = ((x as f32 - 32.0) / 40.0, (y as f32 - 26.0) / 40.0);
+                let l = 1.0 - (dx * dx + dy * dy).sqrt() + (bayer(x, y) - 0.5) * 0.12;
+                let i = if l < 0.25 { 0 } else if l < 0.5 { 1 } else if l < 0.75 { 2 } else { 3 };
+                c.px(x, y, hex(bg[i]));
+            }
+        }
+        match k {
+            portrait::ELDER | portrait::ELDER_WORRIED => {
+                let worried = k == portrait::ELDER_WORRIED;
+                let robe = [0x2a1638, 0x45245c, 0x613883, 0x8456a8];
+                let white = [0x8f8f96, 0xbdbdc4, 0xdedee4, 0xffffff];
+                // Shoulders in the purple robe with a golden trim.
+                c.shade_ellipse(32.0, 70.0, 30.0, 22.0, robe);
+                c.stroke(22.0, 50.0, 32.0, 64.0, 1.2, hex(0xd4a838));
+                c.stroke(42.0, 50.0, 32.0, 64.0, 1.2, hex(0xd4a838));
+                // Neck and head.
+                c.rect(27, 40, 10, 8, hex(skin[1]));
+                c.shade_ellipse(32.0, 28.0, 12.5, 15.0, skin);
+                // Ears.
+                c.shade_ellipse(19.5, 29.0, 2.5, 4.0, skin);
+                c.shade_ellipse(44.5, 29.0, 2.5, 4.0, skin);
+                // White hair: a receding crown and full sides.
+                c.shade_ellipse(32.0, 15.0, 12.0, 5.0, white);
+                c.shade_ellipse(21.0, 22.0, 4.0, 8.0, white);
+                c.shade_ellipse(43.0, 22.0, 4.0, 8.0, white);
+                // A long beard and moustache.
+                c.shade_ellipse(32.0, 45.0, 11.0, 12.0, white);
+                c.shade_ellipse(32.0, 36.0, 9.0, 3.5, white);
+                c.rect(29, 37, 6, 1, hex(0x7a5040)); // the mouth under the moustache
+                // Eyes, brows, nose and wrinkles.
+                for ex in [26, 36] {
+                    c.rect(ex, 28, 3, 2, hex(0xffffff));
+                    c.px(ex + 1, 28, hex(0x3a2a20));
+                    c.px(ex + 1, 29, hex(0x3a2a20));
+                }
+                if worried {
+                    // Brows raised towards the middle, a crease, a bead of sweat.
+                    c.line(24, 25, 29, 23, hex(0xdedee4));
+                    c.line(35, 23, 40, 25, hex(0xdedee4));
+                    c.line(24, 26, 29, 24, hex(0xbdbdc4));
+                    c.line(35, 24, 40, 26, hex(0xbdbdc4));
+                    c.line(31, 21, 31, 23, hex(skin[0]));
+                    c.line(33, 21, 33, 23, hex(skin[0]));
+                    c.rect(43, 22, 2, 3, hex(0xa8d8ff));
+                    c.px(43, 21, hex(0xa8d8ff));
+                } else {
+                    c.rect(24, 25, 6, 2, hex(0xdedee4));
+                    c.rect(34, 25, 6, 2, hex(0xdedee4));
+                    c.hline(27, 20, 10, hex(skin[1]));
+                }
+                c.line(32, 29, 31, 33, hex(skin[1]));
+                c.px(32, 33, hex(skin[0]));
+            }
+            _ => {
+                let hair = [0x1e120c, 0x3a2418, 0x5a3a26, 0x7a5236];
+                let dress = [0x1b3a24, 0x2e5c3a, 0x43804f, 0x63a56c];
+                // Long hair behind the shoulders.
+                c.shade_ellipse(32.0, 34.0, 17.0, 24.0, hair);
+                // Shoulders: a green dress with a white apron strap and collar.
+                c.shade_ellipse(32.0, 70.0, 28.0, 22.0, dress);
+                c.stroke(26.0, 50.0, 24.0, 64.0, 1.5, hex(0xece6d6));
+                c.stroke(38.0, 50.0, 40.0, 64.0, 1.5, hex(0xece6d6));
+                c.rect(27, 41, 10, 8, hex(skin[1]));
+                c.shade_ellipse(32.0, 29.0, 11.5, 14.0, skin);
+                // Fringe and side locks.
+                c.shade_ellipse(32.0, 17.0, 12.5, 6.0, hair);
+                c.shade_ellipse(21.5, 27.0, 3.5, 11.0, hair);
+                c.shade_ellipse(42.5, 27.0, 3.5, 11.0, hair);
+                // Eyes with lashes, brows, rosy cheeks, a smile.
+                for ex in [26, 36] {
+                    c.rect(ex, 29, 3, 2, hex(0xffffff));
+                    c.px(ex + 1, 29, hex(0x3d6b3a));
+                    c.px(ex + 1, 30, hex(0x1e2a1a));
+                    c.hline(ex, 28, 3, hex(0x1e120c));
+                }
+                c.line(25, 26, 29, 25, hex(0x3a2418));
+                c.line(35, 25, 39, 26, hex(0x3a2418));
+                c.rect(24, 33, 3, 2, hex(0xe8907a));
+                c.rect(37, 33, 3, 2, hex(0xe8907a));
+                c.line(32, 30, 31, 34, hex(skin[1]));
+                c.line(29, 37, 31, 38, hex(0xa04848));
+                c.line(31, 38, 33, 38, hex(0xa04848));
+                c.line(33, 38, 35, 37, hex(0xa04848));
+                // A small earring.
+                c.px(20, 34, hex(0xd4a838));
+            }
+        }
+    }
+    c.save(&out.join("sprites/portraits.png"));
 }

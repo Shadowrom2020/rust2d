@@ -315,6 +315,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
                     },
                     |d| &mut d.id,
                 ),
@@ -439,7 +440,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         let mut embed: Option<(String, (u32, u32), bool)> = None;
         egui::CentralPanel::default().show_inside(ui, |ui| {
             // Sprite sheets: a compact form on top, the pixel editor below it.
-            let art_tab = matches!(tab, Tab::Items | Tab::Props) && ed.db.art_open;
+            let art_tab = matches!(tab, Tab::Items | Tab::Props | Tab::Characters) && ed.db.art_open;
             let form_height = if tab == Tab::Sheets {
                 210.0
             } else if art_tab {
@@ -490,6 +491,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Characters => {
                         if let Some(d) = db.characters.get_mut(i) {
                             character_form(ui, d, &mut cx);
+                            art_target = art_of(&db_snapshot, &d.portrait, false);
                         }
                     }
                     Tab::Tilesets => {
@@ -744,6 +746,15 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         ui.add(egui::DragValue::new(&mut d.value).range(0..=999_999))
             .on_hover_text("Base trade price; merchants use it when their stock has no own price (0 = worthless, can't be sold)");
     });
+    ui.horizontal(|ui| {
+        ui.label("Use on");
+        egui::ComboBox::from_id_salt("item_use_on").selected_text(d.use_on.label()).show_ui(ui, |ui| {
+            for t in rustpg2d_engine::defs::UseTarget::ALL {
+                ui.selectable_value(&mut d.use_on, t, t.label());
+            }
+        });
+        ui.weak("(healing items, whose 'On use' heals: with companions around the player chooses whom to heal)");
+    });
     ui.separator();
     ui.heading("Equipment");
     ui.weak("Equipment goes into a character-sheet slot when used from the inventory (weapons also with Q) instead of running 'On use' triggers.");
@@ -884,6 +895,43 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
             t.on = TriggerOn::UseItem { item: String::new() };
         }
     }
+}
+
+/// A character's drawn portrait and its mood portraits.
+fn portrait_ui(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
+    ui.separator();
+    ui.heading("Portrait");
+    ui.weak("A drawn portrait for dialogs and the companions' HUD rows (any frame size, e.g. 64 x 64). None: the head and shoulders of its look.");
+    widgets::sprite_field(ui, "chr_portrait", &mut d.portrait, cx.tex, cx.assets, cx.db, false);
+    ui.horizontal(|ui| {
+        if !d.portrait.is_empty() && ui.button("Clear (automatic)").clicked() {
+            d.portrait = SpriteRef::default();
+        }
+    });
+    art_buttons(ui, cx, "portrait", (1, 1));
+    egui::CollapsingHeader::new(format!("Moods ({})", d.moods.len())).id_salt("chr_moods").show(ui, |ui| {
+        ui.weak("Portraits for moods, shown while a dialog line sets one: say(\"Elder Rowan\", \"...\", #{ mood: \"worried\" }) or the Set mood action.");
+        let mut list: Vec<(String, SpriteRef)> = d.moods.clone().into_iter().collect();
+        let mut remove = None;
+        for (k, (name, sprite)) in list.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label("Mood");
+                ui.add(egui::TextEdit::singleline(name).desired_width(120.0));
+                if ui.button("Remove").clicked() {
+                    remove = Some(k);
+                }
+            });
+            widgets::sprite_field(ui, &format!("chr_mood_{k}"), sprite, cx.tex, cx.assets, cx.db, false);
+        }
+        if let Some(k) = remove {
+            list.remove(k);
+        }
+        if ui.button("+ Mood").clicked() {
+            let name = (1..).map(|n| if n == 1 { "mood".to_string() } else { format!("mood{n}") }).find(|n| !list.iter().any(|(m, _)| m == n)).unwrap_or_default();
+            list.push((name, d.portrait.clone()));
+        }
+        d.moods = list.into_iter().collect();
+    });
 }
 
 fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
@@ -1212,6 +1260,7 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     name_row(ui, &mut d.name);
     ui.label("Description").on_hover_text("What the bestiary (journal, J) says about it once the player has defeated one. Placeholders like {player} work.");
     text_box(ui, &mut d.description, 3, "Shown in the bestiary once the player has defeated one");
+    portrait_ui(ui, d, cx);
     // The look: assembled in the character builder (body, colors, hair, clothes, gear).
     ui.separator();
     ui.heading("Look & equipment");
@@ -1308,6 +1357,10 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
         ui.end_row();
         ui.label("Hostile");
         ui.checkbox(&mut d.hostile, "hurts the player on contact");
+        ui.end_row();
+        ui.label("As companion");
+        ui.checkbox(&mut d.gear_locked, "can't be given gear")
+            .on_hover_text("A companion's window lets the player equip it and hand it items; tick this for animals and creatures that can't wear anything (they still carry items and use potions).");
         ui.end_row();
         ui.label("Experience");
         ui.add(egui::DragValue::new(&mut d.xp).range(0..=1_000_000).suffix(" XP"))
@@ -1810,6 +1863,30 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         ui.checkbox(&mut c.dialog_portraits, "show the speaker's portrait in dialogs")
             .on_hover_text("Found from the speaker's name: the player (\"{player}\" or the player's name), the trigger's owner ({self}), a character on the map or a character definition with that name. Narration and signs (no matching character) have none.");
         ui.end_row();
+        ui.label("Player portrait");
+        ui.vertical(|ui| {
+            widgets::sprite_field(ui, "player_portrait", &mut c.player_portrait, &ed.tex, &ed.assets, &ed.project.db, false);
+            ui.weak("Drawn portrait of the player in dialogs (none: the player character's portrait, else the head and shoulders of the player's look).");
+        });
+        ui.end_row();
+        ui.label("Companions at 0 HP");
+        ui.horizontal(|ui| {
+            use rustpg2d_engine::project::DownRule;
+            egui::ComboBox::from_id_salt("companion_down").selected_text(c.companion_down.label()).show_ui(ui, |ui| {
+                for r in [DownRule::StaysDown, DownRule::GetsUp { seconds: 30.0 }, DownRule::GoesHome] {
+                    let on = std::mem::discriminant(&c.companion_down) == std::mem::discriminant(&r);
+                    if ui.selectable_label(on, r.label()).clicked() && !on {
+                        c.companion_down = r;
+                    }
+                }
+            })
+            .response
+            .on_hover_text("A knocked-down companion lies where it fell, enemies leave it alone; any heal (potion, spell, Heal character) gets it up. Leaving the map asks whether to leave it behind (it then goes home).");
+            if let DownRule::GetsUp { seconds } = &mut c.companion_down {
+                ui.add(egui::DragValue::new(seconds).range(1.0..=600.0).suffix(" s"));
+            }
+        });
+        ui.end_row();
     });
     ui.weak("Tile size changes need a restart of the editor.");
     ui.separator();
@@ -2301,6 +2378,7 @@ impl Editor {
                 let cur = match tab {
                     Tab::Items => self.project.db.items.get(i).map(|d| d.icon.clone()),
                     Tab::Props => self.project.db.props.get(i).map(|d| d.state_look(self.db.state_sel.min(d.states.len())).0.clone()),
+                    Tab::Characters => self.project.db.characters.get(i).map(|d| d.portrait.clone()),
                     _ => None,
                 };
                 let Some(cur) = cur else { anyhow::bail!("nothing selected") };
@@ -2309,6 +2387,7 @@ impl Editor {
                 let sprite = if cells == (1, 1) { SpriteRef::new(&sheet, frame) } else { SpriteRef::block(&sheet, frame, cells.0, cells.1) };
                 match tab {
                     Tab::Items => self.project.db.items[i].icon = sprite,
+                    Tab::Characters => self.project.db.characters[i].portrait = sprite,
                     _ => {
                         let d = &mut self.project.db.props[i];
                         let k = self.db.state_sel.min(d.states.len());
@@ -2334,6 +2413,22 @@ impl Editor {
     /// A sheet for new item icons / prop frames when the definition has none yet: an existing
     /// "items" / "props" sheet, else a new blank one.
     fn default_sheet(&mut self, tab: Tab) -> anyhow::Result<String> {
+        // Portraits: 64 x 64 frames on a sheet of their own.
+        if tab == Tab::Characters {
+            const SIZE: u32 = 64;
+            if self.project.db.sheet("portraits").is_none() {
+                let rel = "sprites/portraits.png";
+                let path = self.project.root.join(rel);
+                std::fs::create_dir_all(path.parent().unwrap())?;
+                if !path.exists() {
+                    std::fs::write(&path, Rgba::new(SIZE * 4, SIZE).encode()?)?;
+                }
+                self.project.db.sheets.push(SheetDef::new("portraits", rel, SIZE, SIZE));
+                self.defs_dirty = true;
+                self.reload_assets();
+            }
+            return Ok("portraits".into());
+        }
         let want = if tab == Tab::Items { "items" } else { "props" };
         if self.project.db.sheet(want).is_some() {
             return Ok(want.to_string());

@@ -420,7 +420,9 @@ impl Game {
         let u = self.u();
         let e = &mut self.loaded.entities[i];
         let before = e.hp;
-        e.hp -= (dmg - e.defense - crate::effects::defense_bonus(&e.effects)).max(1);
+        let hit = (dmg - e.defense - crate::effects::defense_bonus(&e.effects)).max(1);
+        e.hp -= hit;
+        e.last_hit = hit;
         e.invuln = HIT_INVULN;
         e.flash = 0.15;
         e.body.move_target = None;
@@ -457,8 +459,8 @@ impl Game {
     /// Defeats character `i`; `xp`: the player gains its experience.
     fn defeat_with(&mut self, i: usize, xp: bool) {
         if self.loaded.entities[i].companion.is_some() {
-            // Companions aren't defeated: knocked out, they go home.
-            self.dismiss(i, true);
+            // Companions aren't defeated: they fall (and wait to be healed), or go home.
+            self.knock_down(i);
             return;
         }
         if xp {
@@ -604,7 +606,7 @@ impl Game {
                 self.assets.draw_frame_scaled(&icon.sheet, icon.frame, at, a1 + std::f32::consts::FRAC_PI_4, 1.0, WHITE);
             }
         }
-        for e in self.loaded.entities.iter().filter(|e| e.active && e.max_hp > 0 && e.hp < e.max_hp) {
+        for e in self.loaded.entities.iter().filter(|e| e.active && e.max_hp > 0 && e.hp < e.max_hp && !e.companion.as_ref().is_some_and(|l| l.down.is_some())) {
             let w = 14.0 * u;
             let (x, y) = (e.body.pos.x - w / 2.0, e.body.pos.y - ts - 6.0 * u);
             draw_rectangle(x - u, y - u, w + 2.0 * u, 4.0 * u, Color::new(0.0, 0.0, 0.0, 0.7));
@@ -683,6 +685,7 @@ impl Game {
             h += 22.0;
         }
         let frame = Rect::new(x0, y0, tx + col_w + PAD + 2.0 - x0, h.max(portrait.h) + 2.0 * PAD);
+        self.hud_bottom.set(frame.bottom());
 
         // Frame: dark backing, a gold border with an inner line and corner studs.
         let gold = Color::new(0.85, 0.72, 0.38, 1.0);
