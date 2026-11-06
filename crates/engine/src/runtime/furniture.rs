@@ -219,7 +219,7 @@ impl Game {
     /// What a night's sleep does: the clock moves on, HP and mana are restored, timed effects
     /// run out, enemies due to respawn are back, scheduled characters are where the hour wants.
     fn pass_time(&mut self, hours: f32) {
-        self.world.hour = (self.world.hour + hours).rem_euclid(24.0);
+        self.world.advance_hours(hours);
         if self.combat.enabled() {
             self.world.player_hp = Some(self.player_max_hp());
         }

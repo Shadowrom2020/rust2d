@@ -12,6 +12,9 @@
         station: "alchemy",
         skill: "",
         level: 0,
+        tools: [
+            "mortar",
+        ],
     ),
     (
         id: "brew_antidote",
@@ -28,8 +31,11 @@
             ),
         ],
         station: "alchemy",
-        skill: "",
-        level: 0,
+        skill: "alchemy",
+        level: 1,
+        tools: [
+            "mortar",
+        ],
     ),
     (
         id: "brew_mana",
@@ -48,6 +54,9 @@
         station: "alchemy",
         skill: "",
         level: 0,
+        tools: [
+            "mortar",
+        ],
     ),
     (
         id: "brew_swiftness",
@@ -64,7 +73,73 @@
             ),
         ],
         station: "alchemy",
-        skill: "arcana",
-        level: 1,
+        skill: "alchemy",
+        level: 2,
+        tools: [
+            "mortar",
+        ],
+    ),
+    (
+        id: "smelt_copper",
+        result: "copper_ingot",
+        count: 1,
+        ingredients: [
+            (
+                item: "copper_ore",
+                count: 2,
+            ),
+            (
+                item: "coal",
+                count: 1,
+            ),
+        ],
+        station: "smelter",
+        skill: "",
+        level: 0,
+        tools: [
+            "tongs",
+        ],
+    ),
+    (
+        id: "smelt_iron",
+        result: "iron_ingot",
+        count: 1,
+        ingredients: [
+            (
+                item: "iron_ore",
+                count: 2,
+            ),
+            (
+                item: "coal",
+                count: 1,
+            ),
+        ],
+        station: "smelter",
+        skill: "",
+        level: 0,
+        tools: [
+            "tongs",
+        ],
+    ),
+    (
+        id: "smelt_silver",
+        result: "silver_ingot",
+        count: 1,
+        ingredients: [
+            (
+                item: "silver_ore",
+                count: 2,
+            ),
+            (
+                item: "coal",
+                count: 1,
+            ),
+        ],
+        station: "smelter",
+        skill: "mining",
+        level: 2,
+        tools: [
+            "tongs",
+        ],
     ),
 ]

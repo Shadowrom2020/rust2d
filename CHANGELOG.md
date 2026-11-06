@@ -3,6 +3,23 @@
 All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Gameplay
+- **Gathering and mining**: props can be gathered with a tool (E or a melee swing; hits with a
+  progress bar, then their loot and a "used up" state) and **regrow** after some in-game hours,
+  also while the player is elsewhere. A new skill effect **Gathering** needs fewer hits per level.
+  The clock counts **days** (`WorldState.day`). Recipes can need **tools** (not used up).
+- Example: ore veins (copper, iron, silver, gems, coal) in the old mine, a Pickaxe and Smith's
+  Tongs in a crate at its entrance, the Mining skill; a **smelter** by the mine entrance (ore and
+  coal into copper / iron / silver ingots, tongs needed, silver at Mining 2). Alchemy needs a
+  **Mortar and Pestle** (Tilda) and a new **Alchemy** skill for Antidotes (1) and Swiftness
+  Potions (2, was Arcana 1); herb bushes and mushroom patches by the forest path are picked by
+  hand and grow back by the next morning. Ore, ingots and rubies sell at Tilda's.
+- Example: **the Workshop**, a new map north of the village (a road through the tree line): a
+  crafting testing ground with a supply chest of tools, a herb garden with an alchemy table, a
+  quarry with every vein and a smelter, a bed to pass the night, and signs.
+
 ## 0.6.0 — 2026-11-06
 
 ### Gameplay

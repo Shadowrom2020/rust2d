@@ -11,6 +11,7 @@ mod dev;
 mod effects;
 mod equipment;
 mod furniture;
+mod gather;
 mod healing;
 mod fx;
 mod inventory_ui;
@@ -141,6 +142,10 @@ struct RtEntity {
     damage: i32,
     invuln: f32,
     flash: f32,
+    /// When its prop state last changed (in-game hours; regrowing states).
+    changed_at: Option<f64>,
+    /// Hits a gathering prop has taken (and seconds since the last one).
+    gather: Option<(u32, f32)>,
     /// The placed character's own portrait (`EntityInstance::portrait`).
     portrait: Option<crate::defs::SpriteRef>,
     /// HP the last hit took (a character drinks a potion before the next one would fell it).
@@ -256,6 +261,10 @@ pub struct Game {
     moods: std::collections::HashMap<String, String>,
     /// The open "Heal whom?" choice.
     heal_pick: Option<healing::HealPick>,
+    /// Chips flying off gathered props.
+    chips: Vec<gather::Chip>,
+    /// Seconds to the next check of regrowing props.
+    regrow_timer: f32,
     /// The open companion orders menu (G).
     order_menu: Option<orders::OrderMenu>,
     /// The open companion window (its gear and bag).
@@ -368,6 +377,8 @@ impl Game {
             pending_companion: None,
             moods: Default::default(),
             heal_pick: None,
+            chips: Vec::new(),
+            regrow_timer: 0.0,
             order_menu: None,
             comp_win: None,
             hud_bottom: std::cell::Cell::new(80.0),
@@ -397,7 +408,7 @@ impl Game {
             (None, None) if start.map.is_some() => Arrival::Spawn(String::new()),
             _ => Arrival::Spawn(game.project.config.start_spawn.clone()),
         };
-        game.scripts.set_recipes(game.project.db.recipes.clone());
+        game.scripts.set_recipes(game.project.db.recipes.clone(), game.project.db.tool_kinds());
         game.load_achievements();
         game.settings = crate::settings::Settings::load(&game.project.config.name);
         game.apply_settings();
@@ -485,6 +496,8 @@ impl Game {
             invuln: 0.0,
             last_hit: 0,
             portrait: None,
+            changed_at: None,
+            gather: None,
             item_cd: 0.0,
             flash: 0.0,
             knock: Vec2::ZERO,
@@ -523,10 +536,12 @@ impl Game {
             return false;
         };
         let solid = d.state_look(idx).1;
+        let now = self.world.total_hours();
         let e = &mut self.loaded.entities[i];
         e.state = idx;
         e.frame = 0;
         e.solid = solid;
+        e.changed_at = Some(now);
         self.persist(i);
         true
     }
@@ -564,6 +579,7 @@ impl Game {
             st.map_or(e.frame, |s| s.frame),
         );
         rt.count = count;
+        rt.changed_at = st.and_then(|s| s.changed_at);
         rt.light = e.light.clone();
         rt.portrait = e.portrait.clone();
         if e.kind == EntityKind::Character {
@@ -673,6 +689,8 @@ impl Game {
         self.timed_lights.clear();
         self.order = None;
         self.setup_spawners();
+        // Veins and crops that regrew while the player was away.
+        self.update_regrow();
         let music = self.loaded.map.music.clone();
         if !music.is_empty() {
             self.audio.play_music(&music);
@@ -974,6 +992,7 @@ impl Game {
             state,
             patrol: e.patrol.as_ref().map(|p| p.state()),
             schedule_off: e.schedule.as_ref().is_some_and(|s| !s.on),
+            changed_at: e.changed_at,
         };
         let map = self.loaded.map.name.clone();
         let uid = e.uid;
@@ -1039,7 +1058,7 @@ impl Game {
         self.world.play_time += dt as f64;
         self.update_achievements(dt);
         if !self.on_title() && self.project.config.day_minutes > 0.0 {
-            self.world.hour = (self.world.hour + dt * 24.0 / (self.project.config.day_minutes * 60.0)).rem_euclid(24.0);
+            self.world.advance_hours(dt * 24.0 / (self.project.config.day_minutes * 60.0));
         }
         if input::act_pressed(Act::Debug) {
             self.debug = !self.debug;
@@ -1156,6 +1175,9 @@ impl Game {
         if !frozen || self.cutscene_active() {
             self.update_fx(dt);
             self.update_weather(dt);
+        }
+        if !frozen {
+            self.update_gather(dt);
         }
         if let Some(m) = &mut self.click_marker {
             m.1 += dt;
@@ -1384,6 +1406,10 @@ impl Game {
                     if !self.loaded.entities[i].active {
                         return; // e.g. a gate that disappeared on unlocking
                     }
+                    // Ore veins, trees...: E is a gathering hit.
+                    if self.gather_hit(i) {
+                        return;
+                    }
                 }
             }
             self.fire(GameEvent::Interact, Source::Entity(uid));
@@ -1599,7 +1625,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} aim={} orders={} compwin={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} gather={:?} props={:?} day={} aim={} orders={} compwin={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1636,6 +1662,9 @@ impl Game {
             self.achievements_status(),
             self.minigame_status(),
             self.pose_status(),
+            self.gather_status(),
+            self.prop_states_status(),
+            self.world.day,
             self.heal_pick_status(),
             self.order_menu_status(),
             self.companion_win_status(),
@@ -1831,6 +1860,7 @@ impl Game {
         }
 
         self.draw_combat_world();
+        self.draw_gather();
         self.draw_fx();
         if !self.on_title() {
             self.draw_mouse_world();

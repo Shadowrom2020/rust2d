@@ -240,6 +240,9 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.container(&mut d.container);
         r.lock(&mut d.lock);
         r.use_spot(&mut d.use_spot);
+        if let Some(g) = &mut d.gather {
+            r.loot(&mut g.loot);
+        }
     }
     for d in &mut db.characters {
         r.triggers(&mut d.triggers);
@@ -366,6 +369,9 @@ pub fn refs_of_prop(d: &crate::defs::PropDef) -> Vec<(RefKind, String)> {
     r.container(&mut d.container);
     r.lock(&mut d.lock);
     r.use_spot(&mut d.use_spot);
+    if let Some(g) = &mut d.gather {
+        r.loot(&mut g.loot);
+    }
     r.found.unwrap_or_default()
 }
 

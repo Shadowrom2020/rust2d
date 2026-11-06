@@ -61,10 +61,12 @@ pub enum SkillEffect {
     /// Calls the Rhai function `function(level)` whenever the level changes (and once when a
     /// game starts or loads), so a script can apply its own effect.
     Script { function: String },
+    /// Gathering with a tool kind ("pickaxe"; "" = any): percent fewer hits per level.
+    Gather { tool: String, percent: f32 },
 }
 
 impl SkillEffect {
-    pub const LABELS: [(&'static str, &'static str); 11] = [
+    pub const LABELS: [(&'static str, &'static str); 12] = [
         ("None", "No built-in effect (for scripts and conditions)"),
         ("Melee damage", "Melee weapons and bare hands: damage + % per level"),
         ("Ranged damage", "Bows and crossbows: damage + % per level"),
@@ -76,6 +78,7 @@ impl SkillEffect {
         ("Mana", "Maximum mana + points per level"),
         ("Mana regen", "Mana regained per second + per level"),
         ("Script", "Calls a script function with the level"),
+        ("Gathering", "Gathering with a tool (mining with a pickaxe, ...): % fewer hits per level"),
     ];
     pub fn index(&self) -> usize {
         match self {
@@ -90,6 +93,7 @@ impl SkillEffect {
             SkillEffect::Mana { .. } => 8,
             SkillEffect::ManaRegen { .. } => 9,
             SkillEffect::Script { .. } => 10,
+            SkillEffect::Gather { .. } => 11,
         }
     }
     pub fn template(i: usize) -> SkillEffect {
@@ -104,6 +108,7 @@ impl SkillEffect {
             8 => SkillEffect::Mana { points: 10 },
             9 => SkillEffect::ManaRegen { per_second: 0.25 },
             10 => SkillEffect::Script { function: String::new() },
+            11 => SkillEffect::Gather { tool: String::new(), percent: 15.0 },
             _ => SkillEffect::None,
         }
     }
@@ -152,6 +157,7 @@ impl SkillDef {
             SkillEffect::Mana { points } => format!("+{} max mana", points * level),
             SkillEffect::ManaRegen { per_second } => format!("+{:.2} mana/s", per_second * l),
             SkillEffect::Script { function } => format!("{function}({level})"),
+            SkillEffect::Gather { tool, percent } => format!("{:.0}% fewer hits{}", (percent * l).min(80.0), if tool.is_empty() { String::new() } else { format!(" with a {tool}") }),
         }
     }
 }

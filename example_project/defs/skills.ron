@@ -89,6 +89,31 @@
         ),
     ),
     (
+        id: "alchemy",
+        name: "Alchemy",
+        description: "The craft of brewing: Antidotes need level 1, Swiftness Potions level 2 (at an alchemy table, with a mortar and pestle).",
+        icon: (
+            sheet: "items",
+            frame: 46,
+        ),
+        max_level: 2,
+        effect: r#None,
+    ),
+    (
+        id: "mining",
+        name: "Mining",
+        description: "Strong arms and a sharp eye for the seam: every level takes 20% fewer pickaxe hits to break off ore.",
+        icon: (
+            sheet: "items",
+            frame: 41,
+        ),
+        max_level: 3,
+        effect: Gather(
+            tool: "pickaxe",
+            percent: 20.0,
+        ),
+    ),
+    (
         id: "scavenging",
         name: "Scavenging",
         description: "An eye for what others leave behind: defeated slimes drop an extra coin per level (a scripted skill: see scavenging() in main.rhai).",

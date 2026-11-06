@@ -2076,6 +2076,132 @@ pub mod p {
     /// Chairs facing left / right (side views).
     pub const CHAIR_LEFT: u32 = 86;
     pub const CHAIR_RIGHT: u32 = 87;
+    /// Ore veins (row 11): rocks with copper, iron or silver ore, a gem vein, and the
+    /// broken rock a vein leaves when it is mined out.
+    pub const VEIN_COPPER: u32 = 88;
+    pub const VEIN_IRON: u32 = 89;
+    pub const VEIN_SILVER: u32 = 90;
+    pub const VEIN_GEM: u32 = 91;
+    pub const VEIN_EMPTY: u32 = 92;
+    /// Coal for the smelter (row 11), and plants picked by hand (row 11-12): a herb bush and a
+    /// mushroom patch, each also picked bare.
+    pub const VEIN_COAL: u32 = 93;
+    pub const HERB_BUSH: u32 = 94;
+    pub const HERB_BUSH_PICKED: u32 = 95;
+    pub const MUSHROOMS: u32 = 96;
+    pub const MUSHROOMS_PICKED: u32 = 97;
+    /// A smelter (crafting station: ore and coal into ingots), 1x2.
+    pub const SMELTER: u32 = 98;
+}
+
+/// The coal vein, the herb bush and the mushroom patch (full and picked), the smelter.
+fn gathering_props(c: &mut Canvas) {
+    let n = TS as i32;
+    // Coal: a rock with black glossy lumps.
+    let (x, y) = cell(p::VEIN_COAL);
+    c.at(x, y);
+    c.shade_ellipse(16.0, 19.0, 13.0, 11.0, STONE);
+    c.shade_ellipse(9.0, 24.0, 6.0, 5.0, STONE);
+    c.shade_ellipse(24.0, 24.0, 6.0, 5.0, STONE);
+    for (fx, fy, r) in [(11.0, 15.0, 3.0), (18.0, 19.0, 3.4), (21.0, 13.0, 2.4), (13.0, 23.0, 2.2)] {
+        c.shade_disc(fx, fy, r, [0x0c0c10, 0x1c1c24, 0x30303c, 0x6a6a7a]);
+    }
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.0, 13.0, 1.5);
+    // Herb bush: leafy, with pale sprigs when full; bare twigs when picked.
+    for (cell_id, full) in [(p::HERB_BUSH, true), (p::HERB_BUSH_PICKED, false)] {
+        let (x, y) = cell(cell_id);
+        c.at(x, y);
+        if full {
+            for (bx, by, r) in [(10.0, 20.0, 7.0), (22.0, 20.0, 7.0), (16.0, 15.0, 8.0), (16.0, 23.0, 7.0)] {
+                c.shade_disc(bx, by, r, LEAF);
+            }
+            for (sx, sy) in [(9, 14), (15, 10), (22, 13), (19, 20), (12, 22)] {
+                c.rect(sx, sy, 2, 3, hex(0xb8e08a));
+                c.px(sx, sy - 1, hex(0xe8f8c8));
+            }
+        } else {
+            for (x0, y0, x1, y1) in [(16, 29, 16, 18), (16, 22, 10, 16), (16, 22, 22, 15), (16, 25, 21, 21)] {
+                c.line(x0, y0, x1, y1, hex(WOOD[1]));
+            }
+            c.shade_disc(10.0, 16.0, 2.0, LEAF);
+            c.shade_disc(22.0, 15.0, 2.0, LEAF);
+        }
+        c.auto_outline(n, n, OUTLINE);
+        c.shadow(16.0, 29.5, 10.0, 1.5);
+    }
+    // Mushroom patch: three red caps in moss; picked: the moss and stubs.
+    for (cell_id, full) in [(p::MUSHROOMS, true), (p::MUSHROOMS_PICKED, false)] {
+        let (x, y) = cell(cell_id);
+        c.at(x, y);
+        c.shade_ellipse(16.0, 26.0, 12.0, 4.0, [0x1d3a18, 0x2e5a24, 0x447a34, 0x6a9a50]);
+        for (mx, my, s) in [(10.0, 22.0, 1.0), (19.0, 20.0, 1.3), (24.0, 24.0, 0.8)] {
+            c.shade_box((mx - 1.0) as i32, (my + 1.0) as i32, 3, (5.0 * s) as i32, [0xbcaaa4, 0xd7ccc8, 0xefebe9, 0xffffff]);
+            if full {
+                c.shade_ellipse(mx + 0.5, my, 5.0 * s, 3.5 * s, [0x7a1010, 0xb71c1c, 0xe53935, 0xff8a80]);
+                c.px(mx as i32 - 1, (my - 1.0) as i32, hex(0xffffff));
+                c.px(mx as i32 + 2, my as i32, hex(0xffffff));
+            }
+        }
+        c.auto_outline(n, n, OUTLINE);
+    }
+    // Smelter (1x2): a stone furnace with a glowing mouth and a chimney.
+    let (x, y) = cell(p::SMELTER);
+    c.at(x, y);
+    c.shade_box(12, 2, 8, 22, STONE); // chimney
+    c.rect(11, 1, 10, 3, hex(STONE[0]));
+    c.shade_box(4, 22, 24, 40, STONE); // body
+    c.rrect(4, 20, 24, 6, 2, hex(STONE[2]));
+    for (bx, by) in [(6, 30), (18, 30), (10, 40), (22, 44), (6, 52), (16, 54)] {
+        c.hline(bx, by, 6, hex(STONE[0]));
+    }
+    // The fire in its mouth.
+    c.rrect(9, 40, 14, 14, 4, hex(0x1a0c06));
+    for (k, col) in FIRE.iter().enumerate().skip(1) {
+        let r = 6.0 - k as f32 * 1.1;
+        c.ellipse(16.0, 50.0 - k as f32, r + 1.0, r, hex(*col));
+    }
+    c.auto_outline(n, 2 * n, OUTLINE);
+    c.shadow(16.0, 62.5, 13.0, 1.5);
+}
+
+/// Ore veins: a rock with ore flecks in the vein's color, and the mined-out rubble.
+fn veins(c: &mut Canvas) {
+    let n = TS as i32;
+    let ores: [(u32, [u32; 4]); 4] = [
+        (p::VEIN_COPPER, [0x7a3e1a, 0xb8642c, 0xe0904a, 0xffc890]),
+        (p::VEIN_IRON, [0x4a3a36, 0x7a6058, 0xa88a7e, 0xd8c4b8]),
+        (p::VEIN_SILVER, [0x6c7480, 0xa8b2be, 0xd8e0ea, 0xffffff]),
+        (p::VEIN_GEM, [0x6a0e2a, 0xb01e48, 0xe8406e, 0xffa0c0]),
+    ];
+    for (cell_id, ore) in ores {
+        let (x, y) = cell(cell_id);
+        c.at(x, y);
+        c.shade_ellipse(16.0, 19.0, 13.0, 11.0, STONE);
+        c.shade_ellipse(9.0, 24.0, 6.0, 5.0, STONE);
+        c.shade_ellipse(24.0, 24.0, 6.0, 5.0, STONE);
+        // Ore: flecks and a few bright nuggets along a crack.
+        c.line(7, 15, 24, 25, hex(STONE[0]));
+        for (fx, fy, r) in [(10.0, 15.0, 2.2), (15.0, 19.0, 2.6), (20.0, 22.0, 2.0), (21.0, 13.0, 1.8), (12.0, 23.0, 1.6)] {
+            if cell_id == p::VEIN_GEM {
+                // Faceted crystals.
+                c.shade_box(fx as i32 - 1, fy as i32 - 2, 3, 4, ore);
+                c.px(fx as i32, fy as i32 - 2, hex(ore[3]));
+            } else {
+                c.shade_disc(fx, fy, r, ore);
+            }
+        }
+        c.auto_outline(n, n, OUTLINE);
+        c.shadow(16.0, 30.0, 13.0, 1.5);
+    }
+    // Mined out: low broken rubble.
+    let (x, y) = cell(p::VEIN_EMPTY);
+    c.at(x, y);
+    for (rx, ry, r) in [(10.0, 25.0, 5.0), (19.0, 26.0, 6.0), (25.0, 24.0, 3.5), (14.0, 21.0, 3.0)] {
+        c.shade_disc(rx, ry, r, STONE);
+    }
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.5, 12.0, 1.5);
 }
 
 /// Chair, bench, bed and the bed's blanket (furniture the player can use).
@@ -2434,7 +2560,7 @@ fn big_props(c: &mut Canvas) {
 pub fn props(out: &Path) {
     // 11 rows: rows 7-8 (the grand shrine), 9 (the alchemy table, furniture) and 10 (the bed's
     // foot) were added later, below the older cells.
-    let mut c = Canvas::new(TS * 8, TS * 11);
+    let mut c = Canvas::new(TS * 8, TS * 14);
     let n = TS as i32;
     for i in 0..8u32 {
         let (x, y) = cell(i);
@@ -2597,6 +2723,8 @@ pub fn props(out: &Path) {
     c.auto_outline(n, n, OUTLINE);
     c.shadow(16.0, 30.5, 13.0, 1.5);
     furniture(&mut c);
+    veins(&mut c);
+    gathering_props(&mut c);
     big_props(&mut c);
     c.save(&out.join("sprites/props.png"));
 }
@@ -2653,8 +2781,22 @@ pub mod it {
     pub const BOOT: u32 = 39;
     /// A rolled linen bandage (heals the player or a companion).
     pub const BANDAGE: u32 = 40;
+    /// Mining: the pickaxe (a tool) and what veins give.
+    pub const PICKAXE: u32 = 41;
+    pub const COPPER_ORE: u32 = 42;
+    pub const IRON_ORE: u32 = 43;
+    pub const SILVER_ORE: u32 = 44;
+    pub const GEM: u32 = 45;
+    /// Crafting tools and smelting: mortar and pestle (alchemy), smith's tongs (smelter), a
+    /// lump of coal and three ingots.
+    pub const MORTAR: u32 = 46;
+    pub const TONGS: u32 = 47;
+    pub const COAL: u32 = 48;
+    pub const COPPER_INGOT: u32 = 49;
+    pub const IRON_INGOT: u32 = 50;
+    pub const SILVER_INGOT: u32 = 51;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 41;
+    pub const COUNT: u32 = 52;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -3002,6 +3144,73 @@ pub fn items(out: &Path) {
                 c.hline(9, 8, 9, hex(leather[3]));
                 c.px(22, 17, hex(0x6fa8dc)); // a drip
                 c.px(22, 18, hex(0x6fa8dc));
+            }
+            it::PICKAXE => {
+                // A double-ended iron head on a wooden haft.
+                c.stroke(9.0, 28.0, 22.0, 8.0, 1.8, hex(WOOD[1]));
+                c.stroke(9.5, 27.5, 21.5, 8.5, 0.8, hex(WOOD[3]));
+                c.stroke(8.0, 10.0, 22.0, 6.0, 2.2, hex(IRON[1]));
+                c.stroke(22.0, 6.0, 28.0, 13.0, 2.0, hex(IRON[1]));
+                c.stroke(8.0, 10.0, 4.0, 17.0, 1.8, hex(IRON[1]));
+                c.stroke(9.0, 9.0, 21.0, 6.0, 0.8, hex(IRON[3]));
+            }
+            it::COPPER_ORE | it::IRON_ORE | it::SILVER_ORE => {
+                let ore = match i {
+                    it::COPPER_ORE => [0x7a3e1a, 0xb8642c, 0xe0904a, 0xffc890],
+                    it::IRON_ORE => [0x4a3a36, 0x7a6058, 0xa88a7e, 0xd8c4b8],
+                    _ => [0x6c7480, 0xa8b2be, 0xd8e0ea, 0xffffff],
+                };
+                c.shade_ellipse(15.0, 18.0, 10.0, 8.0, STONE);
+                c.shade_ellipse(20.0, 14.0, 6.0, 5.0, STONE);
+                for (fx, fy, r) in [(12.0, 17.0, 2.6), (18.0, 13.0, 2.2), (19.0, 20.0, 2.0), (10.0, 21.0, 1.6)] {
+                    c.shade_disc(fx, fy, r, ore);
+                }
+            }
+            it::MORTAR => {
+                // A stone bowl with a wooden pestle leaning in it.
+                c.stroke(14.0, 18.0, 24.0, 5.0, 2.0, hex(WOOD[2]));
+                c.disc(24.0, 5.0, 2.4, hex(WOOD[3]));
+                c.shade_ellipse(16.0, 22.0, 11.0, 7.0, STONE);
+                c.rect(5, 15, 23, 6, CLEAR);
+                c.shade_ellipse(16.0, 18.0, 11.0, 3.0, [0x2a2a30, 0x45454e, 0x5a5a64, 0x6c6c76]);
+                c.shade_box(10, 27, 12, 2, STONE);
+                c.ellipse(16.0, 18.0, 6.0, 1.5, hex(0x7cc56f));
+            }
+            it::TONGS => {
+                // Two long iron arms joined by a rivet.
+                c.stroke(6.0, 28.0, 20.0, 9.0, 1.4, hex(IRON[2]));
+                c.stroke(10.0, 28.0, 18.0, 8.0, 1.4, hex(IRON[3]));
+                c.stroke(20.0, 9.0, 25.0, 4.0, 1.6, hex(IRON[2]));
+                c.stroke(18.0, 8.0, 21.0, 3.0, 1.6, hex(IRON[3]));
+                c.disc(17.0, 13.0, 1.8, hex(GOLD[2]));
+            }
+            it::COAL => {
+                c.shade_ellipse(15.0, 19.0, 9.0, 7.0, [0x0c0c10, 0x1c1c24, 0x30303c, 0x6a6a7a]);
+                c.shade_ellipse(20.0, 14.0, 5.0, 4.0, [0x0c0c10, 0x1c1c24, 0x30303c, 0x6a6a7a]);
+                c.px(12, 15, hex(0x9a9aaa));
+                c.px(19, 11, hex(0x9a9aaa));
+            }
+            it::COPPER_INGOT | it::IRON_INGOT | it::SILVER_INGOT => {
+                let metal = match i {
+                    it::COPPER_INGOT => [0x6a2e10, 0xa85a28, 0xd8864a, 0xffc28a],
+                    it::IRON_INGOT => [0x3a3a44, 0x60606c, 0x8a8a96, 0xc0c0cc],
+                    _ => [0x7c8490, 0xb4bcc8, 0xdde3ec, 0xffffff],
+                };
+                // A trapezoid bar seen from the side, with a bright top face.
+                c.shade_box(6, 16, 20, 9, metal);
+                c.shade_box(9, 11, 14, 5, metal);
+                c.hline(9, 11, 14, hex(metal[3]));
+                c.hline(6, 16, 20, hex(metal[2]));
+            }
+            it::GEM => {
+                // A cut red gem.
+                let red = [0x6a0e2a, 0xb01e48, 0xe8406e, 0xffa0c0];
+                c.shade_box(9, 10, 14, 6, red);
+                c.shade_box(11, 16, 10, 4, red);
+                c.shade_box(13, 20, 6, 3, red);
+                c.shade_box(15, 23, 2, 2, red);
+                c.hline(9, 10, 14, hex(red[3]));
+                c.px(12, 12, hex(0xffffff));
             }
             it::BANDAGE => {
                 // A roll of linen with its loose end trailing off, marked with a red cross.
