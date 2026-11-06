@@ -106,12 +106,14 @@ The **ribbon** under the menu holds the tools as icon buttons in groups (*Edit* 
 | 1–9 | Select layer |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+S | Save map and definitions |
-| Ctrl+D / Del | Duplicate / delete the selected entity or zone |
-| Esc | Deselect; stop placing (Entities, Structures); otherwise back to the Select tool |
+| Ctrl+D / Del | Duplicate / delete the selected entity or zone; Del on a region clears it |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut the selected region (or entity), paste it (follows the mouse, click to place) |
+| Esc | Deselect; stop placing (Entities, Structures) or pasting; otherwise back to the Select tool |
 | F5 / F6 | Play-test from the camera position (or the selected spawn) / from the project start |
 | G, Home | Toggle grid, fit map to the view |
 
 - **Select** (default tool): click an entity or zone to select it (an entity is found by its sprite or by the tile it stands on), drag to move it, click again to cycle through objects stacked on the same spot; empty space or right-click deselects. It never paints — picking a tile in the palette switches to the Brush.
+- **Copy, cut and paste regions**: with the Select tool, drag on empty space (or Shift+drag anywhere, also over entities and zones) to select a rectangle of tiles, shown with a dashed outline. **Ctrl+C** copies it: the tiles of all layers, the collision overrides and the entities standing in it (zones are not copied). **Ctrl+X** copies it and empties it, **Del** only empties it. **Ctrl+V** arms the copy: it follows the mouse as a transparent preview (centered on the cursor) and every click pastes it as one undo step, until Esc or right-click. A pasted copy replaces everything in its rectangle, so trees don't grow through a pasted house. Pasted entities keep their triggers; named ones get a free name (`guard` becomes `guard_2`). The clipboard stays when you open another map, so regions move between maps. A selected entity can be copied on its own too. The region's inspector has *Copy*, *Cut*, *Paste*, *Clear* and *Save as structure…* (the Structures tool's *New from map area*). The same commands are in the *Edit* menu.
 - **Tiles**: drag in the tileset palette to select a multi-tile stamp. Shift+drag with Rect erases.
 - **Collision**: left paints "force solid", right paints "force walkable", Shift+left resets to the tileset default. Which tiles are solid by default is set per tileset in *Database → Tilesets*.
 - **Entities**: pick a prop, character or item in the left panel and click empty space to place it (snapped to the tile; hold Shift for free placement). **Right-click or Esc stops placing** (clicking the armed entry again does too); with nothing armed, clicks only select / move. The palette has a search box (name or id), *All / Prop / Character / Item* tabs, a *Recent* row of the last used definitions, and `[` / `]` or PgUp / PgDn step to the previous / next definition. *On this map* lists the placed entities (filtered by the same search) — click one to select it and jump there. Select an entity to edit its name, state and triggers on the right; *Place more like this* arms its definition.
@@ -330,6 +332,8 @@ RUST2D_MUTE=1 ./target/debug/rust2d-game                  # no audio
 
 # editor: tools and mouse clicks/drags in tile coordinates
 RUST2D_EDITOR_SCRIPT="tool brush; brush 2 0 1 1; drag 2 2 20 2; dump 0 10 2; rename item key gate_key; shot /tmp/e.png; quit" ./target/debug/rust2d-editor
+# editor clipboard: select a region, copy it, paste it with its top-left corner at a tile
+RUST2D_EDITOR_SCRIPT="open village; region 16 2 10 7; copy; open forest; paste 3 3; status; quit" ./target/debug/rust2d-editor
 ```
 
 ## Limitations / ideas

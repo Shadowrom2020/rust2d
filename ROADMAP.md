@@ -82,7 +82,7 @@ Instructions for every session (people and coding agents) that implements roadma
 Theme: faster map making, faster iteration on scripts, a graph of the game's events, and
 bringing existing assets in.
 
-### [ ] Region copy, cut and paste — `feature/region-clipboard`
+### [x] Region copy, cut and paste — `feature/region-clipboard`
 
 **Goal.** Select a rectangle of the map (all layers, collision, entities), Ctrl+C / Ctrl+X /
 Ctrl+V, paste follows the mouse as a preview, undoable.
@@ -92,8 +92,31 @@ Ctrl+V, paste follows the mouse as a preview, undoable.
 (`Edit::Group`), preview drawn like the Structures tool. Editor script commands `region X Y W H`,
 `copy`, `cut`, `paste X Y`. Ctrl+C/X/V are unbound today.
 
-**Verify.** Editor script copies a house region and pastes it elsewhere; `dump` / screenshot;
-undo restores; cross-map paste after `open`.
+**Decided while building.** A region drag starts on empty space, or anywhere with Shift (big
+zones would otherwise make most of a map unselectable); a plain click still deselects. Copy
+captures with the ground layer, so a paste is an exact copy of the rectangle (empty upper cells
+clear the target). Cut and Del empty every layer (the ground too: the map background shows),
+reset collision to the tileset's and remove the entities standing inside, as one undo step
+(`MapDoc::clear_region`). Ctrl+V arms the clipboard on the Select tool like an armed structure:
+every click pastes, Esc / right-click / another tool stops; the pasted rectangle becomes the
+selection. Zones are never copied (their names are link targets). Pasted named entities get a
+free name (`guard` → `guard_2`, `guard_2` → `guard_3`). A selected entity alone can be copied
+too (a 1×1 clipboard without tiles). The clipboard lives in the editor process, so it survives
+map switches but not a restart, and the Asset Library window has its own. The region inspector
+offers Copy, Cut, Paste, Clear and *Save as structure…* (the capture window); the Edit menu has
+Cut, Copy, Paste. Extra script command `paste` without coordinates arms the clipboard (with
+`hover` for the ghost), `unpaste` stops; `status` prints `sel=`, `clipboard=`, `pasting=`.
+Code in `editor/src/clipboard.rs`.
+
+**Verify.** Done: unit tests for cut + paste + undo on a `MapDoc`, unique names and region
+clipping. Editor script on a scratch copy: Select-tool drag over the village's west house gives
+`sel=Region((16, 2, 10, 7))`; `copy` reports 10×7 tiles and 2 entities (the barrels); `paste` +
+`hover` shows the ghost; a click pastes it centered on the cursor (barrels added, region
+selected); `undo` removes it; `cut` empties the house and its barrels, `undo` restores them;
+copying the elder and pasting gives a selectable `elder_2`; `open forest` keeps the clipboard and
+`paste 3 3` puts the house among the trees. Screenshots of the region outline, ghost, paste, cut,
+forest paste and the region inspector. Compile-checked only: the Ctrl+C / X / V keys (the editor
+script cannot press keys), the Edit menu entries and the inspector buttons (egui clicks).
 
 ### [ ] Script hot reload and in-game console — `feature/live-scripts`
 

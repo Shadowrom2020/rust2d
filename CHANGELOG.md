@@ -3,6 +3,19 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Editor
+- **Copy, cut and paste map regions**: drag a rectangle with the Select tool on empty space (or
+  Shift+drag anywhere); Ctrl+C copies its tiles on all layers, collision overrides and entities,
+  Ctrl+X also empties it, Del only empties it. Ctrl+V shows the copy under the mouse and each
+  click pastes it as one undo step until Esc or right-click. The clipboard is kept when another
+  map is opened. Pasted named entities get a free name. A selected entity can be copied alone.
+  The region's inspector has Copy, Cut, Paste, Clear and *Save as structure…*; the Edit menu has
+  Cut, Copy and Paste. Editor script commands `region`, `copy`, `cut`, `paste`, `unpaste`;
+  `status` prints `sel=`, `clipboard=` and `pasting=`.
+- Structure ghosts (Structures tool and paste preview) draw characters with all their layers.
+
 ## 0.3.0 — 2026-11-06
 
 ### Gameplay
