@@ -11,7 +11,7 @@ use crate::settings::{Settings, TEXT_SPEEDS, ZOOMS};
 
 const W: f32 = 520.0;
 const ROW_H: f32 = 40.0;
-const MAX_ROWS: usize = 11;
+const MAX_ROWS: usize = 12;
 const MAX_NAME: usize = 32;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,6 +47,8 @@ enum Opt {
     Master,
     Music,
     Effects,
+    /// Environmental sounds (rain).
+    Ambience,
     TextSpeed,
     /// Screen shake and the hurt flash.
     ScreenEffects,
@@ -56,7 +58,7 @@ enum Opt {
     Back,
 }
 
-const OPTS: [Opt; 11] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::TextSpeed, Opt::ScreenEffects, Opt::Controls, Opt::Reset, Opt::Back];
+const OPTS: [Opt; 12] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::Ambience, Opt::TextSpeed, Opt::ScreenEffects, Opt::Controls, Opt::Reset, Opt::Back];
 
 struct SaveInfo {
     slot: String,
@@ -501,6 +503,7 @@ impl Game {
             Opt::Master => "Master volume",
             Opt::Music => "Music volume",
             Opt::Effects => "Effects volume",
+            Opt::Ambience => "Ambience volume",
             Opt::TextSpeed => "Text speed",
             Opt::ScreenEffects => "Shake & flash",
             Opt::Controls => "Controls...",
@@ -521,6 +524,7 @@ impl Game {
             Opt::Master => pct(s.master_volume),
             Opt::Music => pct(s.music_volume),
             Opt::Effects => pct(s.effects_volume),
+            Opt::Ambience => pct(s.ambience_volume),
             Opt::TextSpeed => TEXT_SPEEDS.iter().find(|t| t.0 == s.text_speed).map_or("Normal", |t| t.1).to_string(),
             Opt::Controls | Opt::Reset | Opt::Back => String::new(),
         }
@@ -544,6 +548,7 @@ impl Game {
             Opt::Master => s.master_volume = step(&VOLUMES, s.master_volume),
             Opt::Music => s.music_volume = step(&VOLUMES, s.music_volume),
             Opt::Effects => s.effects_volume = step(&VOLUMES, s.effects_volume),
+            Opt::Ambience => s.ambience_volume = step(&VOLUMES, s.ambience_volume),
             Opt::TextSpeed => {
                 let speeds: Vec<f32> = TEXT_SPEEDS.iter().map(|t| t.0).collect();
                 s.text_speed = step(&speeds, s.text_speed);
@@ -601,6 +606,7 @@ impl Game {
         input::set_bindings(&self.settings.keys);
         let s = self.settings.clone();
         self.audio.set_volumes(s.effects(), s.music());
+        self.audio.set_ambience_volume(s.ambience());
         if self.fullscreen != Some(s.fullscreen) {
             // At startup only switch if the player wants fullscreen (the window starts windowed).
             if self.fullscreen.is_some() || s.fullscreen {

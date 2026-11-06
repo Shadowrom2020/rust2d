@@ -174,7 +174,7 @@ impl Renamer<'_> {
             match a {
                 Action::GiveItem { item, .. } | Action::TakeItem { item, .. } => self.fix(RefKind::Item, item),
                 Action::Equip { item, .. } | Action::GiveItemTo { item, .. } | Action::TakeItemFrom { item, .. } => self.fix(RefKind::Item, item),
-                Action::Teleport { map, .. } | Action::SetSpawners { map, .. } => self.fix(RefKind::Map, map),
+                Action::Teleport { map, .. } | Action::SetSpawners { map, .. } | Action::SetWeather { map, .. } => self.fix(RefKind::Map, map),
                 Action::PlaySound { sound } | Action::PlayMusic { sound } => self.fix(RefKind::Sound, sound),
                 Action::Fly { sprite, .. } | Action::Effect { sprite, .. } => self.fix(RefKind::Sheet, &mut sprite.sheet),
                 Action::If { conditions, then, otherwise } => {

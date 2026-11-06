@@ -772,12 +772,13 @@ impl Editor {
 
     fn draw_map(&mut self, doc: &mut crate::doc::MapDoc, cam: &Camera2D, view: Rect, px: f32) {
         let ts = self.ts();
-        // Lighting preview: darkness and lights (drawn over the map, under the overlays).
-        let lighting = if self.view.lighting {
-            render::lighting::ambient(doc.map.lighting, self.view.hour).map(|a| (a, self.preview_lights(&doc.map)))
-        } else {
-            None
-        };
+        // Lighting / weather preview: darkness, lights and the weather's tint (drawn over the map,
+        // under the overlays), then the weather's particles.
+        let weather = if self.view.weather { doc.map.weather } else { rust2d_engine::map::Weather::default() };
+        let base = if self.view.lighting { render::lighting::ambient(doc.map.lighting, self.view.hour) } else { None };
+        // Lights only where it is dark (weather alone just tints the daylight), as in the game.
+        let lighting = render::weather::tint_ambient(base, weather).map(|a| (a, if base.is_some() { self.preview_lights(&doc.map) } else { Vec::new() }));
+        let brightness = lighting.as_ref().map_or(1.0, |(c, _)| (c.r + c.g + c.b) / 3.0);
         let map = &doc.map;
         let (mw, mh) = (map.width as f32 * ts, map.height as f32 * ts);
         let bg = map.background;
@@ -839,6 +840,10 @@ impl Editor {
         if let Some((ambient, lights)) = lighting {
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(cam, ambient, &lights, ts, get_time());
             set_camera(cam);
+        }
+        if weather.active() && !overview {
+            self.weather_fx.update(get_frame_time().min(0.05), weather, view, ts / 32.0);
+            self.weather_fx.draw(weather, view, ts / 32.0, brightness);
         }
 
         // Visible tile range.

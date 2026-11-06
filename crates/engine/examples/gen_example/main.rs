@@ -806,6 +806,8 @@ fn forest() -> Map {
     b.m.background = [10, 25, 10];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.8 };
+    // An eerie fog over Whisperwood: it lifts when the shrine is lit (shrine_awakening).
+    b.m.weather = rust2d_engine::map::Weather::new(rust2d_engine::map::WeatherKind::Fog, 0.45);
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
     // The old mine: a second cave mouth in the cliff, west of the one to the wilds.
@@ -994,6 +996,7 @@ fn wilds() -> Map {
     b.m.background = [30, 60, 120];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.75 };
+    b.m.weather = rust2d_engine::map::Weather::new(rust2d_engine::map::WeatherKind::Rain, 0.5);
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
     // Auto-tiling: lakes with sandy shores, soft edges between grass, forest and snow.
@@ -1504,6 +1507,8 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
 // Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
 //               random(n) current_map()
+// Weather:      set_weather(kind, [intensity]) set_map_weather(map, kind, intensity) (queued;
+//               "rain", "snow", "fog", "none", "default"); weather() weather_intensity()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -1583,6 +1588,7 @@ fn shrine_awakening() {
     set_flag("shrine_lit", true);
     set_quest_stage("strange_lights", 2);
     dim(0, 2);
+    set_weather("none");                        // the eerie fog lifts (kept in the save game)
     wait(1.5);
     emit("shrine_lit");
 }

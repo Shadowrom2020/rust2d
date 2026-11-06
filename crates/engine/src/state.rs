@@ -192,6 +192,9 @@ pub struct WorldState {
     /// The last dialog lines (oldest first, at most [`DIALOG_LOG_MAX`]) for the journal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialog_log: Vec<LogLine>,
+    /// Weather set by actions / scripts, by map name (overrides the map's own weather).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub weather: BTreeMap<String, crate::map::Weather>,
 }
 
 /// How many dialog lines the journal keeps.
@@ -479,6 +482,17 @@ mod tests {
         let w = WorldState { quickbar: vec!["potion".into(), String::new()], ..Default::default() };
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert_eq!(back.quickbar, w.quickbar);
+    }
+
+    #[test]
+    fn weather_overrides_are_saved() {
+        use crate::map::{Weather, WeatherKind};
+        let old: WorldState = ron::from_str(r#"(flags: [], vars: {}, inventory: {}, entities: {}, fired: [], current_map: "m", player_pos: (0.0, 0.0), player_facing: Down)"#).unwrap();
+        assert!(old.weather.is_empty(), "saves from before weather load");
+        let mut w = WorldState::default();
+        w.weather.insert("forest".into(), Weather::new(WeatherKind::Rain, 0.8));
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!(back.weather.get("forest"), Some(&Weather::new(WeatherKind::Rain, 0.8)));
     }
 
     #[test]

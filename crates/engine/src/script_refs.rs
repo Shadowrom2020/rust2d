@@ -66,6 +66,7 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("has_item", 0, IdKind::Item),
     ("item_count", 0, IdKind::Item),
     ("teleport", 0, IdKind::Map),
+    ("set_map_weather", 0, IdKind::Map),
     ("teleport", 1, IdKind::Spawn),
     ("disable_spawners", 0, IdKind::Map),
     ("enable_spawners", 0, IdKind::Map),

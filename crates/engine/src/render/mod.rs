@@ -7,6 +7,7 @@
 pub mod character;
 pub mod lighting;
 pub mod recolor;
+pub mod weather;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

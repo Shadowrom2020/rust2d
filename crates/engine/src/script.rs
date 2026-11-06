@@ -33,6 +33,8 @@ pub struct PlayerInfo {
     pub y: f32,
     pub max_hp: i32,
     pub facing: Facing,
+    /// The current map's weather (`weather()`).
+    pub weather: crate::map::Weather,
 }
 
 pub struct ScriptHost {
@@ -297,6 +299,13 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     // Screen shake (scenes: earthquakes, a boss landing).
     engine.register_fn("shake", with!(ctx, |c, s: Dynamic| c.actions.push(Action::Shake { seconds: num(&s), strength: 1.0 })));
     engine.register_fn("shake", with!(ctx, |c, s: Dynamic, st: Dynamic| c.actions.push(Action::Shake { seconds: num(&s), strength: num(&st) })));
+    // Weather: set_weather("rain" | "snow" | "fog" | "none" | "default", [intensity]) on the
+    // current map, set_map_weather(map, kind, intensity) on another one; weather() reads it.
+    engine.register_fn("set_weather", with!(ctx, |c, kind: &str| c.actions.push(weather_action("", kind, 0.6))));
+    engine.register_fn("set_weather", with!(ctx, |c, kind: &str, i: Dynamic| c.actions.push(weather_action("", kind, num(&i)))));
+    engine.register_fn("set_map_weather", with!(ctx, |c, map: &str, kind: &str, i: Dynamic| c.actions.push(weather_action(map, kind, num(&i)))));
+    engine.register_fn("weather", with!(ctx, |c| c.player.weather.kind.id().to_string()));
+    engine.register_fn("weather_intensity", with!(ctx, |c| c.player.weather.intensity as f64));
     // Status effects.
     engine.register_fn("apply_effect", with!(ctx, |c, t: &str, kind: &str, s: Dynamic, secs: Dynamic| {
         if let Some(k) = effect_kind(kind) {
@@ -516,6 +525,24 @@ fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
     s
 }
 
+/// *Set weather* from a script: "default" goes back to the map's own weather; an unknown kind
+/// is logged and changes nothing (a `SetWeather` without weather = default would be wrong).
+fn weather_action(map: &str, kind: &str, intensity: f32) -> Action {
+    use crate::map::{Weather, WeatherKind};
+    let weather = if kind.trim().eq_ignore_ascii_case("default") {
+        None
+    } else {
+        match WeatherKind::from_id(kind) {
+            Some(k) => Some(Weather::new(k, intensity)),
+            None => {
+                eprintln!("[script] set_weather: unknown weather '{kind}' (none, rain, snow, fog or default)");
+                return Action::Wait { seconds: 0.0 };
+            }
+        }
+    };
+    Action::SetWeather { map: map.into(), weather }
+}
+
 /// Light options: `color: [r, g, b]` (0..255), `flicker: true`.
 fn light_opts(o: &Map, default: [u8; 3]) -> ([u8; 3], bool) {
     let color = o
@@ -545,6 +572,27 @@ fn fly(sheet: &str, x: &Dynamic, y: &Dynamic, function: &str, o: &Map) -> Action
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weather_functions() {
+        use crate::map::{Weather, WeatherKind};
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn w() { set_weather("rain", 0.8); set_weather("default"); set_map_weather("forest", "fog", 2); set_weather("hail"); weather() }"#).unwrap();
+        host.set_player(PlayerInfo { weather: Weather::new(WeatherKind::Snow, 0.4), ..Default::default() });
+        let mut world = WorldState::default();
+        let v = host.call_inner(&mut world, "w", vec![], None).unwrap();
+        assert_eq!(v.into_string().unwrap(), "snow");
+        let a = std::mem::take(&mut host.ctx.borrow_mut().actions);
+        assert_eq!(
+            a,
+            vec![
+                Action::SetWeather { map: String::new(), weather: Some(Weather::new(WeatherKind::Rain, 0.8)) },
+                Action::SetWeather { map: String::new(), weather: None },
+                Action::SetWeather { map: "forest".into(), weather: Some(Weather::new(WeatherKind::Fog, 1.0)) },
+                Action::Wait { seconds: 0.0 },
+            ]
+        );
+    }
 
     #[test]
     fn effect_tag_option() {
@@ -698,7 +746,7 @@ mod tests {
             ]
         );
         assert_eq!(host.call(&mut w, "pause", None), vec![Action::Wait { seconds: 1.0 }, Action::Wait { seconds: 0.5 }]);
-        host.set_player(PlayerInfo { x: 4.5, y: 6.0, max_hp: 12, facing: Facing::Up });
+        host.set_player(PlayerInfo { x: 4.5, y: 6.0, max_hp: 12, facing: Facing::Up, ..Default::default() });
         assert_eq!(
             host.call(&mut w, "glow", None),
             vec![
