@@ -231,6 +231,7 @@ fn skills() -> Vec<SkillDef> {
         SkillDef::new("arcana", "Arcana", "Understanding of magic. Each level adds 10 mana, and harder spells need it to be learned.", icon(it::STAR), 5, E::Mana { points: 10 }),
         SkillDef::new("spellcraft", "Spellcraft", "Focus and precision: every level adds 15% to the damage of Spark and Fire Burst.", icon(it::SPELL_SPARK), 4, E::SpellDamage { percent: 15.0 }),
         SkillDef::new("alchemy", "Alchemy", "The craft of brewing: Antidotes need level 1, Swiftness Potions level 2 (at an alchemy table, with a mortar and pestle).", icon(it::MORTAR), 2, E::None),
+        SkillDef::new("smithing", "Smithing", "Working iron at the anvil: Iron Helmets at level 1, Chainmail at level 2, and from level 2 your swords come out fine.", icon(it::HAMMER), 3, E::None),
         SkillDef::new("mining", "Mining", "Strong arms and a sharp eye for the seam: every level takes 20% fewer pickaxe hits to break off ore.", icon(it::PICKAXE), 3, E::Gather { tool: "pickaxe".into(), percent: 20.0 }),
         SkillDef::new("scavenging", "Scavenging", "An eye for what others leave behind: defeated slimes drop an extra coin per level (a scripted skill: see scavenging() in main.rhai).", icon(it::APPLE), 3, E::Script { function: "scavenging".into() }),
     ]
@@ -264,6 +265,13 @@ fn recipes() -> Vec<RecipeDef> {
     let i = ItemStack::new;
     // `tools`: tool kinds (an item's Tool kind) the player must have; they aren't used up.
     let brew = |id: &str, result: &str, ingredients: Vec<ItemStack>| RecipeDef { tools: vec!["mortar".into()], ..RecipeDef::new(id, result, 1, ingredients, "alchemy") };
+    let forge = |id: &str, result: &str, count: u32, ingredients: Vec<ItemStack>, level: u32, quality: Vec<(u32, &str)>| RecipeDef {
+        tools: vec!["hammer".into(), "tongs".into()],
+        skill: "smithing".into(),
+        level,
+        quality: quality.into_iter().map(|(level, r)| rustpg2d_engine::crafting::QualityStep { level, result: r.into() }).collect(),
+        ..RecipeDef::new(id, result, count, ingredients, "anvil")
+    };
     let smelt = |id: &str, result: &str, ore: &str| RecipeDef { tools: vec!["tongs".into()], ..RecipeDef::new(id, result, 1, vec![i(ore, 2), i("coal", 1)], "smelter") };
     vec![
         brew("brew_potion", "potion", vec![i("herb", 2)]),
@@ -275,6 +283,15 @@ fn recipes() -> Vec<RecipeDef> {
         smelt("smelt_iron", "iron_ingot", "iron_ore"),
         // Silver needs a skilled miner's eye for the melt.
         RecipeDef { skill: "mining".into(), level: 2, ..smelt("smelt_silver", "silver_ingot", "silver_ore") },
+        // The anvil (hammer and tongs): Smithing unlocks recipes, and from Smithing 2 on the
+        // iron sword comes out fine (a better result: `quality`). The upgrade takes the short
+        // sword itself, also while it is equipped.
+        forge("forge_iron_sword", "iron_sword", 1, vec![i("iron_ingot", 2)], 0, vec![(2, "fine_iron_sword")]),
+        forge("forge_helmet", "iron_helmet", 1, vec![i("iron_ingot", 2)], 1, vec![]),
+        forge("forge_chainmail", "chainmail", 1, vec![i("iron_ingot", 4)], 2, vec![]),
+        forge("forge_arrows", "arrows", 10, vec![i("iron_ingot", 1)], 0, vec![]),
+        forge("forge_pickaxe", "pickaxe", 1, vec![i("iron_ingot", 1), i("copper_ingot", 1)], 0, vec![]),
+        forge("upgrade_sword", "iron_sword", 1, vec![i("sword", 1), i("iron_ingot", 1)], 0, vec![(2, "fine_iron_sword")]),
     ]
 }
 
@@ -664,6 +681,7 @@ fn shop() -> Map {
             // Crafting tools: the alchemy table's mortar, the smelter's tongs, a pickaxe.
             ShopEntry::new("mortar", 2, 0),
             ShopEntry::new("tongs", 1, 0),
+            ShopEntry::new("hammer", 1, 0),
             ShopEntry::new("pickaxe", 1, 30),
             ShopEntry::new("antidote", 5, 0),
             ShopEntry::new("elixir_strength", 2, 0),
@@ -1052,7 +1070,7 @@ fn workshop() -> Map {
     let chest = b.entity(EntityKind::Prop, "chest", 15, 16);
     chest.container = Some(ContainerSpec {
         size: 8,
-        items: vec![ItemStack::new("pickaxe", 1), ItemStack::new("tongs", 1), ItemStack::new("mortar", 1), ItemStack::new("apple", 4), ItemStack::new("coal", 3)],
+        items: vec![ItemStack::new("pickaxe", 1), ItemStack::new("tongs", 1), ItemStack::new("hammer", 1), ItemStack::new("mortar", 1), ItemStack::new("apple", 4), ItemStack::new("coal", 3)],
         open_state: "open".into(),
         ..Default::default()
     });
@@ -1063,11 +1081,13 @@ fn workshop() -> Map {
     }
     b.entity(EntityKind::Prop, "alchemy_table", 9, 10);
     // Quarry: every vein (pickaxe, 3 hits, back three days later) and the smelter.
-    sign(&mut b, 28, 11, "QUARRY. Mine the veins with a pickaxe (E or attack). Smelt two ore and a coal into an ingot at the smelter, with smith's tongs; silver needs Mining 2.");
+    sign(&mut b, 29, 11, "QUARRY. Mine the veins with a pickaxe (E or attack). Smelt two ore and a coal into an ingot at the smelter, with smith's tongs; silver needs Mining 2.");
     for (def, x, y) in [("vein_copper", 22, 4), ("vein_copper", 25, 4), ("vein_iron", 28, 4), ("vein_iron", 22, 7), ("vein_silver", 25, 7), ("vein_gem", 28, 7), ("vein_coal", 30, 5), ("vein_coal", 30, 8)] {
         b.entity(EntityKind::Prop, def, x, y);
     }
     b.entity(EntityKind::Prop, "smelter", 23, 10);
+    sign(&mut b, 31, 15, "FORGE. Forge ingots at the anvil with a smith's hammer and tongs: swords, helmets, chainmail, arrows, pickaxes. Smithing unlocks more, and from Smithing 2 swords come out fine.");
+    b.entity(EntityKind::Prop, "anvil", 26, 10);
     // A bed in the open to let a night pass (regrowing needs in-game time).
     b.entity(EntityKind::Prop, "bed", 20, 17);
     b.m.background = [20, 40, 20];
@@ -1436,6 +1456,9 @@ fn database() -> Database {
             stack(item("bolts", "Bolts", "Ammunition for the crossbow.", it::BOLTS, false, vec![]), 30),
             // Melee weapons: balanced sword, long narrow spear, slow heavy axe.
             stack(weapon(item("sword", "Short Sword", "A reliable blade.", it::SWORD, false, vec![]), Weapon { reach: 1.1, arc: 65.0, ..Weapon::melee(2, 0.35) }), 1),
+            // Forged at the anvil (Blacksmithing): the fine one at Smithing 2.
+            stack(weapon(item("iron_sword", "Iron Sword", "A long iron blade from the anvil.", it::IRON_SWORD, false, vec![]), Weapon { reach: 1.2, arc: 65.0, ..Weapon::melee(3, 0.35) }), 1),
+            stack(weapon(item("fine_iron_sword", "Fine Iron Sword", "A masterly forged blade: lighter, sharper, gleaming.", it::FINE_SWORD, false, vec![]), Weapon { reach: 1.2, arc: 70.0, ..Weapon::melee(4, 0.3) }), 1),
             stack(weapon(item("spear", "Spear", "Hits from two tiles away, but only straight ahead.", it::SPEAR, false, vec![]), Weapon { reach: 1.9, arc: 22.0, knockback: 0.7, ..Weapon::melee(2, 0.55) }), 1),
             stack(weapon(item("axe", "Battle Axe", "Slow, wide swings that send enemies flying.", it::AXE, false, vec![]), Weapon { reach: 1.0, arc: 85.0, knockback: 1.8, ..Weapon::melee(4, 0.85) }), 1),
             // Armor: helmets and body armor.
@@ -1475,6 +1498,7 @@ fn database() -> Database {
             // Crafting tools (Tool slot or just carried; recipes name their tool kind) and smelting.
             stack(ItemDef { tool: "mortar".into(), ..item("mortar", "Mortar and Pestle", "An alchemist's tool: needed to brew at an alchemy table.", it::MORTAR, false, vec![]) }, 1),
             stack(ItemDef { tool: "tongs".into(), ..item("tongs", "Smith's Tongs", "Needed to work a smelter (and, one day, an anvil).", it::TONGS, false, vec![]) }, 1),
+            stack(ItemDef { tool: "hammer".into(), ..item("hammer", "Smith's Hammer", "Needed (with the tongs) to forge at an anvil.", it::HAMMER, false, vec![]) }, 1),
             stack(item("coal", "Coal", "Fuel for the smelter. Mined from coal veins.", it::COAL, false, vec![]), 30),
             stack(item("copper_ingot", "Copper Ingot", "Smelted copper.", it::COPPER_INGOT, false, vec![]), 20),
             stack(item("iron_ingot", "Iron Ingot", "Smelted iron, the smith's daily bread.", it::IRON_INGOT, false, vec![]), 20),
@@ -1578,6 +1602,11 @@ fn database() -> Database {
                 regrow: Some(rustpg2d_engine::defs::Regrow { from: "picked".into(), to: "default".into(), hours: 12.0 }),
                 ..prop("mushroom_patch", "Mushroom Patch", p::MUSHROOMS, false, [20.0, 8.0])
             },
+            // The anvil: ingots into weapons, armor and tools (with the hammer and the tongs).
+            PropDef {
+                triggers: vec![trig(TriggerOn::Interact, vec![], vec![Action::OpenCrafting { station: "anvil".into(), title: "Anvil".into() }])],
+                ..prop("anvil", "Anvil", p::ANVIL, true, [24.0, 10.0])
+            },
             // The smelter by the mine: ore and coal into ingots (with smith's tongs).
             PropDef {
                 sprite: SpriteRef::block("props", p::SMELTER, 1, 2),
@@ -1670,6 +1699,9 @@ fn database() -> Database {
         ("ruby", 40),
         ("mortar", 15),
         ("tongs", 20),
+        ("hammer", 20),
+        ("iron_sword", 45),
+        ("fine_iron_sword", 80),
         ("coal", 2),
         ("copper_ingot", 10),
         ("iron_ingot", 16),
@@ -2094,7 +2126,7 @@ fn layered_characters(db: &mut Database) {
     }
     db.sheets.push(SheetDef::new("outfit_icons", "sprites/outfit_icons.png", 32, 32));
     // What weapons, shields and lights look like in a hand.
-    for (item, held) in [("sword", "held_sword"), ("spear", "held_spear"), ("axe", "held_axe"), ("bow", "held_bow"), ("crossbow", "held_crossbow"), ("wooden_shield", "held_shield"), ("lantern", "held_lantern"), ("torch", "held_torch"), ("fishing_rod", "held_rod")] {
+    for (item, held) in [("sword", "held_sword"), ("iron_sword", "held_sword"), ("fine_iron_sword", "held_sword"), ("spear", "held_spear"), ("axe", "held_axe"), ("bow", "held_bow"), ("crossbow", "held_crossbow"), ("wooden_shield", "held_shield"), ("lantern", "held_lantern"), ("torch", "held_torch"), ("fishing_rod", "held_rod")] {
         db.items.iter_mut().find(|d| d.id == item).expect(item).held = held.into();
     }
     // The goblins' own bow: what they shoot with, dropped when they are defeated.

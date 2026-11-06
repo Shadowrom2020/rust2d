@@ -646,6 +646,33 @@
         )),
     ),
     (
+        id: "anvil",
+        name: "Anvil",
+        sprite: (
+            sheet: "props",
+            frame: 99,
+        ),
+        solid: true,
+        default_state: "default",
+        states: [],
+        hitbox: (48.0, 20.0),
+        triggers: [
+            (
+                on: Interact,
+                conditions: [],
+                actions: [
+                    OpenCrafting(
+                        station: "anvil",
+                        title: "Anvil",
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        container: None,
+        lock: None,
+    ),
+    (
         id: "smelter",
         name: "Smelter",
         sprite: (

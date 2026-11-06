@@ -2717,6 +2717,32 @@ fn recipe_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::crafting::RecipeDef, 
             }
         });
         ui.end_row();
+        ui.label("Better results");
+        ui.vertical(|ui| {
+            if d.skill.is_empty() {
+                ui.weak("(choose a required skill first: higher levels of it can make better items)");
+            }
+            let mut remove = None;
+            for (k, q) in d.quality.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label("from level");
+                    ui.add(egui::DragValue::new(&mut q.level).range(1..=99));
+                    ui.label("makes");
+                    widgets::suggest(ui, &format!("recipe_quality{k}"), &mut q.result, &cx.refs.items, 130.0);
+                    if ui.small_button("x").clicked() {
+                        remove = Some(k);
+                    }
+                });
+            }
+            if let Some(k) = remove {
+                d.quality.remove(k);
+            }
+            if ui.add_enabled(!d.skill.is_empty(), egui::Button::new("+ Better result").small()).on_hover_text("From a higher level of the required skill on, the recipe makes another item (e.g. a Fine Iron Sword)").clicked() {
+                let level = d.quality.iter().map(|q| q.level).max().unwrap_or(d.level) + 1;
+                d.quality.push(rustpg2d_engine::crafting::QualityStep { level, result: d.result.clone() });
+            }
+        });
+        ui.end_row();
     });
     ui.weak("Players make it in the crafting window: give a prop (a workbench, an anvil, an alchemy table) an Interact trigger with the 'Open crafting' action for this station. Scripts: open_crafting(station[, title]), can_craft(recipe).");
 }

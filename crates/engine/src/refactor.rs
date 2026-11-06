@@ -116,6 +116,9 @@ impl Renamer<'_> {
             self.fix(RefKind::Item, &mut s.item);
         }
         self.fix(RefKind::Skill, &mut d.skill);
+        for q in &mut d.quality {
+            self.fix(RefKind::Item, &mut q.result);
+        }
     }
 
     fn structure(&mut self, d: &mut crate::defs::StructureDef) {

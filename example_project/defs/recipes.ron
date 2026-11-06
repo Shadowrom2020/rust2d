@@ -142,4 +142,132 @@
             "tongs",
         ],
     ),
+    (
+        id: "forge_iron_sword",
+        result: "iron_sword",
+        count: 1,
+        ingredients: [
+            (
+                item: "iron_ingot",
+                count: 2,
+            ),
+        ],
+        station: "anvil",
+        skill: "smithing",
+        level: 0,
+        tools: [
+            "hammer",
+            "tongs",
+        ],
+        quality: [
+            (
+                level: 2,
+                result: "fine_iron_sword",
+            ),
+        ],
+    ),
+    (
+        id: "forge_helmet",
+        result: "iron_helmet",
+        count: 1,
+        ingredients: [
+            (
+                item: "iron_ingot",
+                count: 2,
+            ),
+        ],
+        station: "anvil",
+        skill: "smithing",
+        level: 1,
+        tools: [
+            "hammer",
+            "tongs",
+        ],
+    ),
+    (
+        id: "forge_chainmail",
+        result: "chainmail",
+        count: 1,
+        ingredients: [
+            (
+                item: "iron_ingot",
+                count: 4,
+            ),
+        ],
+        station: "anvil",
+        skill: "smithing",
+        level: 2,
+        tools: [
+            "hammer",
+            "tongs",
+        ],
+    ),
+    (
+        id: "forge_arrows",
+        result: "arrows",
+        count: 10,
+        ingredients: [
+            (
+                item: "iron_ingot",
+                count: 1,
+            ),
+        ],
+        station: "anvil",
+        skill: "smithing",
+        level: 0,
+        tools: [
+            "hammer",
+            "tongs",
+        ],
+    ),
+    (
+        id: "forge_pickaxe",
+        result: "pickaxe",
+        count: 1,
+        ingredients: [
+            (
+                item: "iron_ingot",
+                count: 1,
+            ),
+            (
+                item: "copper_ingot",
+                count: 1,
+            ),
+        ],
+        station: "anvil",
+        skill: "smithing",
+        level: 0,
+        tools: [
+            "hammer",
+            "tongs",
+        ],
+    ),
+    (
+        id: "upgrade_sword",
+        result: "iron_sword",
+        count: 1,
+        ingredients: [
+            (
+                item: "sword",
+                count: 1,
+            ),
+            (
+                item: "iron_ingot",
+                count: 1,
+            ),
+        ],
+        station: "anvil",
+        skill: "smithing",
+        level: 0,
+        tools: [
+            "hammer",
+            "tongs",
+        ],
+        quality: [
+            (
+                level: 2,
+                result: "fine_iron_sword",
+            ),
+        ],
+    ),
 ]

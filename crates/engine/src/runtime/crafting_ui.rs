@@ -132,7 +132,8 @@ impl Game {
         }
         if made > 0 {
             self.audio.play(&self.project.config.sfx.pickup);
-            let name = self.item_name(&r.result).to_string();
+            // (The quality the skill reached when it was made.)
+            let name = self.item_name(r.result_for(&self.world)).to_string();
             let total = made * r.count.max(1);
             self.crafting_msg(if total > 1 { format!("Made {total} {name}") } else { format!("Made {name}") }, true);
         }
@@ -256,10 +257,20 @@ impl Game {
                 draw_rectangle_lines(rr.x, rr.y, rr.w, rr.h, 2.0, GOLD);
             }
             let dim = if missing.is_some() { Color::new(1.0, 1.0, 1.0, 0.45) } else { WHITE };
-            if let Some(d) = db.item(&r.result) {
+            // What the player's skill makes of it (quality steps).
+            let result = r.result_for(&self.world);
+            if let Some(d) = db.item(result) {
                 self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, Rect::new(rr.x + 6.0, rr.y + 9.0, 36.0, 36.0), dim);
             }
-            let name = if r.count > 1 { format!("{} x{}", self.item_name(&r.result), r.count) } else { self.item_name(&r.result).to_string() };
+            let name = if r.count > 1 { format!("{} x{}", self.item_name(result), r.count) } else { self.item_name(result).to_string() };
+            // The next quality step, as a hint after the name.
+            let have = self.world.skill_level(&r.skill);
+            if let Some(q) = r.quality.iter().filter(|q| q.level > have && !r.skill.is_empty()).min_by_key(|q| q.level) {
+                let skill = db.skill(&r.skill).map_or(r.skill.clone(), |d| d.name.clone());
+                let hint = format!("{skill} {}: {}", q.level, self.item_name(&q.result));
+                let nw = measure_text(&name, None, 21, 1.0).width;
+                draw_text(&hint, rr.x + 58.0 + nw, rr.y + 20.0, 16.0, Color::new(0.75, 0.75, 0.6, 1.0));
+            }
             draw_text(&name, rr.x + 50.0, rr.y + 21.0, 21.0, if missing.is_some() { LIGHTGRAY } else { WHITE });
             // Ingredients: small icons with have / need, red where short.
             let mut x = rr.x + 50.0;
@@ -316,7 +327,7 @@ impl Game {
         // Footer: the selected result's description, the last message, help.
         let f = l.foot;
         draw_rectangle(f.x, f.y, f.w, f.h, Color::new(0.0, 0.0, 0.0, 0.25));
-        if let Some(d) = recipes.get(self.crafting.sel).and_then(|r| db.item(&r.result)) {
+        if let Some(d) = recipes.get(self.crafting.sel).and_then(|r| db.item(r.result_for(&self.world))) {
             draw_text(&d.name, f.x + 10.0, f.y + 22.0, 21.0, GOLD);
             for (k, line) in wrap_text(&d.description, 17, f.w - 20.0).iter().take(1).enumerate() {
                 draw_text(line, f.x + 10.0, f.y + 42.0 + k as f32 * 17.0, 17.0, LIGHTGRAY);
