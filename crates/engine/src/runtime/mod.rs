@@ -237,6 +237,10 @@ pub struct Game {
     portrait: Option<portraits::Speaker>,
     /// The furniture the player uses, the sleep sequence, and the bed a Sleep action lies in.
     seat: Option<furniture::Seat>,
+    /// A map change waiting for the answer to "Leave … behind?" (knocked-down companions).
+    leaving: Option<(String, Arrival)>,
+    /// Seconds before leaving the map may ask again (after "Stay").
+    leave_hold: f32,
     /// The open "Heal whom?" choice.
     heal_pick: Option<healing::HealPick>,
     /// Bottom of the player's HUD panel as last drawn (the companions' rows go below it).
@@ -342,6 +346,8 @@ impl Game {
             minigame: None,
             portrait: None,
             seat: None,
+            leaving: None,
+            leave_hold: 0.0,
             heal_pick: None,
             hud_bottom: std::cell::Cell::new(80.0),
             sleeping: None,
@@ -657,7 +663,16 @@ impl Game {
 
     /// Starts a fade-out; the map switches when the screen is black.
     pub fn transition(&mut self, map: &str, arrival: Arrival) {
-        if matches!(self.fade, Fade::Out { .. }) {
+        if matches!(self.fade, Fade::Out { .. }) || self.leaving.is_some() {
+            return;
+        }
+        // Knocked-down companions can't come along: ask first (once; "Stay" holds still a moment
+        // so walking into the map's edge doesn't ask again at once).
+        if !map.is_empty() && map != self.loaded.map.name && !self.downed_companions().is_empty() {
+            if self.leave_hold > 0.0 {
+                return;
+            }
+            self.ask_leave_behind(map, arrival);
             return;
         }
         self.fade = Fade::Out { t: 0.0, map: map.to_string(), arrival };
@@ -1075,6 +1090,7 @@ impl Game {
         // of characters a 'Damage area' defeats) went to the stand-in runner: keep them.
         let queued = std::mem::replace(&mut self.runner, runner);
         self.runner.append(queued);
+        self.update_leaving(dt);
         self.update_cutscene(dt);
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
@@ -1275,6 +1291,11 @@ impl Game {
     }
 
     fn interact_entity(&mut self, i: usize) {
+        if self.is_down(i) {
+            let name = self.entity_display_name(self.loaded.entities[i].uid).unwrap_or_default();
+            self.ui.toast(format!("{name} is out cold. Heal them to get them back up."));
+            return;
+        }
         {
             let uid = self.loaded.entities[i].uid;
             match self.loaded.entities[i].kind {
@@ -1858,6 +1879,7 @@ impl Game {
         let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { Self::effect_tint(&e.effects).unwrap_or(WHITE) };
         let drawn = match e.kind {
             EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE)),
+            EntityKind::Character if e.companion.as_ref().is_some_and(|l| l.down.is_some()) => self.draw_downed(e),
             EntityKind::Character => db.character(&e.def).is_some() && {
                 let col = if e.body.moving { (e.body.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
                 self.draw_character(&e.appearance, &e.equipment, (e.body.facing, col), e.body.pos, tint, false)

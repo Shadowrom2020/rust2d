@@ -852,7 +852,7 @@ mod tests {
         let actions = host.call(&mut WorldState::default(), "party", None);
         assert_eq!(actions, vec![Action::Companion { target: "guard".into(), join: true }, Action::Companion { target: "self".into(), join: false }]);
         let mut w = WorldState::default();
-        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
+        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None, down: None });
         assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
     }
 

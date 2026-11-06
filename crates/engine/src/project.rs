@@ -46,6 +46,31 @@ pub struct ProjectConfig {
     /// Dialog boxes show the speaker's portrait (on by default).
     #[serde(default = "yes")]
     pub dialog_portraits: bool,
+    /// What happens to a companion at 0 HP.
+    #[serde(default)]
+    pub companion_down: DownRule,
+}
+
+/// What happens to a companion knocked down to 0 HP (`ProjectConfig::companion_down`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum DownRule {
+    /// It lies where it fell until healed (a potion, a spell, `heal_npc`).
+    #[default]
+    StaysDown,
+    /// It lies there, then gets up with 1 HP after this many seconds (healing gets it up sooner).
+    GetsUp { seconds: f32 },
+    /// It goes back to where it is placed at once, healed (as before 0.6).
+    GoesHome,
+}
+
+impl DownRule {
+    pub fn label(&self) -> &'static str {
+        match self {
+            DownRule::StaysDown => "Stays down until healed",
+            DownRule::GetsUp { .. } => "Gets up after a while",
+            DownRule::GoesHome => "Goes home",
+        }
+    }
 }
 
 fn yes() -> bool {
@@ -152,6 +177,7 @@ impl ProjectConfig {
             skills: Default::default(),
             progression: Default::default(),
             dialog_portraits: true,
+            companion_down: Default::default(),
         }
     }
 }

@@ -2001,6 +2001,7 @@ fn main() {
         progression: rustpg2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
         // Dialog boxes show the speaker's portrait (found from the speaker's name).
         dialog_portraits: true,
+        companion_down: Default::default(),
         },
         db: database(),
     };

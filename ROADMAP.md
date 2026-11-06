@@ -137,7 +137,7 @@ the map both heal him with a bandage; F5 saves his healed HP. Screenshots of the
 the guard and the HUD row; the editor's *Use on* field and a *Heal character* action. Unit tests:
 `use_on` defaults to the player (not written), `redirect_heals` inside *If* actions.
 
-### [ ] Knocked-down companions — `feature/downed-companions` (follows *Healing companions*)
+### [x] Knocked-down companions — `feature/downed-companions` (follows *Healing companions*)
 
 **Goal.** At 0 HP a companion falls and stays down until healed, instead of limping home.
 
@@ -154,16 +154,29 @@ the guard and the HUD row; the editor's *Use on* field and a *Heal character* ac
   dismissed, no = stay); a defeat of the player ignores downed companions (the defeat menu as
   today). Talking to a downed companion shows "{name} is out cold." unless a trigger matches.
 
+**Decided while building.** `Companion.down: Option<[f32; 2]>` stores where it lies (a downed
+companion is always on the current map: leaving asks first), `Link.down` the seconds it has
+been lying; `knock_down` replaces the old knock-out in `defeat_with`, `companion_healed` (called
+by `heal_entity` and `heal_area`) gets it up. Talking to a downed companion always just toasts
+"… is out cold" (its triggers don't run: a dialog with someone unconscious makes no sense).
+The question goes through `Game::transition`, so portals, edges and scripted teleports all ask;
+after "Stay" leaving doesn't ask again for 1.5 s (walking into an edge would re-ask at once).
+Effects are cleared when it falls (poison can't tick on), and its HP bar above it is hidden.
+
 **Touch points.** `state.rs` (`Companion.down`), `project.rs` (`DownRule`),
 `runtime/{companions,combat,mod,maps,furniture}.rs` (the rotated drawing made reusable for
 characters), editor *Project settings*, README.
 
 **Example.** Nothing new beyond the guard; the setting stays at *stays down*.
 
-**Verify.** Autoplay: `call` a script that damages the guard to 0 → `down`, a slime next to him
-doesn't attack him, he stays when the player walks away; a potion on him → up with its HP and
-following; save / load while down keeps him down at his place; leaving the map asks; screenshot
-of him lying. Unit test: old saves without `down`.
+**Verify (done).** Autoplay on a scratch copy: `heal_npc("guard", -20)` → `guard:0/8:down`, he
+stays at 9,18 while the player walks off, a potion (choice pre-selects him) → 6/8 and he
+follows; F5 / F9 while down keeps him down at the same spot (`down: Some((288.4, 606.5))` in the
+save); a teleport asks, "Stay" keeps the map, "Leave" → `companions=[]` and the shop; in the
+forest's slime den four slimes hunt the player (12 → 3 HP) and leave him alone; *gets up after
+3 s* → 1/8, *goes home* → dismissed at once; talking to him toasts "out cold"; screenshots of
+him lying, the HUD's DOWN, the question and the editor setting. Unit test: old saves without
+`down`.
 
 ### [ ] Commands for companions — `feature/companion-orders`
 

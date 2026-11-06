@@ -220,6 +220,9 @@ pub struct Companion {
     /// Its HP (None = full).
     #[serde(default)]
     pub hp: Option<i32>,
+    /// Knocked down: where it lies on the current map (world pixels); None = on its feet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub down: Option<[f32; 2]>,
 }
 
 /// How many dialog lines the journal keeps.
@@ -582,10 +585,17 @@ mod tests {
         assert!(!old.contains("companions"));
         assert!(WorldState::from_ron(&old).unwrap().companions.is_empty());
         let mut w = WorldState::default();
-        w.companions.push(Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: Some(5) });
+        w.companions.push(Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: Some(5), down: None });
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert_eq!(back.companions, w.companions);
         assert!(back.is_companion("village", 22) && !back.is_companion("forest", 22));
+        // Companions saved before they could be knocked down are on their feet.
+        let c: Companion = ron::from_str(r#"(map: "village", uid: 22, name: "guard", hp: Some(5))"#).unwrap();
+        assert_eq!(c.down, None);
+        let mut down = c.clone();
+        down.down = Some([272.0, 590.0]);
+        assert_eq!(ron::from_str::<Companion>(&ron::to_string(&down).unwrap()).unwrap(), down);
+        assert!(!ron::to_string(&c).unwrap().contains("down"));
     }
 
     #[test]
