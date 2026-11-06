@@ -41,7 +41,7 @@ fn remove(list: &mut Vec<ItemStack>, item: &str, count: u32) -> u32 {
 
 impl Game {
     /// Saves NPC `i`'s items (spawned characters are not saved individually).
-    fn persist_npc_items(&mut self, i: usize) {
+    pub(super) fn persist_npc_items(&mut self, i: usize) {
         let e = &self.loaded.entities[i];
         if e.spawned_by.is_some() {
             return;

@@ -875,6 +875,9 @@ pub struct CharacterDef {
     /// What the character carries (dropped when it is defeated; players: start inventory).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inventory: Vec<crate::inventory::ItemStack>,
+    /// As a companion it can't be given gear (a wolf, a slime); it still carries items.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gear_locked: bool,
 }
 
 /// One line of a loot table: `item` drops with `chance` percent, `min..=max` of them.

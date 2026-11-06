@@ -420,7 +420,9 @@ impl Game {
         let u = self.u();
         let e = &mut self.loaded.entities[i];
         let before = e.hp;
-        e.hp -= (dmg - e.defense - crate::effects::defense_bonus(&e.effects)).max(1);
+        let hit = (dmg - e.defense - crate::effects::defense_bonus(&e.effects)).max(1);
+        e.hp -= hit;
+        e.last_hit = hit;
         e.invuln = HIT_INVULN;
         e.flash = 0.15;
         e.body.move_target = None;

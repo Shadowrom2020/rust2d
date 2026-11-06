@@ -159,6 +159,7 @@ pub const API: &[ApiFn] = api! {
     "heal"(amount: Num) "Heals the player (queued)";
     "order"(target: Target, order: Text) "Tells a companion (or \"all\") what to do: \"attack\", \"defend\" (only what attacks you), \"passive\" (no fighting), \"stay\" (wait here), \"follow\" (queued)";
     "order_of"(name: Text) "How a companion fights: \"attack\", \"defend\" or \"passive\" (\"\" = no companion of that name)";
+    "open_companion"(target: Target) "Opens a companion's window (its gear and bag next to the player's inventory) once the event is over (queued)";
     "is_staying"(name: Text) "Whether a companion was told to wait where it is";
     "heal_npc"(target: Target, amount: Num) "Heals a character by name (a companion, \"player\"); a negative amount hurts it (queued)";
     "play_sound"(sound: Sound) "Plays a sound (queued)";

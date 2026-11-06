@@ -262,6 +262,17 @@ impl Game {
         self.healable_companions().into_iter().enumerate().map(|(k, i)| (i, Rect::new(10.0, top + k as f32 * (ROW_H + 4.0), ROW_W, ROW_H))).collect()
     }
 
+    /// A click on a companion's HUD row opens its window (gear and bag). Returns true if so.
+    pub(super) fn click_companion_row(&mut self) -> bool {
+        if !input::mouse_pressed(MouseButton::Left) {
+            return false;
+        }
+        let m = input::mouse_pos();
+        let Some((i, _)) = self.companion_rows().into_iter().find(|(_, r)| r.contains(m)) else { return false };
+        self.open_companion_window(i);
+        true
+    }
+
     /// One row per companion: head, name and an HP bar; highlighted while chosen to be healed.
     pub(super) fn draw_companion_rows(&self) {
         let chosen = self.heal_pick.as_ref().and_then(|p| p.choices[p.sel]);
@@ -298,6 +309,16 @@ impl Game {
             draw_rectangle(tx - 1.0, by - 1.0, bw + 2.0, 9.0, Color::new(0.0, 0.0, 0.0, 0.7));
             let col = if share > 0.5 { Color::new(0.3, 0.8, 0.35, 1.0) } else if share > 0.25 { Color::new(0.9, 0.7, 0.2, 1.0) } else { Color::new(0.9, 0.2, 0.2, 1.0) };
             draw_rectangle(tx, by, bw * share, 7.0, col);
+            // Ammunition of a bow the player gave it (red when out).
+            if let Some((kind, n)) = self.companion_ammo(i) {
+                let icon = self.project.db.item(&kind).map(|d| d.icon.clone());
+                let ax = r.right() + 4.0;
+                draw_rectangle(ax, r.y, 54.0, r.h, Color::new(0.05, 0.05, 0.1, 0.78));
+                if let Some(s) = icon {
+                    self.assets.draw_frame_in(&s.sheet, s.frame, Rect::new(ax + 2.0, r.y + 7.0, 20.0, 20.0), WHITE);
+                }
+                draw_text(format!("x{n}"), ax + 24.0, r.y + 22.0, 16.0, if n == 0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { WHITE });
+            }
             let (hp, col) = if self.is_down(i) { ("DOWN".to_string(), Color::new(1.0, 0.35, 0.35, 1.0)) } else { (format!("{}/{}", e.hp, e.max_hp), LIGHTGRAY) };
             let w = measure_text(&hp, None, 14, 1.0).width;
             draw_text(&hp, r.right() - w - 6.0, r.y + 14.0, 14.0, col);
@@ -379,10 +400,13 @@ impl Game {
     }
 }
 
-/// *Heal player* actions of an item used on someone else heal that character ("self").
-fn redirect_heals(a: Action) -> Action {
+/// Actions of an item used by / on someone else than the player: *Heal player* heals that
+/// character ("self"), effects applied to / cured on "player" go to it instead.
+pub(super) fn redirect_heals(a: Action) -> Action {
     match a {
         Action::Heal { amount } => Action::HealCharacter { target: "self".into(), amount },
+        Action::ApplyEffect { target, effect } if target == "player" => Action::ApplyEffect { target: "self".into(), effect },
+        Action::CureEffect { target, kind } if target == "player" => Action::CureEffect { target: "self".into(), kind },
         Action::If { conditions, then, otherwise } => Action::If { conditions, then: then.into_iter().map(redirect_heals).collect(), otherwise: otherwise.into_iter().map(redirect_heals).collect() },
         a => a,
     }

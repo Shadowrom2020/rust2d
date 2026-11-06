@@ -225,7 +225,7 @@ fights it, *Defend* doesn't. F5 / F9 keeps `defend:stay` at the post; a teleport
 guard follow again; the guard's dialog (*Wait here*) → `stay`; the editor's *Companion order*
 fields (screenshot).
 
-### [ ] Companion inventory — `feature/companion-inventory`
+### [x] Companion inventory — `feature/companion-inventory`
 
 **Goal.** The player equips companions with gear and hands them items they use on their own.
 
@@ -251,16 +251,41 @@ fields (screenshot).
 - *Rules*: given items belong to the companion; dismissed or downed companions keep them.
 - Later (not in this item): companions learning spells from scrolls.
 
+**Decided while building.** Not a tab of the character window but its own **companion window**
+(`runtime/companion_ui.rs`, built like the loot window: gear + bag + the player's inventory),
+opened from the companion's HUD row, *Gear...* in the orders menu or `open_companion(name)` /
+`Action::OpenCompanion` (appended; opens once the event is over). Mouse: click moves a stack,
+right-click one, dragging onto a gear slot (or Enter on a bag item) equips; no double-click
+(the first click would already move the stack). The bag holds 12 kinds of items (stored as the
+entity's item list, `persist_npc_items`). Automatic use (`runtime/npc_use.rs`), for every
+character with HP and items, enemies included (user feedback: a guard with potions has to drink
+them when it's critical): the item's *on use* actions are scanned (heal, cure on "player",
+positive effect on "player") and run with the character as "self" (`healing::redirect_heals`
+also redirects effects; dialog lines are dropped); health is critical at 35 % or when HP ≤ the
+last hit taken (`RtEntity.last_hit`: an 8-HP guard taking 4-point hits drinks at 4); one item
+per 4 s (`RtEntity.item_cd`). Ammunition only for a ranged weapon the player gave it (its definition's own weapon
+needs none); out of ammo it keeps out of fights and says so once. `CharacterDef.gear_locked`
+also keeps its own gear on. `status()`: `compwin=name[bag]`; autoplay `slot` / `slotdrag` take
+`gear`, `bag` and `player` while the window is open.
+
 **Touch points.** `runtime/{charwin,inventory_ui,companions,npc_items,combat}.rs`, `defs.rs`
 (`gear_locked`), `script.rs`, game `main.rs` (autoplay), README, scripting.md.
 
-**Example.** The guard can be given the bow and arrows; a second potion in the guard's quest
-reward to try it.
+**Example.** The guard's dialog while he follows offers "Let me see your gear"
+(`open_companion`); the hunting bow in the elder's house and Tilda's arrows and potions are
+there to try it.
 
-**Verify.** Autoplay: give the guard a potion and arrows via the tab (`slot` / `slotdrag`),
-damage him below 40 % → he drinks it (`companions=` HP rises, his bag shrinks, toast); equip a
-bow on him → he shoots and his arrows run down; save / load keeps his bag; screenshot of the
-tab.
+**Verify (done).** Autoplay on a scratch copy: clicking the guard's HUD row opens the window
+(`compwin=guard[]`); clicks give him 2 potions and 20 arrows, a right-click takes one arrow back
+(`guard[potionx2,arrowsx19]`); dragging the bow onto his weapon slot equips it, the spear goes
+into his bag (`npcs=` `guard:…,bow|arrowsx5,spearx1`); hurt to 2/8 he drinks a potion at once
+("Town Guard uses Red Potion.", 8/8, one left); in a real fight in the slime den (no scripted
+damage) he drinks one by himself and the potion's dialog line doesn't show; the Bandit Chief,
+given a potion and hurt to a critical 2/10, drinks it; in the slime den with 3 arrows he shoots
+3 → 2 → 1 → 0, then "Town Guard is out of Arrows." and the HUD row's red ×0; F5 / F9 keeps his
+bag; the dialog's "Let me see your gear" opens the window; with *can't be given gear* the bow
+stays with the player. Screenshots of the window, the toasts, the HUD ammo and the editor
+checkbox. Unit test: what items do (`scan`).
 
 ### [ ] Portrait images — `feature/portrait-images`
 

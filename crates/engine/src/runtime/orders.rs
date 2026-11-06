@@ -26,9 +26,11 @@ pub(super) struct OrderMenu {
 enum Choice {
     Fight(Order),
     Stay(bool),
+    /// Opens the companion window (gear and bag).
+    Gear,
 }
 
-const CHOICES: [Choice; 5] = [Choice::Fight(Order::Attack), Choice::Fight(Order::Defend), Choice::Fight(Order::Passive), Choice::Stay(true), Choice::Stay(false)];
+const CHOICES: [Choice; 6] = [Choice::Fight(Order::Attack), Choice::Fight(Order::Defend), Choice::Fight(Order::Passive), Choice::Stay(true), Choice::Stay(false), Choice::Gear];
 
 impl Choice {
     fn label(self) -> &'static str {
@@ -36,6 +38,7 @@ impl Choice {
             Choice::Fight(o) => o.label(),
             Choice::Stay(true) => "Stay here",
             Choice::Stay(false) => "Follow me",
+            Choice::Gear => "Gear...",
         }
     }
 }
@@ -131,10 +134,21 @@ impl Game {
         if give {
             let who: Vec<usize> = if m.who == 0 { targets.clone() } else { vec![targets[m.who - 1]] };
             let choice = CHOICES[m.sel];
+            if choice == Choice::Gear {
+                if who.len() == 1 {
+                    self.order_menu = None;
+                    self.open_companion_window(who[0]);
+                } else {
+                    self.ui.toast("Choose one companion for its gear.".into());
+                    self.order_menu = Some(m);
+                }
+                return true;
+            }
             for &i in &who {
                 match choice {
                     Choice::Fight(o) => self.give_order(i, Some(o), None),
                     Choice::Stay(s) => self.give_order(i, None, Some(s)),
+                    Choice::Gear => {}
                 }
             }
             let name = if who.len() == 1 { self.entity_display_name(self.loaded.entities[who[0]].uid).unwrap_or_default() } else { "All of them".into() };
@@ -144,6 +158,7 @@ impl Game {
                 Choice::Fight(Order::Passive) => ("stays out of fights", "stay out of fights"),
                 Choice::Stay(true) => ("waits here", "wait here"),
                 Choice::Stay(false) => ("follows you", "follow you"),
+                Choice::Gear => ("", ""),
             };
             self.ui.toast(format!("{name} {}.", if who.len() == 1 { one } else { many }));
             self.order_menu = None;
@@ -223,6 +238,7 @@ impl Game {
                 match c {
                     Choice::Fight(o) => l.order == o,
                     Choice::Stay(s) => l.post.is_some() == s,
+                    Choice::Gear => false,
                 }
             })
         };

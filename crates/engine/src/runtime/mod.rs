@@ -4,6 +4,7 @@ mod achievements;
 mod ai;
 mod charwin;
 mod combat;
+mod companion_ui;
 mod companions;
 mod cutscene;
 mod dev;
@@ -24,6 +25,7 @@ mod schedule;
 mod progression;
 mod paperdoll;
 mod npc_items;
+mod npc_use;
 mod shop_ui;
 mod crafting_ui;
 mod locks;
@@ -139,6 +141,10 @@ struct RtEntity {
     damage: i32,
     invuln: f32,
     flash: f32,
+    /// HP the last hit took (a character drinks a potion before the next one would fell it).
+    last_hit: i32,
+    /// Seconds before it uses another item it carries.
+    item_cd: f32,
     knock: Vec2,
     /// Ranged attack for hostile shooters.
     weapon: Option<Weapon>,
@@ -242,10 +248,14 @@ pub struct Game {
     leaving: Option<(String, Arrival)>,
     /// Seconds before leaving the map may ask again (after "Stay").
     leave_hold: f32,
+    /// A companion window to open once the running event is over (`Action::OpenCompanion`).
+    pending_companion: Option<u32>,
     /// The open "Heal whom?" choice.
     heal_pick: Option<healing::HealPick>,
     /// The open companion orders menu (G).
     order_menu: Option<orders::OrderMenu>,
+    /// The open companion window (its gear and bag).
+    comp_win: Option<companion_ui::CompanionWin>,
     /// Bottom of the player's HUD panel as last drawn (the companions' rows go below it).
     hud_bottom: std::cell::Cell<f32>,
     sleeping: Option<furniture::Sleeping>,
@@ -351,8 +361,10 @@ impl Game {
             seat: None,
             leaving: None,
             leave_hold: 0.0,
+            pending_companion: None,
             heal_pick: None,
             order_menu: None,
+            comp_win: None,
             hud_bottom: std::cell::Cell::new(80.0),
             sleeping: None,
             bed: None,
@@ -466,6 +478,8 @@ impl Game {
             hostile,
             damage,
             invuln: 0.0,
+            last_hit: 0,
+            item_cd: 0.0,
             flash: 0.0,
             knock: Vec2::ZERO,
             weapon,
@@ -1068,7 +1082,10 @@ impl Game {
         self.ui.text_speed = self.settings.text_speed;
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
-        let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
+        // The companion window takes all input while open.
+        let comp = allow_windows && self.update_companion_window();
+        let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows && !comp);
+        let (shop_key, shop_mouse) = (shop_key || comp, shop_mouse || comp);
         // The crafting window works like the trade window (they never are open together).
         let (craft_key, craft_mouse) = self.update_crafting_ui(allow_windows && !self.shop.is_open());
         let (shop_key, shop_mouse) = (shop_key || craft_key, shop_mouse || craft_mouse);
@@ -1086,6 +1103,9 @@ impl Game {
         }
         // G / LB: the companions' orders (only while nothing else is open).
         let cmd_key = self.maybe_open_order_menu(allow_windows && !input.consumed && !shop_key && !hide_key && !self.modal() && !self.aiming());
+        // A click on a companion's HUD row opens its window.
+        let row_click = !shop_mouse && allow_windows && !self.modal() && !self.aiming() && self.click_companion_row();
+        let (shop_key, shop_mouse) = (shop_key, shop_mouse || row_click);
         let (shop_key, shop_mouse) = (shop_key || hide_key || cmd_key, shop_mouse);
         let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.skills_open(), input.consumed || shop_key);
         let (k_key, k_mouse) = self.update_skills_ui(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.journal_open(), input.consumed || shop_key || j_key);
@@ -1499,6 +1519,8 @@ impl Game {
                 self.loaded.entities[i].body.moving = false;
                 continue;
             }
+            // Characters drink a potion they carry when it's critical (and so on).
+            self.npc_use_items(i, dt);
             if self.entity_knockback(i, dt) {
                 continue;
             }
@@ -1566,7 +1588,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} aim={} orders={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} aim={} orders={} compwin={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1605,6 +1627,7 @@ impl Game {
             self.pose_status(),
             self.heal_pick_status(),
             self.order_menu_status(),
+            self.companion_win_status(),
             self.shop_status(),
             self.crafting_status(),
             self.loaded.map.name,
@@ -1843,7 +1866,9 @@ impl Game {
             }
             self.draw_minigame();
             self.draw_sleep();
-            if self.crafting_open() {
+            if self.companion_win_open() {
+                self.draw_companion_window();
+            } else if self.crafting_open() {
                 self.draw_crafting_ui();
             } else if self.shop_open() {
                 self.draw_shop_ui();
@@ -2004,6 +2029,13 @@ impl ActionHost for Game {
             }
             Action::CompanionOrder { target, order } => {
                 self.order_companion(target, order, ctx.owner);
+                Step::Continue
+            }
+            Action::OpenCompanion { target } => {
+                match self.entity_index(target, ctx.owner).filter(|&i| self.loaded.entities[i].companion.is_some()) {
+                    Some(i) => self.pending_companion = Some(self.loaded.entities[i].uid),
+                    None => eprintln!("[events] Open companion window: '{target}' is no companion here"),
+                }
                 Step::Continue
             }
             Action::SetLocked { target, locked } => {

@@ -1319,6 +1319,10 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
         ui.label("Hostile");
         ui.checkbox(&mut d.hostile, "hurts the player on contact");
         ui.end_row();
+        ui.label("As companion");
+        ui.checkbox(&mut d.gear_locked, "can't be given gear")
+            .on_hover_text("A companion's window lets the player equip it and hand it items; tick this for animals and creatures that can't wear anything (they still carry items and use potions).");
+        ui.end_row();
         ui.label("Experience");
         ui.add(egui::DragValue::new(&mut d.xp).range(0..=1_000_000).suffix(" XP"))
             .on_hover_text("What the player gains for defeating this character (Project › Experience and levels must be on). 'Defeat all enemies' gives none.");
