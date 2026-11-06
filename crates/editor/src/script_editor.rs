@@ -159,6 +159,8 @@ pub const API: &[ApiFn] = api! {
     "patrol"(target: Target) "Starts a character's own patrol route (queued)";
     "patrol"(target: Target, points: List) "Patrols [[x, y], ...] tile waypoints (queued)";
     "stop_patrol"(target: Target) "Stops a character's patrol (queued)";
+    "stop_schedule"(target: Target) "The character stops following its daily schedule and stays where it is (queued, saved)";
+    "follow_schedule"(target: Target) "The character follows its daily schedule again (queued)";
     "start_quest"(quest: Quest) "Starts a quest (queued)";
     "advance_quest"(quest: Quest) "Moves a quest to its next stage (queued)";
     "set_quest_stage"(quest: Quest, stage: Num) "Sets a quest's stage (queued)";

@@ -5,7 +5,7 @@
 use macroquad::prelude::*;
 
 use super::Game;
-use crate::entity::{Facing, PatrolRoute};
+use crate::entity::{EntityKind, Facing, PatrolRoute};
 use crate::path::{find_path, TilePos};
 use crate::state::PatrolState;
 
@@ -25,9 +25,26 @@ pub(super) struct Patrol {
     pub index: usize,
     pub back: bool,
     pub wait: f32,
-    /// Remaining tiles to the current waypoint (next first).
-    path: Vec<TilePos>,
+    walker: Walker,
+}
+
+/// A character on its way to a tile: the remaining path and how long it has been blocked.
+#[derive(Clone, Debug, Default)]
+pub(super) struct Walker {
+    /// Remaining tiles to the goal (next first).
+    pub path: Vec<TilePos>,
     stuck: f32,
+}
+
+/// What a step of [`Game::walk_to_tile`] came to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Walk {
+    Walking,
+    Arrived,
+    /// No path to the goal.
+    Unreachable,
+    /// Blocked for a few seconds.
+    GaveUp,
 }
 
 impl Patrol {
@@ -59,8 +76,7 @@ impl Patrol {
         let (i, back) = self.route.next(self.index, self.back);
         self.index = i;
         self.back = back;
-        self.path.clear();
-        self.stuck = 0.0;
+        self.walker = Walker::default();
     }
 }
 
@@ -95,37 +111,61 @@ impl Game {
             return true;
         }
         let goal = p.route.points[p.index.min(p.route.points.len() - 1)];
+        let speed = p.route.speed;
+        let mut walker = std::mem::take(&mut self.loaded.entities[i].patrol.as_mut().unwrap().walker);
+        let walked = self.walk_to_tile(i, goal, &mut walker, speed, dt);
+        let e = &mut self.loaded.entities[i];
+        let p = e.patrol.as_mut().unwrap();
+        p.walker = walker;
+        match walked {
+            Walk::Walking => {}
+            Walk::Arrived => {
+                // Pause, then head for the next waypoint.
+                p.wait = p.route.pause.max(0.0);
+                p.advance();
+            }
+            Walk::Unreachable => {
+                eprintln!("[game] {} can't reach patrol point {goal:?}; skipping it", e.def);
+                p.wait = 1.0;
+                p.advance();
+            }
+            // Blocked for long (by the player, another character): on to the next waypoint.
+            Walk::GaveUp => p.advance(),
+        }
+        true
+    }
+
+    /// One step of character `i` towards tile `goal`, along the path in `w` (planned with A*
+    /// around solid tiles when empty). `speed` 0 = the character's own.
+    pub(super) fn walk_to_tile(&mut self, i: usize, goal: TilePos, w: &mut Walker, speed: f32, dt: f32) -> Walk {
         let pos = self.loaded.entities[i].body.pos;
         let here = self.tile_of(pos);
-        // Plan the way to the waypoint when needed.
-        if p.path.is_empty() {
-            let blocked = |x: i32, y: i32| !self.loaded.map.in_bounds(x, y) || self.tile_solid(x, y);
+        // Plan the way to the goal when needed.
+        if w.path.is_empty() {
+            // Around solid tiles and props (statues, wells, closed gates); characters move, so
+            // they are waited for instead.
+            let props = self.solid_entity_tiles(|e| e.kind == EntityKind::Prop);
+            let blocked = |x: i32, y: i32| !self.loaded.map.in_bounds(x, y) || self.tile_solid(x, y) || ((x, y) != goal && props.contains(&(x, y)));
             let planned = find_path(here, goal, |t| t == goal, blocked, MAX_NODES);
             let at_goal = pos.distance(self.tile_spot(goal)) < 2.0;
-            let e = &mut self.loaded.entities[i];
-            let p = e.patrol.as_mut().unwrap();
             match planned {
                 Some(path) if path.is_empty() && at_goal => {
-                    // Arrived: pause, then head for the next waypoint.
-                    p.wait = p.route.pause.max(0.0);
-                    p.advance();
-                    e.body.moving = false;
-                    return true;
+                    self.loaded.entities[i].body.moving = false;
+                    *w = Walker::default();
+                    return Walk::Arrived;
                 }
-                Some(path) if path.is_empty() => p.path = vec![goal],
-                Some(path) => p.path = path,
+                Some(path) if path.is_empty() => w.path = vec![goal],
+                Some(path) => w.path = path,
                 None => {
-                    eprintln!("[game] {} can't reach patrol point {goal:?}; skipping it", e.def);
-                    p.wait = 1.0;
-                    p.advance();
-                    return true;
+                    self.loaded.entities[i].body.moving = false;
+                    *w = Walker::default();
+                    return Walk::Unreachable;
                 }
             }
         }
         let e = &self.loaded.entities[i];
-        let p = e.patrol.as_ref().unwrap();
-        let target = self.tile_spot(p.path[0]);
-        let speed = if p.route.speed > 0.0 { p.route.speed } else { e.body.speed.max(30.0) };
+        let target = self.tile_spot(w.path[0]);
+        let speed = if speed > 0.0 { speed } else { e.body.speed.max(30.0) };
         let to = target - pos;
         let step = to.clamp_length_max(speed * dt);
         let (body, uid) = (e.body.clone(), e.uid);
@@ -136,22 +176,22 @@ impl Game {
         e.body.moving = new_pos != pos;
         e.body.anim += dt;
         e.home = new_pos;
-        let p = e.patrol.as_mut().unwrap();
         if new_pos.distance(target) < 1.0 {
-            p.path.remove(0);
-            p.stuck = 0.0;
+            w.path.remove(0);
+            w.stuck = 0.0;
         } else if new_pos.distance(pos) < 0.01 {
             // Blocked (by the player, another character, a corner): wait, re-plan, give up.
-            p.stuck += dt;
-            if p.stuck > SKIP_AFTER {
-                p.advance();
-            } else if p.stuck > REPLAN_AFTER && p.path.len() > 1 {
-                p.path.clear();
+            w.stuck += dt;
+            if w.stuck > SKIP_AFTER {
+                *w = Walker::default();
+                return Walk::GaveUp;
+            } else if w.stuck > REPLAN_AFTER && w.path.len() > 1 {
+                w.path.clear();
             }
         } else {
-            p.stuck = 0.0;
+            w.stuck = 0.0;
         }
-        true
+        Walk::Walking
     }
 
     /// Saves the progress of every patrolling character on the current map (before leaving
@@ -174,7 +214,7 @@ impl Game {
         if !active {
             if let Some(p) = &mut e.patrol {
                 p.on = false;
-                p.path.clear();
+                p.walker = Walker::default();
             }
             e.body.moving = false;
         } else if !points.is_empty() {

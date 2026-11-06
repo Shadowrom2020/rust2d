@@ -9,7 +9,7 @@ use rust2d_engine::entity::{EntityInstance, EntityKind, Facing};
 use rust2d_engine::map::{Edge, EdgeLink, Map, Respawn, Tile, Zone, ZoneKind, MAX_MAP_SIZE};
 use rust2d_engine::audio::Audio;
 use rust2d_engine::defs::{ContainerSpec, LockSpec, ShopSpec, SpriteRef};
-use rust2d_engine::entity::{PatrolMode, PatrolRoute};
+use rust2d_engine::entity::{PatrolMode, PatrolRoute, ScheduleStop};
 
 /// Definitions remembered in the entity palette's "Recent" row.
 const RECENT_MAX: usize = 10;
@@ -195,6 +195,13 @@ pub enum Choice {
     Cancel,
 }
 
+/// The tile list edited on the map with clicks (`Editor::route_edit`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteKind {
+    Patrol,
+    Schedule,
+}
+
 pub struct Editor {
     /// Transition tool draft.
     pub link: Option<crate::maps::LinkDraft>,
@@ -207,6 +214,8 @@ pub struct Editor {
     pub new_project: Option<crate::new_project::NewProjectWizard>,
     /// Character whose patrol route is being edited on the map (clicks add waypoints).
     pub route_edit: Option<u32>,
+    /// What `route_edit` edits: the patrol route or the daily schedule's stops.
+    pub route_kind: RouteKind,
     /// Waypoint being dragged while editing a route, and the map objects before the drag.
     pub route_drag: Option<(usize, crate::doc::Objects)>,
     /// Debug: screen points to report the egui layer under (script command `probe X Y`).
@@ -357,6 +366,7 @@ impl Editor {
             new_project: None,
             route_edit: None,
             route_drag: None,
+            route_kind: RouteKind::Patrol,
             probe: Vec::new(),
             map_cams: HashMap::new(),
             last_portal_click: None,
@@ -2349,6 +2359,7 @@ impl Editor {
                             if ui.button("\u{E3D4} Add a patrol route").on_hover_text("Then click tiles on the map to add waypoints").clicked() {
                                 e.patrol = Some(PatrolRoute { points: vec![tile], ..Default::default() });
                                 self.route_edit = Some(uid);
+                                self.route_kind = RouteKind::Patrol;
                             }
                         }
                         Some(r) => {
@@ -2362,11 +2373,12 @@ impl Editor {
                                 ui.label("Speed");
                                 ui.add(egui::DragValue::new(&mut r.speed).range(0.0..=400.0).speed(1.0)).on_hover_text("Pixels per second; 0 = the character's speed");
                             });
-                            let editing = self.route_edit == Some(uid);
+                            let editing = self.route_edit == Some(uid) && self.route_kind == RouteKind::Patrol;
                             ui.horizontal(|ui| {
                                 let label = if editing { "\u{E182} Done editing" } else { "\u{E3B4} Edit on map" };
                                 if ui.selectable_label(editing, label).on_hover_text("Click tiles to add waypoints, drag one to move it, right-click to remove it, Esc when done").clicked() {
                                     self.route_edit = if editing { None } else { Some(uid) };
+                                    self.route_kind = RouteKind::Patrol;
                                 }
                                 remove_route = ui.button("Remove route").clicked();
                             });
@@ -2391,6 +2403,74 @@ impl Editor {
                     if remove_route {
                         e.patrol = None;
                         self.route_edit = None;
+                    }
+
+                    ui.separator();
+                    ui.heading("Daily schedule");
+                    if e.schedule.is_empty() {
+                        ui.weak("No schedule: the character stays around where it is placed.");
+                        if ui.button(ui::t(ph::CLOCK, "Add a schedule")).on_hover_text("Then click tiles on the map to add the places it goes to during the day").clicked() {
+                            e.schedule = vec![ScheduleStop::new(8.0, tile.0, tile.1)];
+                            self.route_edit = Some(uid);
+                            self.route_kind = RouteKind::Schedule;
+                        }
+                    } else {
+                        let editing = self.route_edit == Some(uid) && self.route_kind == RouteKind::Schedule;
+                        let mut remove = false;
+                        ui.horizontal(|ui| {
+                            let label = if editing { ui::t(ph::CHECK, "Done editing") } else { ui::t(ph::MAP_PIN, "Edit on map") };
+                            if ui.selectable_label(editing, label).on_hover_text("Click tiles to add stops, drag one to move it, right-click to remove it, Esc when done").clicked() {
+                                self.route_edit = if editing { None } else { Some(uid) };
+                                self.route_kind = RouteKind::Schedule;
+                            }
+                            remove = ui.button("Remove schedule").clicked();
+                        });
+                        let mut del = None;
+                        let n = e.schedule.len();
+                        egui::Grid::new(("schedule", uid)).num_columns(5).spacing([6.0, 3.0]).show(ui, |ui| {
+                            for (k, s) in e.schedule.iter_mut().enumerate() {
+                                // The hour as a time: dragged in quarter hours, typed as 7.5 or 7:30.
+                                ui.add(
+                                    egui::DragValue::new(&mut s.hour)
+                                        .range(0.0..=23.75)
+                                        .speed(0.05)
+                                        .custom_formatter(|h, _| rust2d_engine::entity::hour_text(h as f32))
+                                        .custom_parser(|t| match t.split_once(':') {
+                                            Some((h, m)) => Some(h.trim().parse::<f64>().ok()? + m.trim().parse::<f64>().ok()? / 60.0),
+                                            None => t.trim().parse().ok(),
+                                        }),
+                                )
+                                .on_hover_text("From this time on (in-game clock) the character goes here");
+                                if ui.ctx().input(|i| !i.pointer.any_down()) {
+                                    s.hour = (s.hour * 4.0).round() / 4.0;
+                                }
+                                ui.monospace(format!("tile {},{}", s.x, s.y));
+                                let face = s.facing.map_or("Any", |f| f.label());
+                                egui::ComboBox::from_id_salt(("stopface", uid, k)).width(70.0).selected_text(face).show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut s.facing, None, "Any");
+                                    for f in Facing::ALL {
+                                        ui.selectable_value(&mut s.facing, Some(f), f.label());
+                                    }
+                                })
+                                .response
+                                .on_hover_text("The direction it faces once there");
+                                ui.checkbox(&mut s.inside, "inside").on_hover_text("It goes indoors here (e.g. at a door): out of sight until the next stop");
+                                if ui.add_enabled(n > 1, egui::Button::new(ph::TRASH).small()).on_hover_text("Remove this stop").clicked() {
+                                    del = Some(k);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                        if let Some(k) = del {
+                            e.schedule.remove(k);
+                        }
+                        if remove {
+                            e.schedule.clear();
+                            if self.route_kind == RouteKind::Schedule {
+                                self.route_edit = None;
+                            }
+                        }
+                        ui.weak("At each time the character walks to its stop and stays there (wandering around it if its behaviour is Wander). Entering the map puts it at the stop of the hour. Use the Time of day condition for lines it says at night. The Schedule action (scripts: stop_schedule / follow_schedule) stops and resumes it. A schedule replaces the patrol route.");
                     }
                 }
                 if e.kind == EntityKind::Prop {

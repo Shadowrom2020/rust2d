@@ -316,6 +316,8 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target)` | Starts the character's own patrol route (set in the editor). *(queued)* |
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
+| `stop_schedule(target)` | The character stops following its daily schedule (set in the editor) and stays where it is. Saved. *(queued)* |
+| `follow_schedule(target)` | The character follows its daily schedule again: it heads for the stop of the current hour. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 | `defeated_count(character)` | How many characters of a definition the player has defeated (the bestiary's count), e.g. `defeated_count("slime")`. |
 | `hp_of(target)` | A character's HP right now: `"player"`, `"self"` (or `SELF`) or the name of a character on this map; `-1` if there is none (or it can't be hurt). |

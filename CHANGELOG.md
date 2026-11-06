@@ -15,6 +15,21 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   changes are kept in save games (`WorldState.weather`). The editor has *View › Weather
   preview*. Example: fog over Whisperwood until the shrine is lit, rain in the Wilds.
   Editor script `mapweather`, `viewopt weather`; game `status` prints `weather=`.
+- **NPC schedules**: a placed character can have a *Daily schedule* (map inspector): stops with a
+  time, a tile, an optional facing and *inside* (the character goes indoors there, out of sight
+  until the next stop). At each time it walks to the stop (A*, like patrols) and stays there,
+  wandering around it if its behaviour is Wander; entering a map puts scheduled characters at
+  the stop of the hour. Stops are placed, dragged and removed on the map like patrol waypoints
+  and drawn as a dashed loop with their times. The **Schedule** action (follow / stop, kept in
+  save games: `EntityState.schedule_off`) and `stop_schedule(target)` / `follow_schedule(target)`
+  control it. Example: Tomas in the village spends the day at the shop, the duck pond and the big
+  pond and goes home into the elder's house at night; his lines depend on the time of day.
+  Editor script `scheduleedit`, `stop K hour|facing|inside V`, `status` prints `schedule=`; game
+  `status` prints `schedule=`.
+
+### Fixes
+- Patrolling (and scheduled) characters plan their way around solid props such as the village
+  statue instead of walking into them and getting stuck.
 
 ## 0.4.0 — 2026-11-06
 

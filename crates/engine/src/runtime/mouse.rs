@@ -1,6 +1,6 @@
 //! Mouse controls: left click walks (or attacks an enemy), right click walks over and interacts.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use macroquad::prelude::*;
 
@@ -135,24 +135,11 @@ impl Game {
 
     /// Plans a path for a goal (tiles occupied by solid entities are avoided).
     fn plan(&self, goal: Goal) -> Option<VecDeque<TilePos>> {
-        let ts = self.ts();
         let ignore = match goal {
             Goal::Interact(u) | Goal::Attack(u) => Some(u),
             _ => None,
         };
-        let mut occupied: HashSet<TilePos> = HashSet::new();
-        for e in self.loaded.entities.iter().filter(|e| e.active && e.solid && Some(e.uid) != ignore) {
-            let r = e.body.rect();
-            for ty in (r.y / ts).floor() as i32..=((r.y + r.h) / ts).floor() as i32 {
-                for tx in (r.x / ts).floor() as i32..=((r.x + r.w) / ts).floor() as i32 {
-                    // Any real overlap blocks the tile (small hitboxes sit at the bottom of their tile).
-                    let inner = Rect::new(tx as f32 * ts + 2.0, ty as f32 * ts + 2.0, ts - 4.0, ts - 4.0);
-                    if r.overlaps(&inner) {
-                        occupied.insert((tx, ty));
-                    }
-                }
-            }
-        }
+        let occupied = self.solid_entity_tiles(|e| Some(e.uid) != ignore);
         let blocked = |x: i32, y: i32| self.tile_solid(x, y) || occupied.contains(&(x, y));
         let near = |a: TilePos, b: TilePos| (a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1;
         let start = self.player_tile();

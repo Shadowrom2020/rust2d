@@ -1353,6 +1353,18 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
         }
+        Action::Schedule { target, active } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.radio_value(active, true, "follow");
+                ui.radio_value(active, false, "stop");
+            });
+            ui.weak(if *active {
+                "the character heads for the stop of the current hour again (map inspector: Daily schedule)"
+            } else {
+                "the character stays where it is and does what its definition says (kept in the save game)"
+            });
+        }
         Action::Autosave => {
             ui.weak("Saves the game to the 'Autosave' slot once this event (dialogs, cut-scene) has finished. Map changes autosave by themselves.");
         }

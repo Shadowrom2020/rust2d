@@ -464,7 +464,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} clipboard={} pasting={} graph={},{} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} schedule={} clipboard={} pasting={} graph={},{} msg={}",
             ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
@@ -479,6 +479,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.audio.previewing(),
             ed.audio.current_music(),
             ed.sel,
+            schedule_text(ed),
             ed.clipboard.as_ref().map_or("empty".to_string(), |c| format!("{}x{},{}ents", c.w, c.h, c.entities.len())),
             ed.pasting,
             ed.graph.counts.0,
@@ -769,9 +770,44 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         // routeedit on|off: edit the selected character's patrol route on the map
         "routeedit" => {
+            ed.route_kind = app::RouteKind::Patrol;
             ed.route_edit = match (arg(1), ed.sel) {
                 ("on", app::Selection::Entity(uid)) => Some(uid),
                 _ => None,
+            }
+        }
+        // scheduleedit on|off: edit the selected character's schedule on the map (on: adds a
+        // schedule with one stop at its tile when it has none, like "Add a schedule")
+        "scheduleedit" => {
+            ed.route_edit = None;
+            if let (Some(doc), app::Selection::Entity(uid), "on") = (&mut ed.doc, ed.sel, arg(1)) {
+                let ts = rust2d_engine::project::TILE_SIZE as f32;
+                let before = doc::Objects::of(&doc.map);
+                if let Some(e) = doc.map.entities.iter_mut().find(|e| e.uid == uid && e.kind == rust2d_engine::entity::EntityKind::Character) {
+                    if e.schedule.is_empty() {
+                        let tile = ((e.x / ts).floor() as i32, ((e.y - 1.0) / ts).floor() as i32);
+                        e.schedule.push(rust2d_engine::entity::ScheduleStop::new(8.0, tile.0, tile.1));
+                    }
+                    ed.route_edit = Some(uid);
+                    ed.route_kind = app::RouteKind::Schedule;
+                }
+                doc.record_objects(before, "schedule");
+            }
+        }
+        // stop K hour H | facing up|down|left|right|any | inside on|off: edit stop K of the
+        // selected character's schedule (as the inspector's row)
+        "stop" => {
+            if let (Some(doc), app::Selection::Entity(uid)) = (&mut ed.doc, ed.sel) {
+                let before = doc::Objects::of(&doc.map);
+                if let Some(s) = doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.schedule.get_mut(num(1) as usize)) {
+                    match arg(2) {
+                        "hour" => s.hour = num(3).rem_euclid(24.0),
+                        "facing" => s.facing = rust2d_engine::entity::Facing::ALL.into_iter().find(|f| f.label().eq_ignore_ascii_case(arg(3))),
+                        "inside" => s.inside = arg(3) == "on",
+                        _ => println!("[script] stop: unknown field {}", arg(2)),
+                    }
+                }
+                doc.record_objects(before, "schedule");
             }
         }
         // scriptsel FILE: what clicking a file in Database > Scripts does
@@ -954,4 +990,25 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "collision" => ed.view.collision = arg(1) != "off",
         other => eprintln!("[editor script] unknown command '{other}'"),
     }
+}
+
+/// The selected character's schedule for `status`: "HH:MM@x,y[in][facing]" per stop, "-" if
+/// none; "(editing)" while edited on the map.
+fn schedule_text(ed: &Editor) -> String {
+    let Some(e) = ed.doc.as_ref().zip(match ed.sel {
+        app::Selection::Entity(uid) => Some(uid),
+        _ => None,
+    }).and_then(|(d, uid)| d.map.entity(uid)) else {
+        return "-".into();
+    };
+    if e.schedule.is_empty() {
+        return "-".into();
+    }
+    let stops: Vec<String> = e
+        .schedule
+        .iter()
+        .map(|s| format!("{}@{},{}{}{}", s.time_text(), s.x, s.y, if s.inside { "[in]" } else { "" }, s.facing.map_or(String::new(), |f| format!("[{}]", f.label()))))
+        .collect();
+    let editing = ed.route_edit == Some(e.uid) && ed.route_kind == app::RouteKind::Schedule;
+    format!("[{}]{}", stops.join(" "), if editing { "(editing)" } else { "" })
 }

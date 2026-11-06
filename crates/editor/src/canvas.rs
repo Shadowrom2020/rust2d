@@ -369,7 +369,7 @@ impl Editor {
         if is_key_pressed(KeyCode::Escape) && self.route_edit.is_some() {
             self.route_edit = None;
             self.route_drag = None;
-            self.set_status("Patrol route done");
+            self.set_status(if self.route_kind == crate::app::RouteKind::Patrol { "Patrol route done" } else { "Schedule done" });
             return;
         }
         if is_key_pressed(KeyCode::Escape) && self.pasting {
@@ -924,6 +924,36 @@ impl Editor {
             }
         }
 
+        // Daily schedule of the selected character: stops in time order joined in a loop (the
+        // day starts over); their times are drawn on screen below.
+        if let Some(stops) = match self.sel {
+            Selection::Entity(uid) => map.entity(uid).map(|e| &e.schedule).filter(|s| !s.is_empty()),
+            _ => None,
+        } {
+            let editing = self.route_edit.is_some() && self.route_kind == crate::app::RouteKind::Schedule;
+            let col = Color::new(1.0, 0.72, 0.25, if editing { 1.0 } else { 0.7 });
+            let c = |s: &rust2d_engine::entity::ScheduleStop| vec2((s.x as f32 + 0.5) * ts, (s.y as f32 + 0.5) * ts);
+            let mut order: Vec<&rust2d_engine::entity::ScheduleStop> = stops.iter().collect();
+            order.sort_by(|a, b| a.hour.total_cmp(&b.hour));
+            let n = order.len();
+            for k in 0..if n > 2 { n } else { n.saturating_sub(1) } {
+                let (a, b) = (c(order[k]), c(order[(k + 1) % n]));
+                // Dashed, to tell it from a patrol route.
+                let len = a.distance(b);
+                let dir = (b - a).normalize_or_zero();
+                let mut d = 0.0;
+                while d < len {
+                    let (p, q) = (a + dir * d, a + dir * (d + 7.0 * px).min(len));
+                    draw_line(p.x, p.y, q.x, q.y, 2.0 * px, col);
+                    d += 12.0 * px;
+                }
+                let mid = a.lerp(b, 0.5);
+                let h = dir * 6.0 * px;
+                let nrm = vec2(-h.y, h.x);
+                draw_triangle(mid + h, mid - h + nrm, mid - h - nrm, col);
+            }
+        }
+
         // Selection outline.
         if let Selection::Entity(uid) = self.sel {
             if let Some(e) = map.entity(uid) {
@@ -1070,6 +1100,19 @@ impl Editor {
                 }
             }
         }
+        // Schedule stops of the selected character: their times (drawn on screen, readable
+        // at any zoom; "in" = goes inside there).
+        if let Selection::Entity(uid) = self.sel {
+            for s in map.entity(uid).map_or(&[][..], |e| &e.schedule[..]) {
+                let q = cam.world_to_screen(vec2((s.x as f32 + 0.5) * ts, (s.y as f32 + 0.5) * ts));
+                let t = if s.inside { format!("{} in", s.time_text()) } else { s.time_text() };
+                let w = measure_text(&t, None, 16, 1.0).width;
+                let (bw, bh) = (w + 10.0, 20.0);
+                draw_rectangle(q.x - bw / 2.0, q.y - bh / 2.0, bw, bh, Color::new(0.25, 0.15, 0.02, 0.9));
+                draw_rectangle_lines(q.x - bw / 2.0, q.y - bh / 2.0, bw, bh, 1.5, Color::new(1.0, 0.72, 0.25, 1.0));
+                draw_text(&t, q.x - w / 2.0, q.y + 5.0, 16.0, WHITE);
+            }
+        }
         if self.cam.zoom >= 1.5 {
             for e in ents.iter().filter(|e| !e.name.is_empty()) {
                 let p = cam.world_to_screen(vec2(e.x, e.y));
@@ -1114,29 +1157,26 @@ fn zone_color(k: &ZoneKind) -> Color {
 }
 
 impl Editor {
-    /// Mouse handling while a patrol route is edited. Returns true if the event was used.
+    /// Mouse handling while a patrol route / schedule is edited. Returns true if the event was
+    /// used.
     fn route_edit_mouse(&mut self, tile: (i32, i32), ms: &Mouse, over_ui: bool) -> bool {
         const L: usize = 0;
         const R: usize = 1;
         let Some(uid) = self.route_edit else { return false };
+        let kind = self.route_kind;
         let Some(doc) = &mut self.doc else { return false };
-        // Editing ends when another object is selected or the character is gone.
-        if self.sel != Selection::Entity(uid) || doc.map.entity(uid).is_none_or(|e| e.patrol.is_none()) {
+        // Editing ends when another object is selected or the character (or its route) is gone.
+        if self.sel != Selection::Entity(uid) || route_points(&doc.map, uid, kind).is_none() {
             self.route_edit = None;
             self.route_drag = None;
             return false;
         }
         let inside = doc.map.in_bounds(tile.0, tile.1);
-        fn points(doc: &mut crate::doc::MapDoc, uid: u32) -> Option<&mut Vec<(i32, i32)>> {
-            doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.patrol.as_mut()).map(|r| &mut r.points)
-        }
         // Dragging a waypoint.
         if let Some((k, before)) = self.route_drag.take() {
             if ms.down[L] {
                 if inside {
-                    if let Some(p) = points(doc, uid).and_then(|p| p.get_mut(k)) {
-                        *p = tile;
-                    }
+                    route_edit(&mut doc.map, uid, kind, RouteOp::Move(k, tile));
                 }
                 self.route_drag = Some((k, before));
             } else {
@@ -1149,12 +1189,12 @@ impl Editor {
         }
         if ms.pressed[L] {
             let before = crate::doc::Objects::of(&doc.map);
-            let Some(pts) = points(doc, uid) else { return false };
+            let Some(pts) = route_points(&doc.map, uid, kind) else { return false };
             match pts.iter().position(|p| *p == tile) {
                 // On a waypoint: drag it.
                 Some(k) => self.route_drag = Some((k, before)),
                 None => {
-                    pts.push(tile);
+                    route_edit(&mut doc.map, uid, kind, RouteOp::Add(tile));
                     doc.record_objects(before, "route");
                 }
             }
@@ -1162,17 +1202,72 @@ impl Editor {
         }
         if ms.pressed[R] {
             let before = crate::doc::Objects::of(&doc.map);
-            if let Some(pts) = points(doc, uid) {
+            if let Some(pts) = route_points(&doc.map, uid, kind) {
                 // The waypoint on this tile, else the last one.
-                let k = pts.iter().rposition(|p| *p == tile).or(pts.len().checked_sub(1));
-                if let Some(k) = k {
-                    pts.remove(k);
+                if let Some(k) = pts.iter().rposition(|p| *p == tile).or(pts.len().checked_sub(1)) {
+                    route_edit(&mut doc.map, uid, kind, RouteOp::Remove(k));
                 }
             }
             doc.record_objects(before, "route");
             return true;
         }
         false
+    }
+}
+
+/// The tiles of a character's patrol route or schedule stops (None: it has none).
+fn route_points(map: &rust2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind) -> Option<Vec<(i32, i32)>> {
+    let e = map.entity(uid)?;
+    match kind {
+        crate::app::RouteKind::Patrol => e.patrol.as_ref().map(|r| r.points.clone()),
+        crate::app::RouteKind::Schedule => (!e.schedule.is_empty()).then(|| e.schedule.iter().map(|s| (s.x, s.y)).collect()),
+    }
+}
+
+enum RouteOp {
+    Add((i32, i32)),
+    Move(usize, (i32, i32)),
+    Remove(usize),
+}
+
+/// Adds / moves / removes a patrol waypoint or schedule stop. A new stop starts two hours
+/// after the latest one.
+fn route_edit(map: &mut rust2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind, op: RouteOp) {
+    let Some(e) = map.entities.iter_mut().find(|e| e.uid == uid) else { return };
+    match kind {
+        crate::app::RouteKind::Patrol => {
+            let Some(pts) = e.patrol.as_mut().map(|r| &mut r.points) else { return };
+            match op {
+                RouteOp::Add(t) => pts.push(t),
+                RouteOp::Move(k, t) => {
+                    if let Some(p) = pts.get_mut(k) {
+                        *p = t;
+                    }
+                }
+                RouteOp::Remove(k) => {
+                    if k < pts.len() {
+                        pts.remove(k);
+                    }
+                }
+            }
+        }
+        crate::app::RouteKind::Schedule => match op {
+            RouteOp::Add(t) => {
+                let hour = e.schedule.iter().map(|s| s.hour).max_by(f32::total_cmp).map_or(8.0, |h| ((h + 2.0) % 24.0).floor());
+                e.schedule.push(rust2d_engine::entity::ScheduleStop::new(hour, t.0, t.1));
+            }
+            RouteOp::Move(k, t) => {
+                if let Some(s) = e.schedule.get_mut(k) {
+                    (s.x, s.y) = t;
+                }
+            }
+            // Removing the last stop keeps the schedule (an empty one is "no schedule").
+            RouteOp::Remove(k) => {
+                if k < e.schedule.len() && e.schedule.len() > 1 {
+                    e.schedule.remove(k);
+                }
+            }
+        },
     }
 }
 

@@ -78,6 +78,9 @@ pub struct EntityState {
     /// Where a patrolling character is on its route.
     #[serde(default)]
     pub patrol: Option<PatrolState>,
+    /// A character with a schedule stopped following it (Schedule action / script).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub schedule_off: bool,
 }
 
 /// Progress of a patrolling character (saved, so a loaded game continues the route).
@@ -527,11 +530,21 @@ mod tests {
         w.set_entity_state(
             "village",
             7,
-            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None },
+            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None, schedule_off: false },
         );
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert!(back.flag("a"));
         assert_eq!(back.var("x"), -4);
         assert_eq!(back.entity_state("village", 7).unwrap().frame, 1);
+    }
+
+    #[test]
+    fn entity_states_of_old_saves_follow_their_schedule() {
+        let old: EntityState = ron::from_str("(active: true, frame: 0, x: 1.0, y: 2.0, facing: Down)").unwrap();
+        assert!(!old.schedule_off);
+        let off = EntityState { schedule_off: true, ..old.clone() };
+        let text = ron::to_string(&off).unwrap();
+        assert_eq!(ron::from_str::<EntityState>(&text).unwrap(), off);
+        assert!(!ron::to_string(&old).unwrap().contains("schedule_off"), "only written when stopped");
     }
 }
