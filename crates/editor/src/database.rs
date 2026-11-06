@@ -30,6 +30,7 @@ pub enum Tab {
     Skills,
     Spells,
     Recipes,
+    Achievements,
 }
 
 /// Inline "rename id" editor state; at most one rename is open at a time.
@@ -125,6 +126,7 @@ fn tab_icon(t: Tab) -> &'static str {
         Tab::Skills => ph::STAR,
         Tab::Spells => ph::MAGIC_WAND,
         Tab::Recipes => ph::HAMMER,
+        Tab::Achievements => ph::TROPHY,
         Tab::Project => ph::GEAR,
         Tab::Scripts => ph::CODE,
     }
@@ -177,7 +179,7 @@ fn list_ui<T: Clone>(
 pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let library = ed.library_mode;
     LIBRARY_MODE.with(|m| m.set(library));
-    if library && matches!(ed.db.tab, Tab::Quests | Tab::Project | Tab::Scripts) {
+    if library && matches!(ed.db.tab, Tab::Quests | Tab::Achievements | Tab::Project | Tab::Scripts) {
         ed.db.tab = Tab::Items;
     }
     // Wraps onto a second line in narrow windows (instead of widening the forms below).
@@ -194,11 +196,12 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             (Tab::Spells, "Spells"),
             (Tab::Recipes, "Recipes"),
             (Tab::Quests, "Quests"),
+            (Tab::Achievements, "Achievements"),
             (Tab::Project, "Project"),
             (Tab::Scripts, "Scripts"),
         ];
         for (t, l) in tabs {
-            if library && matches!(t, Tab::Quests | Tab::Project | Tab::Scripts) {
+            if library && matches!(t, Tab::Quests | Tab::Achievements | Tab::Project | Tab::Scripts) {
                 continue; // the library only holds assets
             }
             if ui.selectable_label(ed.db.tab == t, ui::t(tab_icon(t), l)).clicked() && ed.db.tab != t {
@@ -406,6 +409,14 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         |d| &mut d.id,
                     )
                 }
+                Tab::Achievements => list_ui(
+                    ui,
+                    &mut db.achievements,
+                    sel,
+                    |d| format!("{}{}  ({})", d.name, if d.hidden { " (hidden)" } else { "" }, d.id),
+                    |ids| rust2d_engine::achievements::AchievementDef::new(&unique("achievement", ids), "New achievement", "", SpriteRef::default(), Vec::new()),
+                    |d| &mut d.id,
+                ),
                 Tab::Quests => list_ui(
                     ui,
                     &mut db.quests,
@@ -514,6 +525,11 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Recipes => {
                         if let Some(d) = db.recipes.get_mut(i) {
                             recipe_form(ui, d, &mut cx);
+                        }
+                    }
+                    Tab::Achievements => {
+                        if let Some(d) = db.achievements.get_mut(i) {
+                            achievement_form(ui, d, &mut cx);
                         }
                     }
                     Tab::Structures => {
@@ -2320,6 +2336,32 @@ fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &m
     ui.separator();
     ui.heading("Icon");
     widgets::sprite_field(ui, "skill_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
+}
+
+fn achievement_form(ui: &mut egui::Ui, d: &mut rust2d_engine::achievements::AchievementDef, cx: &mut Cx) {
+    ui.heading("Achievement");
+    egui::Grid::new("achievement").num_columns(2).show(ui, |ui| {
+        ui.label("Id");
+        ui.add(egui::TextEdit::singleline(&mut d.id).desired_width(200.0))
+            .on_hover_text("Used by the 'Unlock achievement' action and scripts (unlock_achievement(\"id\")). Changing it does not update them, and players' unlocks are kept by id.");
+        ui.end_row();
+        ui.label("Name");
+        ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(320.0));
+        ui.end_row();
+        ui.label("Hidden");
+        ui.checkbox(&mut d.hidden, "a secret: shown as \"???\" until unlocked");
+        ui.end_row();
+    });
+    ui.label("Description (shown in the Achievements page of the menus)");
+    text_box(ui, &mut d.description, 2, "");
+    ui.separator();
+    ui.heading("Unlocked when");
+    ui.weak("All of these hold (checked twice a second while playing): quests, flags, variables, defeated characters (the bestiary counts), level, items, a script condition... Without conditions only the 'Unlock achievement' action or unlock_achievement(id) unlocks it.");
+    widgets::conditions_ui(ui, &format!("ach_{}", d.id), &mut d.conditions, cx.refs);
+    ui.separator();
+    ui.heading("Icon");
+    widgets::sprite_field(ui, "ach_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
+    ui.weak("Unlocks belong to the player, not to a save game: they are kept in achievements.ron next to the game's settings (play-tests use the same file; Reset achievements in the game's menu clears it).");
 }
 
 fn recipe_form(ui: &mut egui::Ui, d: &mut rust2d_engine::crafting::RecipeDef, cx: &mut Cx) {

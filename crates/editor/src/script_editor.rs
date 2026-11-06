@@ -42,6 +42,7 @@ pub enum Arg {
     Event,
     /// A crafting recipe id.
     Recipe,
+    Achievement,
     /// A crafting station (named by recipes).
     Station,
     Text,
@@ -163,6 +164,8 @@ pub const API: &[ApiFn] = api! {
     "patrol"(target: Target) "Starts a character's own patrol route (queued)";
     "patrol"(target: Target, points: List) "Patrols [[x, y], ...] tile waypoints (queued)";
     "stop_patrol"(target: Target) "Stops a character's patrol (queued)";
+    "unlock_achievement"(id: Achievement) "Unlocks an achievement for the player (queued; kept across save games)";
+    "achievement_unlocked"(id: Achievement) "Whether the player has unlocked an achievement";
     "open_crafting"(station: Station) "Opens the crafting window with the station's recipes (queued)";
     "open_crafting"(station: Station, title: Text) "Opens the crafting window with a title, e.g. \"Alchemy table\" (queued)";
     "can_craft"(recipe: Recipe) "Whether the player has the ingredients (and skill) for a recipe";
@@ -488,6 +491,7 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                 Some(Arg::Func) => known.functions.iter().map(|f| c(f, "script function")).collect(),
                 Some(Arg::Dir) => ["up", "down", "left", "right"].iter().map(|d| c(d, "direction")).collect(),
                 Some(Arg::Character) => db.characters.iter().map(|q| c(&q.id, &q.name)).collect(),
+                Some(Arg::Achievement) => db.achievements.iter().map(|q| c(&q.id, &q.name)).collect(),
                 Some(Arg::Recipe) => db.recipes.iter().map(|q| c(&q.id, db.item(&q.result).map_or(q.result.as_str(), |d| d.name.as_str()))).collect(),
                 Some(Arg::Station) => {
                     let mut v: Vec<String> = db.recipes.iter().map(|r| r.station.clone()).filter(|s| !s.is_empty()).collect();

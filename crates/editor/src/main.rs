@@ -858,6 +858,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "skills" => Tab::Skills,
                 "spells" => Tab::Spells,
                 "recipes" => Tab::Recipes,
+                "achievements" => Tab::Achievements,
                 _ => Tab::Items,
             };
             // tab KIND N, or tab KIND ID (sheets, tilesets, items, props, characters).
@@ -869,6 +870,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 Tab::Props => db.props.iter().position(|d| d.id == arg(2)),
                 Tab::Characters => db.characters.iter().position(|d| d.id == arg(2)),
                 Tab::Recipes => db.recipes.iter().position(|d| d.id == arg(2)),
+                Tab::Achievements => db.achievements.iter().position(|d| d.id == arg(2)),
                 _ => None,
             };
             ed.db.sel = by_id.unwrap_or(num(2) as usize);

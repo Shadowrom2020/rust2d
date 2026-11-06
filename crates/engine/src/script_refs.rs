@@ -29,6 +29,7 @@ pub enum IdKind {
     Character,
     /// A crafting recipe.
     Recipe,
+    Achievement,
 }
 
 impl IdKind {
@@ -45,6 +46,7 @@ impl IdKind {
             IdKind::Sheet => "sprite sheet",
             IdKind::Character => "character",
             IdKind::Recipe => "recipe",
+            IdKind::Achievement => "achievement",
         }
     }
     /// The definition kind renamed together with this id kind.
@@ -96,6 +98,8 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("effect", 0, IdKind::Sheet),
     ("defeated_count", 0, IdKind::Character),
     ("can_craft", 0, IdKind::Recipe),
+    ("unlock_achievement", 0, IdKind::Achievement),
+    ("achievement_unlocked", 0, IdKind::Achievement),
 ];
 
 /// A string literal argument of a function call.
@@ -464,6 +468,7 @@ pub fn check_script(src: &str, db: &Database, maps: &[String], spawns: &HashMap<
             IdKind::Sheet => db.sheet(v).is_some(),
             IdKind::Character => db.character(v).is_some(),
             IdKind::Recipe => db.recipe(v).is_some(),
+            IdKind::Achievement => db.achievement(v).is_some(),
         };
         if !known {
             let extra = match kind {
