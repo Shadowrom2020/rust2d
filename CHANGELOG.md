@@ -3,7 +3,7 @@
 All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.5.0 — 2026-11-06
 
 ### Gameplay
 - **Weather**: each map has a weather (map settings: clear, rain, snow or fog, with a strength).
