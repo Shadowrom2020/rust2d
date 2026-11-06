@@ -31,6 +31,12 @@ All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and edi
   them), cures when poisoned or burning, buffs in a fight; a bow the player gave them shoots arrows from
   their bag (the HUD row counts them). Characters can be marked *can't be given gear*. The
   guard's dialog in the example offers "Let me see your gear".
+- **Portrait images**: characters can have a drawn portrait (*Database → Characters → Portrait*,
+  a placed character's own in the inspector, the player's in *Project*) shown in dialogs and the
+  companions' HUD rows instead of the automatic bust; *New blank portrait* opens the pixel editor
+  on a 64 x 64 frame. **Moods**: more portraits per character by name, shown with
+  `say(name, text, #{ mood: "worried" })`, the new **Set mood** action or `mood(name, mood)`.
+  The example's elder (calm and worried) and Tilda have drawn portraits.
 - Gamepad: LB no longer opens the character window from the map (RB and Y do); it opens the
   companion orders.
 - Example: the Red Potion and a new **Bandage** (Tilda, 6 coins) work on the guard. The Red

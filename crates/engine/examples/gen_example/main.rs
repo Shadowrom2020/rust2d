@@ -441,7 +441,10 @@ fn village() -> Map {
             TriggerOn::Interact,
             vec![not(flag("quest_accepted"))],
             vec![
-                dialog("Elder Rowan", "Ah, a traveller! Welcome to Emberbrook, {player}. Strange lights have been seen in Whisperwood, east of here."),
+                dialog("Elder Rowan", "Ah, a traveller! Welcome to Emberbrook, {player}."),
+                // Set mood: his "worried" portrait until the mood is cleared (or the talk ends).
+                Action::Mood { target: "self".into(), mood: "worried".into() },
+                dialog("Elder Rowan", "Strange lights have been seen in Whisperwood, east of here."),
                 Action::Choice {
                     speaker: "Elder Rowan".into(),
                     text: "Would you investigate the old shrine for us?".into(),
@@ -453,6 +456,7 @@ fn village() -> Map {
                     then: vec![
                         Action::SetFlag { name: "quest_accepted".into(), value: true },
                         quest("strange_lights", QuestOp::Start, 0),
+                        Action::Mood { target: "self".into(), mood: String::new() },
                         dialog("Elder Rowan", "Wonderful! The gate key is in the chest in my house, just north of here."),
                     ],
                     otherwise: vec![dialog("Elder Rowan", "I understand. Come back if you change your mind.")],
@@ -612,6 +616,8 @@ fn shop() -> Map {
     // Tilda behind her counter, with her own stock and prices.
     let merchant = b.entity(EntityKind::Character, "merchant_f", 6, 3);
     merchant.name = "tilda".into();
+    // Her own drawn portrait (placed characters can override their definition's).
+    merchant.portrait = Some(SpriteRef::new("portraits", art::portrait::TILDA));
     merchant.facing = rustpg2d_engine::entity::Facing::Down;
     merchant.shop = Some(ShopSpec {
         title: "Tilda's Wares".into(),
@@ -1144,6 +1150,8 @@ fn database() -> Database {
         equipment: Default::default(),
         inventory: Vec::new(),
         gear_locked: false,
+        portrait: Default::default(),
+        moods: Default::default(),
     };
     let item = |id: &str, name: &str, desc: &str, frame: u32, consumable: bool, on_use: Vec<Trigger>| ItemDef {
         id: id.into(),
@@ -1269,6 +1277,8 @@ fn database() -> Database {
             SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_chain", "sprites/ov_chain.png", 32, 48) },
             SheetDef::new("props", "sprites/props.png", 32, 32),
             SheetDef::new("items", "sprites/items.png", 32, 32),
+            // Drawn dialog portraits (Database > Characters > Portrait): the elder, Tilda.
+            SheetDef::new("portraits", "sprites/portraits.png", 64, 64),
             // Spell effects (the Fireball script).
             SheetDef::new("fireball", "sprites/fireball.png", 32, 32),
             SheetDef::new("explosion", "sprites/explosion.png", 64, 64),
@@ -1456,7 +1466,12 @@ fn database() -> Database {
         ],
         characters: vec![
             hero,
-            ch("elder", "Elder", "", 40.0, Behavior::Static),
+            // A drawn portrait with a "worried" mood (the other characters show their bust).
+            CharacterDef {
+                portrait: sprite("portraits", art::portrait::ELDER),
+                moods: [("worried".to_string(), sprite("portraits", art::portrait::ELDER_WORRIED))].into_iter().collect(),
+                ..ch("elder", "Elder", "", 40.0, Behavior::Static)
+            },
             ch("villager", "Villager", "", 35.0, Behavior::Wander { radius: 3.0 }),
             // The guard can be hurt (he can come along as a companion: guard_talk()).
             CharacterDef { max_hp: 8, ..ch("guard", "Town Guard", "", 40.0, Behavior::Static) },
@@ -1972,6 +1987,7 @@ fn main() {
     slime(&out);
     props(&out);
     items(&out);
+    portraits(&out);
     fireball(&out);
     explosion(&out);
     magic_burst(&out);
@@ -2029,6 +2045,7 @@ fn main() {
         // Dialog boxes show the speaker's portrait (found from the speaker's name).
         dialog_portraits: true,
         companion_down: Default::default(),
+        player_portrait: Default::default(),
         },
         db: database(),
     };

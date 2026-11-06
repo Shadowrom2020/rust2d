@@ -284,9 +284,7 @@ impl Game {
             draw_rectangle_lines(r.x, r.y, r.w, r.h, if lit { 2.5 } else { 1.5 }, if lit { Color::new(0.5, 1.0, 0.55, 1.0) } else { gold });
             let head = Rect::new(r.x + 3.0, r.y + 3.0, r.h - 6.0, r.h - 6.0);
             draw_rectangle(head.x, head.y, head.w, head.h, Color::new(0.0, 0.0, 0.0, 0.45));
-            if !e.appearance.body.is_empty() {
-                self.draw_bust(&e.appearance, &e.equipment, head);
-            }
+            self.draw_entity_portrait(e.uid, head);
             let name = self.entity_display_name(e.uid).unwrap_or_else(|| e.name.clone());
             let tx = head.right() + 6.0;
             draw_text(&name, tx, r.y + 14.0, 16.0, Color::new(1.0, 0.86, 0.45, 1.0));

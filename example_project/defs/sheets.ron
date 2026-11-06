@@ -47,6 +47,12 @@
         frame_h: 32,
     ),
     (
+        id: "portraits",
+        image: "sprites/portraits.png",
+        frame_w: 64,
+        frame_h: 64,
+    ),
+    (
         id: "fireball",
         image: "sprites/fireball.png",
         frame_w: 32,

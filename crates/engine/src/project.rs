@@ -49,6 +49,10 @@ pub struct ProjectConfig {
     /// What happens to a companion at 0 HP.
     #[serde(default)]
     pub companion_down: DownRule,
+    /// The player's portrait in dialogs (empty = the player character's, else the head and
+    /// shoulders of the player's model).
+    #[serde(default, skip_serializing_if = "crate::defs::SpriteRef::is_empty")]
+    pub player_portrait: crate::defs::SpriteRef,
 }
 
 /// What happens to a companion knocked down to 0 HP (`ProjectConfig::companion_down`).
@@ -178,6 +182,7 @@ impl ProjectConfig {
             progression: Default::default(),
             dialog_portraits: true,
             companion_down: Default::default(),
+            player_portrait: Default::default(),
         }
     }
 }

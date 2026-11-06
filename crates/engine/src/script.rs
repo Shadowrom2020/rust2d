@@ -278,6 +278,21 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         speaker: if entity < 0 { String::new() } else { format!("{{uid:{entity}}}") },
         text: text.into()
     })));
+    // say(speaker, "...", #{ mood: "worried" }): the line with a mood portrait of the speaker.
+    fn say_with(c: &mut Ctx, speaker: String, text: &str, opts: &rhai::Map) {
+        let mood = opts.get("mood").map(|m| m.to_string()).unwrap_or_default();
+        if !mood.is_empty() {
+            c.actions.push(Action::Mood { target: speaker.clone(), mood });
+        }
+        c.actions.push(Action::Dialog { speaker: speaker.clone(), text: text.into() });
+        if opts.contains_key("mood") {
+            c.actions.push(Action::Mood { target: speaker, mood: String::new() });
+        }
+    }
+    engine.register_fn("say", with!(ctx, |c, speaker: &str, text: &str, opts: rhai::Map| say_with(&mut c, speaker.into(), text, &opts)));
+    engine.register_fn("say", with!(ctx, |c, entity: i64, text: &str, opts: rhai::Map| say_with(&mut c, if entity < 0 { String::new() } else { format!("{{uid:{entity}}}") }, text, &opts)));
+    // mood(name, "worried"): the character's portrait shows that mood until changed ("" = usual).
+    engine.register_fn("mood", with!(ctx, |c, t: &str, m: &str| c.actions.push(Action::Mood { target: t.into(), mood: m.into() })));
     engine.register_fn("choice", with!(ctx, |c, text: &str, options: Array, var: &str| {
         let options = options.into_iter().map(|o| o.to_string()).collect();
         c.actions.push(Action::Choice { speaker: String::new(), text: text.into(), options, var: var.into() })

@@ -1650,6 +1650,8 @@ fn characters(x: &mut Extras) {
         equipment: Default::default(),
         inventory: Vec::new(),
         gear_locked: false,
+        portrait: Default::default(),
+        moods: Default::default(),
     };
     let foe = |mut d: CharacterDef, hp: i32, damage: i32, xp: u32| {
         d.description = match d.id.as_str() {

@@ -528,6 +528,10 @@ pub enum Action {
     /// Opens a companion's window (its gear and bag next to the player's inventory) once the
     /// running event is over.
     OpenCompanion { target: TargetName },
+    /// Sets the mood a character's portrait shows (one of its definition's mood portraits; ""
+    /// = its usual one) until changed or the running event is over. `target`: a character on
+    /// the map, or a character definition's id or name.
+    Mood { target: TargetName, mood: String },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -637,6 +641,7 @@ impl Action {
             Action::HealCharacter { .. } => "Heal character",
             Action::CompanionOrder { .. } => "Companion order",
             Action::OpenCompanion { .. } => "Open companion window",
+            Action::Mood { .. } => "Set mood",
         }
     }
 
@@ -706,6 +711,7 @@ impl Action {
             Action::HealCharacter { target: "self".into(), amount: 2 },
             Action::CompanionOrder { target: "self".into(), order: "stay".into() },
             Action::OpenCompanion { target: "self".into() },
+            Action::Mood { target: "self".into(), mood: "worried".into() },
         ]
     }
 }

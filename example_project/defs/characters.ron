@@ -60,6 +60,16 @@
             weapon: None,
             offhand: None,
         ),
+        portrait: (
+            sheet: "portraits",
+            frame: 0,
+        ),
+        moods: {
+            "worried": (
+                sheet: "portraits",
+                frame: 1,
+            ),
+        },
     ),
     (
         id: "villager",
