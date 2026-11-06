@@ -3,7 +3,7 @@
 All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.6.0 — 2026-11-06
 
 ### Gameplay
 - **Healing companions**: a *Heal* spell or a healing item set to *Use on: Player or companion*
