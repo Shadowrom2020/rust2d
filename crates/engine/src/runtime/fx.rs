@@ -50,7 +50,19 @@ impl Game {
 
     /// Sends an animated sprite from the player to tile point `tile`; `function(x, y)` runs when
     /// it arrives.
+    /// Applies a sprite's named animation (`FxSprite::tag`) from its sheet's tags.
+    fn resolve_tag(&self, mut sprite: FxSprite) -> FxSprite {
+        if !sprite.tag.is_empty() {
+            match self.project.db.sheet(&sprite.sheet).and_then(|d| d.tags.iter().find(|t| t.name == sprite.tag)) {
+                Some(t) => (sprite.first, sprite.last, sprite.fps) = (t.first, t.last.max(t.first), t.fps.max(0.1)),
+                None => eprintln!("[fx] sheet '{}' has no animation '{}'", sprite.sheet, sprite.tag),
+            }
+        }
+        sprite
+    }
+
     pub(super) fn spawn_fly(&mut self, sprite: FxSprite, tile: Vec2, speed_tiles: f32, function: String) {
+        let sprite = self.resolve_tag(sprite);
         if !self.assets.sheets.contains_key(&sprite.sheet) {
             eprintln!("[fx] fly: unknown sprite sheet '{}'", sprite.sheet);
         }
@@ -66,6 +78,7 @@ impl Game {
 
     /// Plays an animated sprite once, centered on tile point `tile`.
     pub(super) fn spawn_effect(&mut self, sprite: FxSprite, tile: Vec2) {
+        let sprite = self.resolve_tag(sprite);
         if !self.assets.sheets.contains_key(&sprite.sheet) {
             eprintln!("[fx] effect: unknown sprite sheet '{}'", sprite.sheet);
         }
@@ -190,7 +203,7 @@ impl Game {
             .iter()
             .map(|f| match f.kind {
                 FxKind::Fly { .. } => format!("fly:{}@{:.1},{:.1}", f.sprite.sheet, f.pos.x / ts, f.pos.y / ts),
-                FxKind::Once => format!("once:{}", f.sprite.sheet),
+                FxKind::Once => format!("once:{}[{}-{}@{}fps]", f.sprite.sheet, f.sprite.first, f.sprite.last, f.sprite.fps),
             })
             .chain(self.timed_lights.iter().map(|l| format!("light@{:.1},{:.1}", l.pos.x / ts, l.pos.y / ts)))
             .collect()

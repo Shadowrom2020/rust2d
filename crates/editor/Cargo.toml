@@ -12,5 +12,9 @@ egui-phosphor = "0.9"
 anyhow.workspace = true
 ron.workspace = true
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+# File › Import…: Tiled maps (.tmx XML, .tmj / Aseprite JSON through rhai), compressed tile data.
+quick-xml = "0.41"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+rhai.workspace = true
 # AppImage / Flatpak exports (package.rs).
 rust2d-packaging.workspace = true

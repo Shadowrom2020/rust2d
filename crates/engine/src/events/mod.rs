@@ -520,6 +520,10 @@ pub struct FxSprite {
     /// *Effect*: shakes the screen this many seconds when it starts (0 = no shake).
     #[serde(skip_serializing_if = "is_zero_f32")]
     pub shake: f32,
+    /// A named animation of the sheet (`SheetDef::tags`): replaces `first` / `last` / `fps`
+    /// when the game plays it ("" = use them as they are).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tag: String,
 }
 
 fn is_zero_f32(v: &f32) -> bool {
@@ -528,7 +532,7 @@ fn is_zero_f32(v: &f32) -> bool {
 
 impl Default for FxSprite {
     fn default() -> Self {
-        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70], shake: 0.0 }
+        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70], shake: 0.0, tag: String::new() }
     }
 }
 

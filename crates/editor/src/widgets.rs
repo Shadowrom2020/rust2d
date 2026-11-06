@@ -626,6 +626,8 @@ pub struct Refs {
     pub spells: Vec<String>,
     /// Sprite sheet ids (effects).
     pub sheets: Vec<String>,
+    /// Named animations of sprite sheets (Aseprite tags).
+    pub sheet_tags: HashMap<String, Vec<rust2d_engine::defs::SheetTag>>,
 }
 
 /// Placeholders understood in dialog / choice texts (and quest texts).
@@ -704,6 +706,20 @@ fn speaker_field(ui: &mut Ui, id: &str, speaker: &mut String, refs: &Refs) {
 /// The animated sprite of the Fly / Effect actions.
 fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs, shake: bool) {
     labeled(ui, "sheet", |ui| suggest(ui, &format!("{id}/sheet"), &mut s.sheet, &refs.sheets, 120.0));
+    // Named animations of the sheet (e.g. Aseprite tags) fill in the frames and speed.
+    if let Some(tags) = refs.sheet_tags.get(&s.sheet).filter(|t| !t.is_empty()) {
+        labeled(ui, "animation", |ui| {
+            let current = tags.iter().find(|t| (t.first, t.last) == (s.first, s.last)).map_or("(frames below)".to_string(), |t| t.name.clone());
+            egui::ComboBox::from_id_salt(format!("{id}/tag")).selected_text(current).show_ui(ui, |ui| {
+                for t in tags {
+                    if ui.selectable_label((t.first, t.last) == (s.first, s.last), format!("{}  ({}–{}, {} fps)", t.name, t.first, t.last, t.fps)).clicked() {
+                        (s.first, s.last, s.fps) = (t.first, t.last, t.fps);
+                        s.tag.clear();
+                    }
+                }
+            });
+        });
+    }
     labeled(ui, "frames", |ui| {
         ui.add(egui::DragValue::new(&mut s.first).range(0..=999));
         ui.label("to");
