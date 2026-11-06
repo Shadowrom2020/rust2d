@@ -500,6 +500,7 @@ mod tests {
         skills: Default::default(),
         progression: Default::default(),
         dialog_portraits: true,
+        companion_down: Default::default(),
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);

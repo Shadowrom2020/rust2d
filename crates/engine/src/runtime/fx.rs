@@ -104,7 +104,7 @@ impl Game {
             let e = &mut self.loaded.entities[i];
             if e.active && !e.hostile && e.max_hp > 0 && e.body.pos.distance(center) <= r {
                 e.hp = (e.hp + amount).min(e.max_hp);
-                self.sync_companion_hp(i);
+                self.companion_healed(i);
             }
         }
     }

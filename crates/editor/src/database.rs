@@ -1820,6 +1820,24 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         ui.checkbox(&mut c.dialog_portraits, "show the speaker's portrait in dialogs")
             .on_hover_text("Found from the speaker's name: the player (\"{player}\" or the player's name), the trigger's owner ({self}), a character on the map or a character definition with that name. Narration and signs (no matching character) have none.");
         ui.end_row();
+        ui.label("Companions at 0 HP");
+        ui.horizontal(|ui| {
+            use rustpg2d_engine::project::DownRule;
+            egui::ComboBox::from_id_salt("companion_down").selected_text(c.companion_down.label()).show_ui(ui, |ui| {
+                for r in [DownRule::StaysDown, DownRule::GetsUp { seconds: 30.0 }, DownRule::GoesHome] {
+                    let on = std::mem::discriminant(&c.companion_down) == std::mem::discriminant(&r);
+                    if ui.selectable_label(on, r.label()).clicked() && !on {
+                        c.companion_down = r;
+                    }
+                }
+            })
+            .response
+            .on_hover_text("A knocked-down companion lies where it fell, enemies leave it alone; any heal (potion, spell, Heal character) gets it up. Leaving the map asks whether to leave it behind (it then goes home).");
+            if let DownRule::GetsUp { seconds } = &mut c.companion_down {
+                ui.add(egui::DragValue::new(seconds).range(1.0..=600.0).suffix(" s"));
+            }
+        });
+        ui.end_row();
     });
     ui.weak("Tile size changes need a restart of the editor.");
     ui.separator();

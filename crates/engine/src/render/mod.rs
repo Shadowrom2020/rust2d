@@ -266,10 +266,10 @@ impl Assets {
     /// Like [`draw_frame_colored`](Self::draw_frame_colored), scaled into `dest` (portraits).
     /// Like [`draw_frame_colored`](Self::draw_frame_colored), centered at `center` and rotated
     /// by `angle` radians (clockwise on screen): characters lying in a sideways bed.
-    pub fn draw_frame_colored_rotated(&self, sheet: &str, frame: u32, center: Vec2, angle: f32, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
+    pub fn draw_frame_colored_rotated(&self, sheet: &str, frame: u32, center: Vec2, angle: f32, (skin, hair): (Option<[u8; 3]>, Option<[u8; 3]>), tint: Color) -> bool {
         let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
         let pos = vec2((center.x - s.frame_w / 2.0).round(), (center.y - s.frame_h / 2.0).round());
-        draw_texture_ex(&tex, pos.x, pos.y, WHITE, DrawTextureParams { source: Some(s.src_rect(frame)), rotation: angle, ..Default::default() });
+        draw_texture_ex(&tex, pos.x, pos.y, tint, DrawTextureParams { source: Some(s.src_rect(frame)), rotation: angle, ..Default::default() });
         true
     }
 

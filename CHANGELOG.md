@@ -12,6 +12,11 @@ All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and edi
   work too; Esc cancels, nothing is spent). Items can
   also be *for companions only*. Companions get HUD rows with their head and HP under the
   player's panel. New action **Heal character** and script `heal_npc(name, amount)`.
+- **Knocked-down companions**: at 0 HP a companion falls and lies where it fell (greyed, *DOWN*
+  in its HUD row) instead of going home; enemies ignore it and any heal gets it back up. Leaving
+  the map asks "Leave … behind?" (it then limps home); save games keep it down in its place.
+  *Project settings → Companions at 0 HP*: stays down until healed (default), gets up after N
+  seconds with 1 HP, or goes home at once (the old behaviour).
 - Example: the Red Potion and a new **Bandage** (Tilda, 6 coins) work on the guard. The Red
   Potion no longer says "You're already at full health" (it may be meant for someone else).
 

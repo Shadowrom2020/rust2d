@@ -239,7 +239,7 @@ impl Game {
         let e = &mut self.loaded.entities[i];
         e.hp = (e.hp + amount).min(e.max_hp);
         self.ui.toast(format!("{name} +{amount} HP"));
-        self.sync_companion_hp(i);
+        self.companion_healed(i);
     }
 
     /// `Action::HealCharacter`: `"player"` heals the player.
@@ -284,9 +284,9 @@ impl Game {
             draw_rectangle(tx - 1.0, by - 1.0, bw + 2.0, 9.0, Color::new(0.0, 0.0, 0.0, 0.7));
             let col = if share > 0.5 { Color::new(0.3, 0.8, 0.35, 1.0) } else if share > 0.25 { Color::new(0.9, 0.7, 0.2, 1.0) } else { Color::new(0.9, 0.2, 0.2, 1.0) };
             draw_rectangle(tx, by, bw * share, 7.0, col);
-            let hp = format!("{}/{}", e.hp, e.max_hp);
+            let (hp, col) = if self.is_down(i) { ("DOWN".to_string(), Color::new(1.0, 0.35, 0.35, 1.0)) } else { (format!("{}/{}", e.hp, e.max_hp), LIGHTGRAY) };
             let w = measure_text(&hp, None, 14, 1.0).width;
-            draw_text(&hp, r.right() - w - 6.0, r.y + 14.0, 14.0, LIGHTGRAY);
+            draw_text(&hp, r.right() - w - 6.0, r.y + 14.0, 14.0, col);
         }
     }
 
