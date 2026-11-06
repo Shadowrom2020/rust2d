@@ -218,6 +218,34 @@ syntax errors.
 - **Renames**: renaming an item, map, sound or sprite sheet in the editor also updates the ids in
   scripts, where they are passed directly to an API function.
 
+### Trying scripts while the game runs
+
+Play-tests started from the editor (F5 / F6, *Play as cutscene*) run the game with `--dev`:
+
+- **Hot reload**: saving a script (Ctrl+S in the script editor, or any editor writing
+  `scripts/*.rhai`) reloads all scripts within half a second; a toast says *Scripts reloaded*.
+  Triggers, conditions and spells use the new functions from then on. If a file has an error,
+  the game keeps running the previous scripts and shows the error (toast and console) until it
+  is fixed.
+- **Console** (F4): pauses the game and takes commands. `call FN` runs a script function,
+  `give ITEM [N]` / `take ITEM [N]`, `flag NAME on|off`, `var NAME V`, `settime H`,
+  `teleport MAP SPAWN`, `hp N`, `xp N`, `effects`, `status`, `reload`, `clear`, `help`. Any other
+  line is run as Rhai with your functions available, and its value is printed:
+
+  ```text
+  > item_count("coin")
+  12
+  > set_flag("shrine_lit", true)
+  > give_item("potion", 3); quest_stage("pest_control")
+  1
+  ```
+
+  `print(...)` output and script errors appear in the console too. Up / Down bring back earlier
+  lines, Esc clears the line (and closes the console when it is empty), F4 closes it. Actions
+  that take time (dialogs, teleports, walking) run once the console is closed.
+
+Exported games ignore `--dev`: players never get the console.
+
 ---
 
 ## API reference

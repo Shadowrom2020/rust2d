@@ -15,6 +15,13 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   Cut, Copy and Paste. Editor script commands `region`, `copy`, `cut`, `paste`, `unpaste`;
   `status` prints `sel=`, `clipboard=` and `pasting=`.
 - Structure ghosts (Structures tool and paste preview) draw characters with all their layers.
+- **Script hot reload and developer console**: play-tests from the editor start the game with
+  the new `--dev` option. Saved scripts reload in the running game within half a second; a
+  script with an error leaves the previous scripts running and shows the error in a toast and
+  the console. F4 opens a console that pauses the game: `call`, `give`, `take`, `flag`, `var`,
+  `settime`, `teleport`, `hp`, `xp`, `effects`, `status`, `reload`, `clear`, `help`, and any other
+  line runs as Rhai with the project's functions. Exported games ignore `--dev`. Autoplay has
+  `console LINE`, and `status` starts with `dev=`; the editor script has `play [start]`.
 
 ## 0.3.0 — 2026-11-06
 

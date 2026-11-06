@@ -118,7 +118,7 @@ copying the elder and pasting gives a selectable `elder_2`; `open forest` keeps 
 forest paste and the region inspector. Compile-checked only: the Ctrl+C / X / V keys (the editor
 script cannot press keys), the Edit menu entries and the inspector buttons (egui clicks).
 
-### [ ] Script hot reload and in-game console — `feature/live-scripts`
+### [x] Script hot reload and in-game console — `feature/live-scripts`
 
 **Goal.** Edit a script while the play-test runs and see it update; a console to poke the game.
 
@@ -129,8 +129,32 @@ autoplay vocabulary (`call FN`, `settime H`, `give ITEM N`, `flag NAME on|off`, 
 `teleport MAP SPAWN`, `hp N`, `xp N`, `effects`, `status`). Only with `--dev`, so exported games
 don't expose it.
 
-**Verify.** Autoplay with `--dev`: change a script file from the test harness mid-run, `call` it,
-output changed; console screenshot; the released game ignores F4.
+**Decided while building.** Reloading uses a new `ScriptHost::reload_dir`: it compiles every
+file first and swaps the scripts only if all compile, so a half-typed edit never removes working
+functions; the watch compares mtime and size, so new and deleted files count too. The console
+pauses the game while open (like the character creator: typing must not move the player).
+Commands that only change state run at once; actions that take time (dialogs, teleports,
+walking, from `teleport` or a called script) go to the action runner and run once the console is
+closed. Instant actions run through a separate `ActionRunner`, because the runner (not
+`execute`) handles items, flags and variables. Any line that isn't a command is evaluated as Rhai
+with the project's functions (`ScriptHost::eval`), and the value is printed. Script `print`
+output is captured for the console (`take_printed`). Extra commands: `take`, `reload`, `clear`,
+`help`. Up / Down recall earlier lines; Esc clears the line first, then closes; F4 closes. The
+console uses the raw F4 key, not a rebindable action, so it never appears on the Controls page.
+A released game (the bundle next to the executable) refuses `--dev` with a message. Autoplay
+`console LINE` runs a line directly; `status` starts with `dev=off` or `dev=on console=…
+reloads=N reload_error=B`. Code in `runtime/dev.rs`.
+
+**Verify.** Done: unit tests for reload (a broken edit keeps the old function, a fix and a new
+file load) and console evaluation. Autoplay with `--dev` while the test harness rewrote a script
+three times: `call probe` printed v1, then v2 after the edit, then v2 again with
+`reload_error=true` after a syntax error (error toast screenshot), then v3 after the fix.
+Console driven by keys (`press f4`, `type`, `press enter`) from a quick save: `give potion 2`,
+`flag`, a Rhai expression, `set_var(…)`, a syntax error, `xp 50`, `help`, history with Up all
+work (screenshots); `teleport forest cave` happens after Esc closes the console; `call
+guard_talk` shows its dialog after closing. A play-test started by the editor (new editor script command `play`, with `RUST2D_AUTOPLAY` inherited by the game) reports `dev=on`. Without `--dev` F4 does nothing; the exported game
+started with `--dev` prints the refusal and reports `dev=off`. Not checked by a script: saving
+from the editor's script editor during a real play-test (the same file write as the harness).
 
 ### [ ] Auto-tiling terrains — `feature/autotile`
 

@@ -245,6 +245,9 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "save" => ed.save_all(),
+        // play [start]: F5 (from the camera / selected spawn) or F6 (project start); the game
+        // inherits the environment, so RUST2D_AUTOPLAY can drive the play-test
+        "play" => ed.play(arg(1) != "start"),
         // Same code paths as the file dialogs, without the dialog.
         "import" => {
             let purpose = match arg(1) {
