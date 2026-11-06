@@ -5,6 +5,7 @@
 //! pixel per tile replaces the per-tile drawing, so even a 1024x1024 map renders fast.
 
 pub mod character;
+pub mod fish;
 pub mod lighting;
 pub mod recolor;
 pub mod weather;

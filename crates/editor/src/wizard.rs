@@ -210,6 +210,7 @@ impl Editor {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
             }),
             WKind::Tileset | WKind::Sheet | WKind::Structure => {}
         }

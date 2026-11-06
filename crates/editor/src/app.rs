@@ -2573,6 +2573,12 @@ impl Editor {
                 ui.heading(format!("{} zone #{}", z.kind.label(), z.uid));
                 zone_fields(ui, z, refs, doc.map.width, doc.map.height);
                 // Spawners pass their loot table on to the characters they spawn.
+                if let ZoneKind::FishingSpot { .. } = &z.kind {
+                    ui.separator();
+                    ui.heading("Catch");
+                    let table = z.loot.get_or_insert_with(Vec::new);
+                    widgets::loot_ui(ui, &format!("zfish{uid}"), table, refs, &self.tex, &self.assets, &self.project.db);
+                }
                 if let ZoneKind::Spawner { character, .. } = &z.kind {
                     let db = &self.project.db;
                     let def_loot = db.character(character).map(|d| d.loot.clone()).unwrap_or_default();
@@ -2787,6 +2793,7 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             ZoneKind::Trigger => 2,
             ZoneKind::Spawner { .. } => 3,
             ZoneKind::Transition { .. } => 4,
+            ZoneKind::FishingSpot { .. } => 5,
         };
         let old = k;
         ui.vertical(|ui| {
@@ -2798,6 +2805,7 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             ui.horizontal(|ui| {
                 ui.radio_value(&mut k, 2, "Trigger");
                 ui.radio_value(&mut k, 3, "Enemy spawner");
+                ui.radio_value(&mut k, 5, "Fishing spot");
             });
         });
         if k != old {
@@ -2806,6 +2814,7 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
                 1 => ZoneKind::Portal { target_map: refs.maps.first().cloned().unwrap_or_default(), target_spawn: String::new() },
                 2 => ZoneKind::Trigger,
                 4 => ZoneKind::Transition { target_map: String::new(), target_zone: String::new() },
+                5 => ZoneKind::FishingSpot { rod: String::new() },
                 _ => default_spawner(refs),
             };
         }
@@ -2899,6 +2908,18 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
             }
             ui.end_row();
         }
+        if let ZoneKind::FishingSpot { rod } = &mut z.kind {
+            ui.label("Needs item");
+            ui.horizontal(|ui| {
+                widgets::suggest(ui, "fish_rod", rod, &refs.items, 120.0);
+                if rod.is_empty() {
+                    ui.weak("(nothing: anyone can fish)");
+                }
+            })
+            .response
+            .on_hover_text("The rod (or net) the player must have to fish here");
+            ui.end_row();
+        }
         if let ZoneKind::Spawner { character, count, respawn } = &mut z.kind {
             ui.label("Character");
             widgets::suggest(ui, "sp_char", character, &refs.characters, 120.0);
@@ -2940,6 +2961,9 @@ fn zone_fields(ui: &mut egui::Ui, z: &mut Zone, refs: &Refs, mw: u32, mh: u32) {
         }
         ZoneKind::Spawner { .. } => {
             ui.weak("Invisible in the game. Characters appear on random walkable tiles inside the zone (never right next to the player). Their 'Defeated' triggers come from the character definition.");
+        }
+        ZoneKind::FishingSpot { .. } => {
+            ui.weak("Draw it over the water where the fish are. Facing it from the shore (up to 3 tiles away), the player presses E to cast: the bobber lands on the zone, then wait for the bite, strike, and hold E to reel in without breaking the line. Fish shadows glide through the zone now and then to show players where to fish. The catch comes from the table below (chances are weights: every fish landed gives one entry).");
         }
         _ => {}
     }

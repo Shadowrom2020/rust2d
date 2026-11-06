@@ -1357,6 +1357,14 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
         }
+        Action::Lockpick { difficulty, var } => {
+            ui.horizontal(|ui| {
+                ui.label("difficulty");
+                ui.add(egui::DragValue::new(difficulty).range(0..=10)).on_hover_text("Like a lock's 'Lockpicking' difficulty: higher = a smaller sweet spot and a faster marker (the player's lockpicking skill makes it easier)");
+            });
+            labeled(ui, "result into", |ui| suggest(ui, &format!("{id}/lpvar"), var, &refs.vars, 120.0));
+            ui.weak("the lockpicking game; 1 (picked) or 0 goes into the variable, test it with a Variable condition afterwards");
+        }
         Action::UnlockAchievement { id: ach } => {
             labeled(ui, "achievement", |ui| suggest(ui, &format!("{id}/ach"), ach, &refs.achievements, 140.0));
             ui.weak("unlocks it for the player (kept across save games; Database \u{203A} Achievements)");

@@ -317,6 +317,7 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `stop_schedule(target)` | The character stops following its daily schedule (set in the editor) and stays where it is. Saved. *(queued)* |
+| `lockpick(difficulty, var)` | Plays the lockpicking game (like a lock with that *Lockpicking* difficulty; the player's skill makes it easier) and puts 1 (picked) or 0 into the variable, e.g. `lockpick(2, "vault"); then_call("vault_result");`. *(queued, blocks until it is over)* |
 | `unlock_achievement(id)` | Unlocks an achievement (*Database › Achievements*) for the player: a toast, kept across save games. *(queued)* |
 | `achievement_unlocked(id)` | Whether the player has unlocked an achievement (in any game). |
 | `open_crafting(station)` | Opens the crafting window with the recipes of a station (*Database › Recipes*), e.g. `open_crafting("alchemy")` on an alchemy table's trigger. *(queued)* |
@@ -389,7 +390,7 @@ Changes are saved with the game.
 | Function | Description |
 |---|---|
 | `equip(target, item)` | Puts an item into its slot (clothing, armor, weapon, left hand); what was worn there goes to the character's carried items. For `"player"` the item comes from the inventory (or is given). *(queued)* |
-| `unequip(target, slot)` | Takes off what is worn in `"clothing"`, `"head"`, `"body"`, `"weapon"` or `"offhand"` (into the carried items; the player: the inventory). *(queued)* |
+| `unequip(target, slot)` | Takes off what is worn in `"clothing"`, `"head"`, `"body"`, `"weapon"`, `"offhand"` or `"tool"` (into the carried items; the player: the inventory). *(queued)* |
 | `give_item_to(target, item, count)` | Adds items to what a character carries (the player: the inventory). *(queued)* |
 | `take_item_from(target, item, count)` | Takes items from what a character carries. *(queued)* |
 

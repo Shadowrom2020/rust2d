@@ -190,6 +190,13 @@
         kind: Held,
     ),
     (
+        id: "held_rod",
+        image: "sprites/held_rod.png",
+        frame_w: 32,
+        frame_h: 48,
+        kind: Held,
+    ),
+    (
         id: "outfit_tunic_blue",
         image: "sprites/outfit_tunic_blue.png",
         frame_w: 32,

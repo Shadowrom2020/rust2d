@@ -25,6 +25,7 @@ mod shop_ui;
 mod crafting_ui;
 mod locks;
 mod menu;
+mod minigame;
 pub mod input;
 mod mouse;
 mod spawner;
@@ -227,6 +228,8 @@ pub struct Game {
     crafting: crafting_ui::CraftingUi,
     /// The player's achievements, their checks and toasts.
     ach: achievements::Achievements,
+    /// Lockpicking / fishing in progress (pauses the world).
+    minigame: Option<minigame::Minigame>,
     journal: journal::Journal,
     worldmap: worldmap::WorldMap,
     creator: Option<creator::Creator>,
@@ -323,6 +326,7 @@ impl Game {
             shop: Default::default(),
             crafting: Default::default(),
             ach: Default::default(),
+            minigame: None,
             journal: Default::default(),
             worldmap: Default::default(),
             creator: None,
@@ -943,6 +947,10 @@ impl Game {
         if self.update_creator(dt) {
             return;
         }
+        // Lockpicking and fishing pause the world (Esc gives up instead of opening the menu).
+        if self.update_minigame(dt) {
+            return;
+        }
         if self.update_menu(can_open) {
             return;
         }
@@ -1224,6 +1232,7 @@ impl Game {
         for uid in self.zones_inside.clone() {
             self.fire(GameEvent::Interact, Source::Zone(uid));
         }
+        self.try_fish();
     }
 
     fn interact_entity(&mut self, i: usize) {
@@ -1470,7 +1479,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1505,6 +1514,7 @@ impl Game {
             self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
             self.achievements_status(),
+            self.minigame_status(),
             self.shop_status(),
             self.crafting_status(),
             self.loaded.map.name,
@@ -1650,6 +1660,14 @@ impl Game {
         for layer in m.layers.iter().filter(|l| l.visible && !l.above_entities) {
             render::draw_layer(m, layer, &sets, ts, view, WHITE);
         }
+        // Fish shadows mark the fishing spots' water.
+        let now = get_time() as f32;
+        for z in m.zones.iter().filter(|z| matches!(z.kind, ZoneKind::FishingSpot { .. })) {
+            let r = Rect::new(z.x as f32 * ts, z.y as f32 * ts, z.w as f32 * ts, z.h as f32 * ts);
+            if r.overlaps(&view) {
+                render::fish::draw_shadows(r, z.uid, now, ts);
+            }
+        }
 
         // Y-sorted entities + player.
         let mut order: Vec<(f32, Option<usize>)> = self
@@ -1674,7 +1692,8 @@ impl Game {
                     let col = if self.player.moving { (self.player.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
                     // During a melee swing the weapon is drawn along the swing instead.
                     let swinging = self.combat.swing > 0.0;
-                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, Self::effect_tint(&self.world.effects).unwrap_or(WHITE), swinging));
+                    let eq = self.player_equipment_drawn();
+                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &eq, (self.player.facing, col), self.player.pos, Self::effect_tint(&self.world.effects).unwrap_or(WHITE), swinging));
                     if !drawn {
                         let r = self.player.rect();
                         draw_rectangle(r.x, r.y - ts * 0.5, r.w, r.h + ts * 0.5, YELLOW);
@@ -1728,6 +1747,7 @@ impl Game {
                 self.draw_hud();
                 self.draw_clock();
             }
+            self.draw_minigame();
             if self.crafting_open() {
                 self.draw_crafting_ui();
             } else if self.shop_open() {
@@ -2094,6 +2114,12 @@ impl ActionHost for Game {
                 };
                 Step::Continue
             }
+            Action::Lockpick { difficulty, var } => {
+                // Skill below the difficulty makes it harder (the skill system may be off: 0).
+                let gap = *difficulty as i32 - self.lockpick_level() as i32;
+                self.start_lockpick(minigame::PickTarget::Var(var.clone()), gap);
+                Step::Block
+            }
             Action::UnlockAchievement { id } => {
                 self.unlock_achievement(id);
                 Step::Continue
@@ -2157,7 +2183,7 @@ impl ActionHost for Game {
             // Characters that walked up to someone turn to face them.
             self.apply_face_after();
         }
-        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking
+        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking || self.minigame_open()
     }
 
     fn script_condition(&mut self, function: &str, ctx: &ActionCtx) -> bool {

@@ -314,6 +314,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
                     },
                     |d| &mut d.id,
                 ),
@@ -746,6 +747,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     ui.heading("Equipment");
     ui.weak("Equipment goes into a character-sheet slot when used from the inventory (weapons also with Q) instead of running 'On use' triggers.");
     let mut kind = match (&d.weapon, &d.armor) {
+        _ if !d.tool.is_empty() => 6,
         (Some(_), _) => 1,
         (None, Some(a)) if a.slot == EquipSlot::Head => 2,
         (None, Some(a)) if a.slot == EquipSlot::Offhand => 4,
@@ -761,8 +763,10 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         ui.radio_value(&mut kind, 3, "Body armor");
         ui.radio_value(&mut kind, 4, "Left hand").on_hover_text("A shield (defense) or a light (lantern, torch: set its light below). Not usable together with a two-handed weapon.");
         ui.radio_value(&mut kind, 5, "Clothing").on_hover_text("An outfit: changes how layered characters look (its overlay sheet); armor is worn over it.");
+        ui.radio_value(&mut kind, 6, "Tool").on_hover_text("Goes into the Tool slot (a fishing rod, later pickaxes, hoes...): held in the right hand while it is used. Activities ask for it, e.g. a fishing spot's 'Needs item'.");
     });
     if kind != old {
+        d.tool = if kind == 6 { if d.tool.is_empty() { "tool".into() } else { d.tool.clone() } } else { String::new() };
         d.weapon = (kind == 1).then(|| Weapon::melee(1, 0.4));
         d.armor = match kind {
             2..=5 => {
@@ -824,7 +828,23 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
             });
         }
     }
-    if matches!(d.equip_slot(), Some(EquipSlot::Weapon | EquipSlot::Offhand)) {
+    if !d.tool.is_empty() {
+        ui.horizontal(|ui| {
+            ui.label("Tool kind");
+            let kinds: Vec<String> = {
+                let mut v: Vec<String> = cx.db.items.iter().map(|i| i.tool.clone()).filter(|t| !t.is_empty()).collect();
+                v.sort();
+                v.dedup();
+                v
+            };
+            widgets::suggest(ui, "item_tool", &mut d.tool, &kinds, 140.0);
+            ui.weak("(what it is: \"fishing rod\", \"pickaxe\"...)");
+        });
+        if d.tool.trim().is_empty() {
+            d.tool = "tool".into();
+        }
+    }
+    if matches!(d.equip_slot(), Some(EquipSlot::Weapon | EquipSlot::Offhand | EquipSlot::Tool)) {
         ui.horizontal(|ui| {
             ui.label("Held sprite");
             let held: Vec<String> = cx.db.sheets.iter().filter(|s| s.kind == rust2d_engine::defs::SheetKind::Held).map(|s| s.id.clone()).collect();

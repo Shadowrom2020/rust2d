@@ -1532,6 +1532,8 @@ pub enum Held {
     Shield,
     Lantern,
     Torch,
+    /// A fishing rod (in the hand while fishing): its tip is where the engine starts the line.
+    Rod,
 }
 
 impl Held {
@@ -1645,6 +1647,23 @@ pub fn held_canvas(kind: Held) -> Canvas {
                     c.rect(x - 1, y + 4, 3, 5, hex(0xffd166));
                     c.px(x - 1, y + 4, hex(0xfff2b0));
                 }
+                Held::Rod => {
+                    // From the hand out to the tip (idle frame: the tip at the engine's
+                    // `rod_tip` offsets: down (3, 48), up (30, 6), right (29, 12), left (3, 12)).
+                    let tip = match f {
+                        Facing::Down => (x - 4, y + 16),
+                        Facing::Up => (x + 4, y - 25),
+                        Facing::Right => (x + 13, y - 20),
+                        Facing::Left => (x - 13, y - 20),
+                    };
+                    let (hx, hy) = (x as f32, y as f32);
+                    let (tx, ty) = (tip.0 as f32, tip.1 as f32);
+                    let mid = (hx + (tx - hx) * 0.4, hy + (ty - hy) * 0.4);
+                    c.stroke(hx, hy, mid.0, mid.1, 1.6, hex(WOOD[1]));
+                    c.stroke(mid.0, mid.1, tx, ty, 1.0, hex(WOOD[2]));
+                    c.disc(hx + (tx - hx) * 0.12, hy + (ty - hy) * 0.12 + 1.0, 1.6, hex(IRON[2]));
+                    c.px(tip.0, tip.1, hex(0xe53935));
+                }
                 Held::Torch => {
                     c.rect(x - 1, y - 8, 2, 11, hex(WOOD[1]));
                     c.disc(x as f32, y as f32 - 10.0, 2.5, hex(0xe8590c));
@@ -1725,6 +1744,7 @@ pub fn shared_layers() -> Vec<(String, Canvas, rust2d_engine::defs::SheetKind, b
         ("shield", Held::Shield),
         ("lantern", Held::Lantern),
         ("torch", Held::Torch),
+        ("rod", Held::Rod),
     ] {
         v.push((format!("held_{id}"), held_canvas(kind), K::Held, false));
     }
@@ -1774,6 +1794,7 @@ pub fn clothing_item(id: &str, name: &str, description: &str, icon_sheet: &str, 
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
     }
 }
 
@@ -2484,8 +2505,12 @@ pub mod it {
     /// Crafting ingredients: a healing herb and a red-capped mushroom.
     pub const HERB: u32 = 35;
     pub const MUSHROOM: u32 = 36;
+    /// Fishing: the rod and two catches.
+    pub const ROD: u32 = 37;
+    pub const TROUT: u32 = 38;
+    pub const BOOT: u32 = 39;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 37;
+    pub const COUNT: u32 = 40;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -2796,6 +2821,43 @@ pub fn items(out: &Path) {
                     c.vline(x, 6, 21, hex(WOOD[0]));
                 }
                 c.shade_disc(16.0, 16.0, 3.5, [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6]);
+            }
+            it::ROD => {
+                // A long wooden rod with a reel and the line hanging down.
+                c.stroke(5.0, 28.0, 27.0, 4.0, 2.0, hex(WOOD[2]));
+                c.stroke(5.0, 28.0, 12.0, 20.5, 2.6, hex(WOOD[0]));
+                c.shade_disc(11.0, 23.0, 3.2, IRON);
+                c.disc(11.0, 23.0, 1.2, hex(0xc5d0d6));
+                c.vline(27, 5, 16, hex(0xe0e0e0));
+                c.rect(26, 20, 3, 3, hex(0xe53935));
+            }
+            it::TROUT => {
+                // A speckled fish swimming right.
+                let body = [0x4e6a3a, 0x7a9a5a, 0xa8c08a, 0xe0ecd0];
+                c.shade_disc(15.0, 16.0, 8.0, body);
+                c.rect(4, 10, 24, 3, CLEAR);
+                c.rect(4, 20, 24, 3, CLEAR);
+                c.shade_disc(15.0, 16.0, 6.0, body);
+                c.shade_disc(21.0, 16.0, 4.5, body);
+                for (fx, fy) in [(3, 11), (3, 21), (5, 13), (5, 19), (6, 15), (6, 17)] {
+                    c.px(fx, fy, hex(body[1]));
+                }
+                c.rect(4, 12, 3, 9, hex(body[1])); // tail
+                c.hline(9, 17, 16, hex(0xe57373)); // pink stripe
+                for (sx, sy) in [(11, 13), (14, 12), (17, 14), (12, 19)] {
+                    c.px(sx, sy, hex(0x2e3b22));
+                }
+                c.px(23, 15, hex(0x111111));
+            }
+            it::BOOT => {
+                // A soggy old boot.
+                let leather = [0x3e2a1a, 0x5d4030, 0x7b5a44, 0x9c7a62];
+                c.shade_box(9, 5, 9, 17, leather);
+                c.shade_box(9, 19, 18, 7, leather);
+                c.hline(9, 26, 18, hex(0x2a1c10));
+                c.hline(9, 8, 9, hex(leather[3]));
+                c.px(22, 17, hex(0x6fa8dc)); // a drip
+                c.px(22, 18, hex(0x6fa8dc));
             }
             it::HERB => {
                 // A sprig with three pairs of leaves and a tied stem.

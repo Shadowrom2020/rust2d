@@ -541,6 +541,13 @@ fn village() -> Map {
         }
     }
 
+    // The big pond is a fishing spot (the zone covers its water; fish from the shore with the
+    // Fishing Rod from Tilda): mostly trout, now and then an old boot (chances are weights).
+    let spot = b.zone("pond_fishing", 6, 25, 9, 5, ZoneKind::FishingSpot { rod: "fishing_rod".into() });
+    if let Some(z) = b.m.zones.iter_mut().find(|z| z.uid == spot) {
+        z.loot = Some(vec![LootEntry::new("trout", 75.0, 1, 1), LootEntry::new("old_boot", 25.0, 1, 1)]);
+    }
+
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
     b.m.triggers = vec![
         // A new game's intro: a cut-scene (the script's intro_cutscene()), then the welcome.
@@ -604,6 +611,7 @@ fn shop() -> Map {
         items: vec![
             ShopEntry { unlimited: true, ..ShopEntry::new("apple", 0, 4) },
             ShopEntry { unlimited: true, ..ShopEntry::new("herb", 0, 3) },
+            ShopEntry::new("fishing_rod", 2, 20),
             ShopEntry::new("potion", 5, 0),
             ShopEntry { unlimited: true, ..ShopEntry::new("arrows", 0, 2) },
             ShopEntry::new("bolts", 20, 0),
@@ -1129,6 +1137,7 @@ fn database() -> Database {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -1303,6 +1312,11 @@ fn database() -> Database {
                 item("swiftness", "Swiftness Potion", "You move 30% faster for half a minute.", it::SWIFTNESS, true, use_trig(vec![Action::ApplyEffect { target: "player".into(), effect: EffectSpec::new(EffectKind::Haste, 30.0, 30.0) }])),
                 10,
             ),
+            // Fishing (village pond: a fishing spot zone). The rod is needed to fish there.
+            // A tool (Tool slot, tool kind "fishing rod"): in the hand while fishing.
+            stack(ItemDef { tool: "fishing rod".into(), ..item("fishing_rod", "Fishing Rod", "A tool: stand at the pond's edge and press E to cast.", it::ROD, false, vec![]) }, 1),
+            stack(item("trout", "Trout", "A fresh trout. Eating it restores a heart.", it::TROUT, true, use_trig(vec![Action::Heal { amount: 2 }])), 10),
+            stack(item("old_boot", "Old Boot", "Soggy. Nobody wants it - except perhaps a merchant who buys anything.", it::BOOT, false, vec![]), 5),
             // Crafting ingredients (Database › Recipes: brewed at the alchemy table in Tilda's shop).
             stack(item("herb", "Healing Herb", "A fragrant herb. Brewed into potions at an alchemy table.", it::HERB, false, vec![]), 20),
             stack(item("mushroom", "Red Cap", "A red forest mushroom. Useful in brews, not for dinner.", it::MUSHROOM, false, vec![]), 20),
@@ -1802,7 +1816,7 @@ fn layered_characters(db: &mut Database) {
     }
     db.sheets.push(SheetDef::new("outfit_icons", "sprites/outfit_icons.png", 32, 32));
     // What weapons, shields and lights look like in a hand.
-    for (item, held) in [("sword", "held_sword"), ("spear", "held_spear"), ("axe", "held_axe"), ("bow", "held_bow"), ("crossbow", "held_crossbow"), ("wooden_shield", "held_shield"), ("lantern", "held_lantern"), ("torch", "held_torch")] {
+    for (item, held) in [("sword", "held_sword"), ("spear", "held_spear"), ("axe", "held_axe"), ("bow", "held_bow"), ("crossbow", "held_crossbow"), ("wooden_shield", "held_shield"), ("lantern", "held_lantern"), ("torch", "held_torch"), ("fishing_rod", "held_rod")] {
         db.items.iter_mut().find(|d| d.id == item).expect(item).held = held.into();
     }
     // The goblins' own bow: what they shoot with, dropped when they are defeated.

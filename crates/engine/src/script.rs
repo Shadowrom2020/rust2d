@@ -435,6 +435,7 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         c.actions.push(Action::Patrol { target: t.into(), active: true, points })
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
+    engine.register_fn("lockpick", with!(ctx, |c, difficulty: i64, var: &str| c.actions.push(Action::Lockpick { difficulty: difficulty.max(0) as u32, var: var.into() })));
     engine.register_fn("unlock_achievement", with!(ctx, |c, id: &str| c.actions.push(Action::UnlockAchievement { id: id.into() })));
     engine.register_fn("achievement_unlocked", with!(ctx, |c, id: &str| c.achievements.contains(id)));
     engine.register_fn("can_craft", with!(ctx, |c, id: &str| c.recipes.iter().find(|r| r.id == id).is_some_and(|r| r.missing(&c.world).is_none())));
@@ -842,6 +843,14 @@ mod tests {
         let mut w = WorldState::default();
         w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
         assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
+    }
+
+    #[test]
+    fn lockpick_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn puzzle() { lockpick(2, "vault"); then_call("after"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "puzzle", None);
+        assert_eq!(actions[0], Action::Lockpick { difficulty: 2, var: "vault".into() });
     }
 
     #[test]

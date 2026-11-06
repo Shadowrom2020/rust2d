@@ -569,6 +569,7 @@ fn reward() {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
         });
         let maps = vec!["village".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("village".to_string(), vec!["gate".to_string()])].into();

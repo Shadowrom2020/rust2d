@@ -92,7 +92,9 @@ pub struct TileAnim {
 impl ItemDef {
     /// The equipment slot this item goes into, if it can be equipped.
     pub fn equip_slot(&self) -> Option<EquipSlot> {
-        if self.weapon.is_some() {
+        if !self.tool.is_empty() {
+            Some(EquipSlot::Tool)
+        } else if self.weapon.is_some() {
             Some(EquipSlot::Weapon)
         } else {
             self.armor.as_ref().map(|a| a.slot)
@@ -327,6 +329,9 @@ pub enum EquipSlot {
     Offhand,
     /// An outfit: changes how a layered character looks (armor is worn over it).
     Clothing,
+    /// A tool used for an activity (a fishing rod, later pickaxes, hoes, …): held in the
+    /// right hand while it is being used, the weapon otherwise.
+    Tool,
 }
 
 impl EquipSlot {
@@ -338,10 +343,11 @@ impl EquipSlot {
             "body" | "armor" => EquipSlot::Body,
             "weapon" | "hand" | "right" => EquipSlot::Weapon,
             "offhand" | "left" | "left hand" | "shield" => EquipSlot::Offhand,
+            "tool" => EquipSlot::Tool,
             _ => return None,
         })
     }
-    pub const ALL: [EquipSlot; 5] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
+    pub const ALL: [EquipSlot; 6] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand, EquipSlot::Tool];
     pub fn label(self) -> &'static str {
         match self {
             EquipSlot::Clothing => "Clothing",
@@ -349,6 +355,7 @@ impl EquipSlot {
             EquipSlot::Body => "Body",
             EquipSlot::Weapon => "Weapon",
             EquipSlot::Offhand => "Left hand",
+            EquipSlot::Tool => "Tool",
         }
     }
 }
@@ -441,9 +448,13 @@ pub struct ItemDef {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub teaches: String,
     /// Sheet (character layout) drawn in the character's hand while the item is in the Weapon
-    /// or left-hand slot; "" = not visible.
+    /// or left-hand slot, or a tool while it is used; "" = not visible.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub held: String,
+    /// What kind of tool it is ("fishing rod", "pickaxe", …; "" = no tool): tools go into the
+    /// Tool slot and are what activities ask for (a fishing spot needs a fishing rod).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tool: String,
 }
 
 fn default_max_stack() -> u32 {
@@ -1150,6 +1161,7 @@ mod tests {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
             });
         }
         let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };
