@@ -29,6 +29,7 @@ mod crafting_ui;
 mod locks;
 mod menu;
 mod minigame;
+mod orders;
 pub mod input;
 mod mouse;
 mod spawner;
@@ -243,6 +244,8 @@ pub struct Game {
     leave_hold: f32,
     /// The open "Heal whom?" choice.
     heal_pick: Option<healing::HealPick>,
+    /// The open companion orders menu (G).
+    order_menu: Option<orders::OrderMenu>,
     /// Bottom of the player's HUD panel as last drawn (the companions' rows go below it).
     hud_bottom: std::cell::Cell<f32>,
     sleeping: Option<furniture::Sleeping>,
@@ -349,6 +352,7 @@ impl Game {
             leaving: None,
             leave_hold: 0.0,
             heal_pick: None,
+            order_menu: None,
             hud_bottom: std::cell::Cell::new(80.0),
             sleeping: None,
             bed: None,
@@ -668,12 +672,17 @@ impl Game {
         }
         // Knocked-down companions can't come along: ask first (once; "Stay" holds still a moment
         // so walking into the map's edge doesn't ask again at once).
-        if !map.is_empty() && map != self.loaded.map.name && !self.downed_companions().is_empty() {
+        // (Loading a save isn't leaving: the companions come from the save.)
+        let leaving_map = !map.is_empty() && map != self.loaded.map.name && !self.resuming;
+        if leaving_map && !self.downed_companions().is_empty() {
             if self.leave_hold > 0.0 {
                 return;
             }
             self.ask_leave_behind(map, arrival);
             return;
+        }
+        if leaving_map {
+            self.companions_follow_again();
         }
         self.fade = Fade::Out { t: 0.0, map: map.to_string(), arrival };
     }
@@ -995,6 +1004,10 @@ impl Game {
         if self.update_heal_pick() {
             return;
         }
+        // So does the companions' orders menu (G).
+        if self.update_order_menu() {
+            return;
+        }
         if self.update_menu(can_open) {
             return;
         }
@@ -1071,7 +1084,9 @@ impl Game {
                 self.ui.toast("Interface hidden - press H to show it".into());
             }
         }
-        let (shop_key, shop_mouse) = (shop_key || hide_key, shop_mouse);
+        // G / LB: the companions' orders (only while nothing else is open).
+        let cmd_key = self.maybe_open_order_menu(allow_windows && !input.consumed && !shop_key && !hide_key && !self.modal() && !self.aiming());
+        let (shop_key, shop_mouse) = (shop_key || hide_key || cmd_key, shop_mouse);
         let (j_key, j_mouse) = self.update_journal(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.skills_open(), input.consumed || shop_key);
         let (k_key, k_mouse) = self.update_skills_ui(allow_windows && !self.shop_open() && !self.inv.is_open() && !self.journal_open(), input.consumed || shop_key || j_key);
         let (j_key, j_mouse) = (j_key || k_key, j_mouse || k_mouse);
@@ -1551,7 +1566,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} aim={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} aim={} orders={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1589,6 +1604,7 @@ impl Game {
             self.minigame_status(),
             self.pose_status(),
             self.heal_pick_status(),
+            self.order_menu_status(),
             self.shop_status(),
             self.crafting_status(),
             self.loaded.map.name,
@@ -1833,7 +1849,7 @@ impl Game {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
-            } else if !self.heal_picking() {
+            } else if !self.heal_picking() && !self.order_menu_open() {
                 // (While choosing whom to heal, the window steps aside for the map.)
                 self.draw_window_frame();
                 if self.skills_open() {
@@ -1844,6 +1860,7 @@ impl Game {
             }
             self.draw_world_map();
             self.draw_heal_pick();
+            self.draw_order_menu();
         }
         if !self.on_title() {
             self.draw_aim_cursor();
@@ -1983,6 +2000,10 @@ impl ActionHost for Game {
             }
             Action::HealCharacter { target, amount } => {
                 self.heal_character(target, *amount, ctx.owner);
+                Step::Continue
+            }
+            Action::CompanionOrder { target, order } => {
+                self.order_companion(target, order, ctx.owner);
                 Step::Continue
             }
             Action::SetLocked { target, locked } => {

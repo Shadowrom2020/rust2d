@@ -316,6 +316,7 @@ impl Game {
                 | Action::SetVar { .. }
                 | Action::Heal { .. }
                 | Action::HealCharacter { .. }
+                | Action::CompanionOrder { .. }
                 | Action::GiveXp { .. }
                 | Action::SetTime { .. }
                 | Action::Quest { .. }

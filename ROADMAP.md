@@ -178,7 +178,7 @@ forest's slime den four slimes hunt the player (12 → 3 HP) and leave him alone
 him lying, the HUD's DOWN, the question and the editor setting. Unit test: old saves without
 `down`.
 
-### [ ] Commands for companions — `feature/companion-orders`
+### [x] Commands for companions — `feature/companion-orders`
 
 **Goal.** The player tells companions how to behave: attack, defend, stay passive or wait.
 
@@ -198,6 +198,17 @@ him lying, the HUD's DOWN, the question and the editor setting. Unit test: old s
   `stay_follows_across_maps`, default true) — no dialog. The HUD row of *Healing companions*
   shows the order as a letter (A / D / P / S).
 
+**Decided while building.** Fighting and staying are separate: `Companion.order: Order { Attack,
+Defend, Passive }` and `Companion.post: Option<[f32; 2]>` (where it waits), so a staying
+companion keeps its way of fighting (with *Stay*, it fights what comes within 2.5 tiles of it
+and walks back to its post). No `stay_follows_across_maps` setting: a staying companion always
+catches up on a map change (`companions_follow_again` in `Game::transition`, not when loading
+a save). The menu is `runtime/orders.rs`, a bar at the bottom like the heal choice (pauses the
+game; one click on an order gives it). Pad: all buttons were taken, so LB opens the menu while
+playing and only switches tabs inside an open window (`Act::PrevTab` places = windows).
+Scripts also get `is_staying(name)`; `status()` `companions=` shows `:defend` / `:passive`,
+`:stay`, `:fighting` and `orders=who:choice` while the menu is open.
+
 **Touch points.** `state.rs` (`Order`), `runtime/{companions,input,menu or ui}.rs`,
 `events/mod.rs`, `script.rs`, `script_refs.rs` (no ids: the name is a character name like
 `follow`), editor `widgets.rs`, `script_editor.rs`, README (controls table), scripting.md.
@@ -205,10 +216,14 @@ him lying, the HUD's DOWN, the question and the editor setting. Unit test: old s
 **Example.** The guard's dialog after joining offers "Wait here" / "Follow me" / "Stay out of
 fights" via `order`.
 
-**Verify.** Autoplay: `press g` + menu choices → `status` `companions=["guard:8/8:stay@…"]`;
-*Passive*: a slime next to him isn't attacked (its HP unchanged after 5 s); *Defend* ignores a
-slime that hasn't noticed the player; *Stay* keeps him put while the player walks off; save /
-load keeps the orders; screenshot of the menu.
+**Verify (done).** Autoplay on a scratch copy: `press g`, Right ×3, E → `guard:8/8:stay`, he stays
+at 8,18 while the player walks off (screenshot with STAY in the HUD row); pad LB opens the menu;
+with Mira along the menu has an *All / Villager / Town Guard* row, a click on *Defend* sets both,
+choosing the guard then *Passive* only him. In the slime den (staying): *Passive* never
+`:fighting`, *Attack* and *Defend* fight the slimes hunting him; next to an idle slime *Attack*
+fights it, *Defend* doesn't. F5 / F9 keeps `defend:stay` at the post; a teleport makes a staying
+guard follow again; the guard's dialog (*Wait here*) → `stay`; the editor's *Companion order*
+fields (screenshot).
 
 ### [ ] Companion inventory — `feature/companion-inventory`
 

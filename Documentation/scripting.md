@@ -330,6 +330,9 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `stop_following(target)` | The companion leaves: on its own map it stays where it is, elsewhere it goes back to where it is placed. *(queued)* |
 | `is_companion(name)` | Whether the character with that name follows the player. |
 | `companion_count()` | How many companions follow the player. |
+| `order(target, order)` | Tells a companion (or `"all"`) what to do, like the player's orders menu (G): `"attack"` (fight enemies near the player, the default), `"defend"` (only what hunts the player or the companion), `"passive"` (no fighting, back away from enemies), `"stay"` (wait where it is, fighting what comes close) or `"follow"`. Saved. *(queued)* |
+| `order_of(name)` | How a companion fights: `"attack"`, `"defend"` or `"passive"` (`""` if no companion has that name). |
+| `is_staying(name)` | Whether a companion was told to stay where it is. |
 | `follow_schedule(target)` | The character follows its daily schedule again: it heads for the stop of the current hour. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 | `defeated_count(character)` | How many characters of a definition the player has defeated (the bestiary's count), e.g. `defeated_count("slime")`. |

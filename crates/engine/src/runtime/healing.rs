@@ -279,6 +279,20 @@ impl Game {
             let name = self.entity_display_name(e.uid).unwrap_or_else(|| e.name.clone());
             let tx = head.right() + 6.0;
             draw_text(&name, tx, r.y + 14.0, 16.0, Color::new(1.0, 0.86, 0.45, 1.0));
+            // Its orders, when not the usual (attack, following).
+            if let Some(l) = &e.companion {
+                let mut tag = match l.order {
+                    crate::state::Order::Attack => String::new(),
+                    o => o.label().to_uppercase(),
+                };
+                if l.post.is_some() {
+                    tag = if tag.is_empty() { "STAY".into() } else { format!("{tag} STAY") };
+                }
+                if !tag.is_empty() {
+                    let nw = measure_text(&name, None, 16, 1.0).width;
+                    draw_text(&tag, tx + nw + 6.0, r.y + 13.0, 12.0, Color::new(0.55, 0.8, 1.0, 1.0));
+                }
+            }
             let (bw, by) = (r.right() - tx - 6.0, r.y + 20.0);
             let share = (e.hp as f32 / e.max_hp.max(1) as f32).clamp(0.0, 1.0);
             draw_rectangle(tx - 1.0, by - 1.0, bw + 2.0, 9.0, Color::new(0.0, 0.0, 0.0, 0.7));
