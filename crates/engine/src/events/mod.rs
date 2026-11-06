@@ -492,6 +492,8 @@ pub enum Action {
     ApplyEffect { target: TargetName, effect: crate::effects::EffectSpec },
     /// Ends a status effect (`None` = all of them) on the player or a character.
     CureEffect { target: TargetName, kind: Option<crate::effects::EffectKind> },
+    /// Shakes the screen (`strength` 1 = like a hit) - earthquakes, explosions, a boss landing.
+    Shake { seconds: f32, strength: f32 },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -515,11 +517,18 @@ pub struct FxSprite {
     pub light: f32,
     /// The color of that light (default: a warm fire glow).
     pub glow: [u8; 3],
+    /// *Effect*: shakes the screen this many seconds when it starts (0 = no shake).
+    #[serde(skip_serializing_if = "is_zero_f32")]
+    pub shake: f32,
+}
+
+fn is_zero_f32(v: &f32) -> bool {
+    *v == 0.0
 }
 
 impl Default for FxSprite {
     fn default() -> Self {
-        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70] }
+        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70], shake: 0.0 }
     }
 }
 
@@ -579,6 +588,7 @@ impl Action {
             Action::GiveXp { .. } => "Give experience",
             Action::ApplyEffect { .. } => "Apply effect",
             Action::CureEffect { .. } => "Cure effect",
+            Action::Shake { .. } => "Shake the screen",
         }
     }
 
@@ -637,6 +647,7 @@ impl Action {
             Action::GiveXp { amount: 10 },
             Action::ApplyEffect { target: "player".into(), effect: crate::effects::EffectSpec::template(crate::effects::EffectKind::Poison) },
             Action::CureEffect { target: "player".into(), kind: Some(crate::effects::EffectKind::Poison) },
+            Action::Shake { seconds: 0.5, strength: 1.5 },
         ]
     }
 }

@@ -19,6 +19,8 @@ pub struct Settings {
     pub effects_volume: f32,
     /// Dialog text speed multiplier (0 = instant).
     pub text_speed: f32,
+    /// Screen shake and the red flash when hurt (off for players who find them unpleasant).
+    pub screen_effects: bool,
     /// Keys the player changed (Options › Controls): action id -> key names; other actions keep
     /// their default keys.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -27,7 +29,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { fullscreen: false, zoom: 1.0, show_fps: false, master_volume: 1.0, music_volume: 0.8, effects_volume: 1.0, text_speed: 1.0, keys: Default::default() }
+        Settings { fullscreen: false, zoom: 1.0, show_fps: false, master_volume: 1.0, music_volume: 0.8, effects_volume: 1.0, text_speed: 1.0, screen_effects: true, keys: Default::default() }
     }
 }
 

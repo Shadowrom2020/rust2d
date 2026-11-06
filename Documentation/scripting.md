@@ -372,6 +372,8 @@ are still shown. Not saved: a loaded game always starts with the HUD visible.
 |---|---|
 | `hide_ui()` | Hides the HUD. *(queued)* |
 | `show_ui()` | Shows it again. *(queued)* |
+| `shake(seconds)` | Shakes the screen as hard as a hit on the player, fading out (earthquakes, explosions, a boss landing). *(queued)* |
+| `shake(seconds, strength)` | The same with a strength: `1` = like a hit, `2` = twice as hard. *(queued)* |
 
 ### Saving
 
@@ -498,7 +500,7 @@ Use these to build spells (and traps, cut-scenes, …) in scripts.
 | `fly(sheet, x, y, function)` | An animated sprite flies from the player to point `x, y`, turned in its direction, then calls `function(x, y)` (`""` = call nothing). *(queued)* |
 | `fly(sheet, x, y, function, options)` | Like above with [options](#options-maps): `speed`, `frames`, `fps`, `scale`, `light`, `color`. *(queued)* |
 | `effect(sheet, x, y)` | Plays the frames of a sprite sheet once, centered on `x, y` (explosions, sparkles). *(queued)* |
-| `effect(sheet, x, y, options)` | Like above with options: `frames`, `fps`, `scale`, `light`, `color`. *(queued)* |
+| `effect(sheet, x, y, options)` | Like above with options: `frames`, `fps`, `scale`, `light`, `color`, `shake` (seconds the screen shakes as it starts). *(queued)* |
 | `damage_area(x, y, radius, damage)` | Damages every character within `radius` tiles of `x, y`. Spell damage skills increase it. Never hurts the player. *(queued)* |
 | `damage_around(damage, radius)` | The same around the player. *(queued)* |
 
@@ -625,7 +627,7 @@ fn fireball_at(x, y) {
 
 fn fireball_hit(x, y) {
     play_sound("explosion");
-    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5, shake: 0.3 });
     damage_area(x, y, 2, 5);
     light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });   // embers
 }

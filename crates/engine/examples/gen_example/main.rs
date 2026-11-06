@@ -1530,7 +1530,7 @@ fn fireball_at(x, y) {
 
 fn fireball_hit(x, y) {
     play_sound("explosion");
-    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5, shake: 0.3 });
     damage_area(x, y, 2, 5);
     // Embers glow on for a few seconds.
     light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });

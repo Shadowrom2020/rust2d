@@ -489,6 +489,7 @@ impl Game {
         let away = (self.player.pos - from).try_normalize().unwrap_or(vec2(0.0, 1.0));
         self.combat.knock = away * KNOCKBACK * self.u();
         self.audio.play(&self.project.config.sfx.hurt);
+        self.hurt_feedback();
         if hp == 0 {
             self.player_defeated();
         }

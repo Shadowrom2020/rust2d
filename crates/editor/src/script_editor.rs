@@ -91,6 +91,8 @@ pub const API: &[ApiFn] = api! {
     "cure"(target: Target, effect: Effect) "Ends a status effect, e.g. cure(\"player\", \"poison\") (queued)";
     "cure"(target: Target) "Ends all status effects (queued)";
     "defeated_count"(character: Character) "How many characters of this definition the player has defeated (the bestiary's count), e.g. defeated_count(\"slime\")";
+    "shake"(seconds: Num) "Shakes the screen like a hit for a while: earthquakes, explosions (queued)";
+    "shake"(seconds: Num, strength: Num) "Shakes the screen; strength 1 = like a hit, 2 = twice as hard (queued)";
     "hp_of"(target: Target) "A character's HP right now: \"player\", \"self\" (also SELF), or a name on this map; -1 if there is no such character";
     "has_effect"(effect: Effect) "Whether the player has a status effect, e.g. has_effect(\"poison\")";
     "give_xp"(amount: Num) "Gives experience; enough of it raises the level (negative takes it away, the level never drops) (queued)";
@@ -114,7 +116,7 @@ pub const API: &[ApiFn] = api! {
     "fly"(sheet: Sheet, x: Num, y: Num, function: Func) "An animated sprite flies from the player to tile x, y, then calls function(x, y) (queued)";
     "fly"(sheet: Sheet, x: Num, y: Num, function: Func, options: Opts) "Like fly(); options #{ speed: tiles/s, frames: [first, last], fps, scale, light: radius, color: [r, g, b] } (queued)";
     "effect"(sheet: Sheet, x: Num, y: Num) "Plays a sprite sheet's frames once, centered on tile x, y (explosions) (queued)";
-    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius, color: [r, g, b] } (queued)";
+    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius, color: [r, g, b], shake: seconds } (queued)";
     "damage_area"(x: Num, y: Num, radius: Num, damage: Num) "Damages every character within radius tiles of tile x, y (spell damage skills apply) (queued)";
     "text"(text: Text) "Fills in {player}, {sir|madam} and {variable} placeholders";
     "random"(n: Num) "Random integer from 0 to n-1";

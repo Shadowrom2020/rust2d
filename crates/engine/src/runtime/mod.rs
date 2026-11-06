@@ -9,6 +9,7 @@ mod equipment;
 mod fx;
 mod inventory_ui;
 mod journal;
+mod juice;
 mod skills;
 mod lights;
 mod creator;
@@ -182,6 +183,8 @@ pub struct Game {
     pub assets: Assets,
     pub audio: Audio,
     combat: PlayerCombat,
+    /// Screen shake and the hurt flash.
+    juice: juice::Juice,
     /// Seconds since the player was defeated.
     game_over: Option<f32>,
     /// Short-lived visual effects: (position, age).
@@ -269,6 +272,7 @@ impl Game {
             resuming: false,
             autosave_pending: false,
             settings: crate::settings::Settings::default(),
+            juice: Default::default(),
             fullscreen: None,
             loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![], tile_lights: vec![] },
             project,
@@ -842,6 +846,7 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32) {
+        self.update_juice(dt);
         self.sync_script_player();
         // Esc opens the pause menu (unless a window or dialog uses Esc); it pauses everything.
         // (While a bolt spell is being aimed, Esc cancels the spell instead.)
@@ -1368,7 +1373,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1385,6 +1390,7 @@ impl Game {
             self.world.dialog_log.len(),
             input::pad_name(),
             self.combat.cooldown > 0.0,
+            self.juice_status(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),
@@ -1516,7 +1522,7 @@ impl Game {
             let t = get_time() as f32;
             focus += vec2((t * 0.07).sin() * 12.0 * ts, (t * 0.05).cos() * 6.0 * ts);
         }
-        let target = vec2(clamp_axis(focus.x, vw, mw), clamp_axis(focus.y, vh, mh));
+        let target = vec2(clamp_axis(focus.x, vw, mw), clamp_axis(focus.y, vh, mh)) + self.shake_offset();
         render::pixel_camera(target, scale)
     }
 
@@ -1604,6 +1610,7 @@ impl Game {
         if alpha > 0.0 {
             draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0., 0., 0., alpha));
         }
+        self.draw_hurt_flash();
         if !self.on_title() {
             if !self.ui_hidden {
                 self.draw_hud();
@@ -1941,6 +1948,10 @@ impl ActionHost for Game {
             }
             Action::CureEffect { target, kind } => {
                 self.cure_effect(target, ctx.owner, *kind);
+                Step::Continue
+            }
+            Action::Shake { seconds, strength } => {
+                self.shake_screen(*seconds, *strength);
                 Step::Continue
             }
             Action::OpenShop { target } => {

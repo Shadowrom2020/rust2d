@@ -702,7 +702,7 @@ fn speaker_field(ui: &mut Ui, id: &str, speaker: &mut String, refs: &Refs) {
 }
 
 /// The animated sprite of the Fly / Effect actions.
-fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs) {
+fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs, shake: bool) {
     labeled(ui, "sheet", |ui| suggest(ui, &format!("{id}/sheet"), &mut s.sheet, &refs.sheets, 120.0));
     labeled(ui, "frames", |ui| {
         ui.add(egui::DragValue::new(&mut s.first).range(0..=999));
@@ -718,6 +718,12 @@ fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, 
             ui.color_edit_button_srgb(&mut s.glow).on_hover_text("Color of the light");
         }
     });
+    if shake {
+        labeled(ui, "shake", |ui| {
+            ui.add(egui::DragValue::new(&mut s.shake).range(0.0..=5.0).speed(0.05).suffix(" s"))
+                .on_hover_text("Shakes the screen this long when it starts (explosions); 0 = no shake. Players can switch shaking off in the Options.");
+        });
+    }
 }
 
 /// A point in tile coordinates (10.5 = the middle of tile 10).
@@ -1132,7 +1138,7 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             ui.weak("The player clicks a target; the script function gets it as (x, y) in tiles.");
         }
         Action::Fly { sprite, x, y, speed, function } => {
-            fx_sprite_ui(ui, id, sprite, refs);
+            fx_sprite_ui(ui, id, sprite, refs, false);
             tile_point_ui(ui, "to", x, y);
             labeled(ui, "speed", |ui| {
                 ui.add(egui::DragValue::new(speed).range(0.5..=60.0).speed(0.1).suffix(" tiles/s"));
@@ -1140,7 +1146,7 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "then call", |ui| suggest(ui, &format!("{id}/fn"), function, &refs.functions, 130.0));
         }
         Action::Effect { sprite, x, y } => {
-            fx_sprite_ui(ui, id, sprite, refs);
+            fx_sprite_ui(ui, id, sprite, refs, true);
             tile_point_ui(ui, "at", x, y);
         }
         Action::DamageArea { x, y, radius, damage } => {
@@ -1291,6 +1297,14 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                         ui.selectable_value(kind, Some(k), k.label());
                     }
                 });
+            });
+        }
+        Action::Shake { seconds, strength } => {
+            labeled(ui, "shake for", |ui| {
+                ui.add(egui::DragValue::new(seconds).range(0.05..=10.0).speed(0.05).suffix(" s"));
+                ui.label("strength");
+                ui.add(egui::DragValue::new(strength).range(0.1..=5.0).speed(0.05).prefix("x "))
+                    .on_hover_text("1 = like a hit on the player. Players can switch shaking off in the Options.");
             });
         }
         Action::Autosave => {
