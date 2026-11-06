@@ -3,7 +3,7 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
-## Unreleased
+## 0.3.0 — 2026-11-06
 
 ### Gameplay
 - **Experience and levels** (optional per project, *Database › Project › Experience and levels*):
