@@ -40,6 +40,10 @@ pub enum Arg {
     Weather,
     /// Event name for emit().
     Event,
+    /// A crafting recipe id.
+    Recipe,
+    /// A crafting station (named by recipes).
+    Station,
     Text,
     Num,
     Bool,
@@ -159,6 +163,9 @@ pub const API: &[ApiFn] = api! {
     "patrol"(target: Target) "Starts a character's own patrol route (queued)";
     "patrol"(target: Target, points: List) "Patrols [[x, y], ...] tile waypoints (queued)";
     "stop_patrol"(target: Target) "Stops a character's patrol (queued)";
+    "open_crafting"(station: Station) "Opens the crafting window with the station's recipes (queued)";
+    "open_crafting"(station: Station, title: Text) "Opens the crafting window with a title, e.g. \"Alchemy table\" (queued)";
+    "can_craft"(recipe: Recipe) "Whether the player has the ingredients (and skill) for a recipe";
     "follow"(target: Target) "The character joins the player as a companion (queued, saved)";
     "stop_following"(target: Target) "The companion leaves: stays on its own map, else goes back home (queued)";
     "is_companion"(name: Text) "Whether the character with that name follows the player";
@@ -481,6 +488,13 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                 Some(Arg::Func) => known.functions.iter().map(|f| c(f, "script function")).collect(),
                 Some(Arg::Dir) => ["up", "down", "left", "right"].iter().map(|d| c(d, "direction")).collect(),
                 Some(Arg::Character) => db.characters.iter().map(|q| c(&q.id, &q.name)).collect(),
+                Some(Arg::Recipe) => db.recipes.iter().map(|q| c(&q.id, db.item(&q.result).map_or(q.result.as_str(), |d| d.name.as_str()))).collect(),
+                Some(Arg::Station) => {
+                    let mut v: Vec<String> = db.recipes.iter().map(|r| r.station.clone()).filter(|s| !s.is_empty()).collect();
+                    v.sort();
+                    v.dedup();
+                    v.iter().map(|s| c(s, "crafting station")).collect()
+                }
                 Some(Arg::Effect) => rust2d_engine::effects::EffectKind::ALL.iter().map(|k| c(k.id(), k.label())).collect(),
                 Some(Arg::Weather) => {
                     let mut v: Vec<Cand> = rust2d_engine::map::WeatherKind::ALL.iter().map(|k| c(k.id(), k.label())).collect();

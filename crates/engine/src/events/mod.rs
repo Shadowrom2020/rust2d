@@ -502,6 +502,8 @@ pub enum Action {
     /// A placed character joins the player as a companion (`join`) or leaves (goes back to
     /// where it is placed).
     Companion { target: TargetName, join: bool },
+    /// Opens the crafting window with the recipes of `station` (`title` "" = "Crafting").
+    OpenCrafting { station: String, title: String },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -604,6 +606,7 @@ impl Action {
             Action::SetWeather { .. } => "Set weather",
             Action::Schedule { .. } => "Schedule",
             Action::Companion { .. } => "Companion",
+            Action::OpenCrafting { .. } => "Open crafting",
         }
     }
 
@@ -666,6 +669,7 @@ impl Action {
             Action::SetWeather { map: s(), weather: Some(crate::map::Weather::new(crate::map::WeatherKind::Rain, 0.6)) },
             Action::Schedule { target: "self".into(), active: false },
             Action::Companion { target: "self".into(), join: true },
+            Action::OpenCrafting { station: s(), title: s() },
         ]
     }
 }

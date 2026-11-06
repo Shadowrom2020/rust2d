@@ -1,0 +1,79 @@
+[
+    (
+        id: "brew_potion",
+        result: "potion",
+        count: 1,
+        ingredients: [
+            (
+                item: "herb",
+                count: 2,
+            ),
+        ],
+        station: "alchemy",
+        skill: "",
+        level: 0,
+    ),
+    (
+        id: "brew_antidote",
+        result: "antidote",
+        count: 1,
+        ingredients: [
+            (
+                item: "herb",
+                count: 1,
+            ),
+            (
+                item: "mushroom",
+                count: 1,
+            ),
+        ],
+        station: "alchemy",
+        skill: "",
+        level: 0,
+    ),
+    (
+        id: "brew_mana",
+        result: "mana_potion",
+        count: 1,
+        ingredients: [
+            (
+                item: "mushroom",
+                count: 2,
+            ),
+            (
+                item: "apple",
+                count: 1,
+            ),
+        ],
+        station: "alchemy",
+        skill: "",
+        level: 0,
+    ),
+    (
+        id: "brew_swiftness",
+        result: "swiftness",
+        count: 1,
+        ingredients: [
+            (
+                item: "herb",
+                count: 2,
+            ),
+            (
+                item: "mushroom",
+                count: 2,
+            ),
+        ],
+        station: "alchemy",
+        skill: "arcana",
+        level: 1,
+    ),
+    (
+        id: "vomit_potion",
+        result: "",
+        count: 1,
+        ingredients: [],
+        station: "",
+        skill: "",
+        level: 0,
+    ),
+]

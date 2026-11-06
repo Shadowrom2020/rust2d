@@ -102,8 +102,9 @@ fn button_rect(row: Rect) -> Rect {
 }
 
 impl Game {
+    /// The trade or the crafting window is open (both block the other windows).
     pub(super) fn shop_open(&self) -> bool {
-        self.shop.is_open()
+        self.shop.is_open() || self.crafting.is_open()
     }
 
     /// The merchant spec of a character on the current map.

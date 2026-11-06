@@ -915,6 +915,8 @@ pub struct Database {
     /// Skills and spells (`ProjectConfig::skills` switches the systems on).
     pub skills: Vec<crate::skills::SkillDef>,
     pub spells: Vec<crate::skills::SpellDef>,
+    /// Crafting recipes.
+    pub recipes: Vec<crate::crafting::RecipeDef>,
 }
 
 /// A multi-tile asset ("structure"): tiles on several map layers, collision overrides and
@@ -976,6 +978,13 @@ impl Database {
     }
     pub fn spell(&self, id: &str) -> Option<&crate::skills::SpellDef> {
         self.spells.iter().find(|d| d.id == id)
+    }
+    pub fn recipe(&self, id: &str) -> Option<&crate::crafting::RecipeDef> {
+        self.recipes.iter().find(|d| d.id == id)
+    }
+    /// Recipes of a crafting station, in definition order.
+    pub fn recipes_at<'a>(&'a self, station: &'a str) -> impl Iterator<Item = &'a crate::crafting::RecipeDef> + 'a {
+        self.recipes.iter().filter(move |r| r.station == station)
     }
 
     /// Ids of all definitions of a kind (for editor dropdowns).

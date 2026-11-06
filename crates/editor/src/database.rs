@@ -29,6 +29,7 @@ pub enum Tab {
     Structures,
     Skills,
     Spells,
+    Recipes,
 }
 
 /// Inline "rename id" editor state; at most one rename is open at a time.
@@ -123,6 +124,7 @@ fn tab_icon(t: Tab) -> &'static str {
         Tab::Quests => ph::SCROLL,
         Tab::Skills => ph::STAR,
         Tab::Spells => ph::MAGIC_WAND,
+        Tab::Recipes => ph::HAMMER,
         Tab::Project => ph::GEAR,
         Tab::Scripts => ph::CODE,
     }
@@ -190,6 +192,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             (Tab::Structures, "Structures"),
             (Tab::Skills, "Skills"),
             (Tab::Spells, "Spells"),
+            (Tab::Recipes, "Recipes"),
             (Tab::Quests, "Quests"),
             (Tab::Project, "Project"),
             (Tab::Scripts, "Scripts"),
@@ -227,6 +230,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             Tab::Structures => db.structures.get(i).map(|d| (RefKind::Structure, d.id.clone())),
             Tab::Skills => db.skills.get(i).map(|d| (RefKind::Skill, d.id.clone())),
             Tab::Spells => db.spells.get(i).map(|d| (RefKind::Spell, d.id.clone())),
+            Tab::Recipes => db.recipes.get(i).map(|d| (RefKind::Recipe, d.id.clone())),
             _ => None,
         };
         if !library {
@@ -240,6 +244,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 Tab::Structures => Some(RefKind::Structure),
                 Tab::Skills => Some(RefKind::Skill),
                 Tab::Spells => Some(RefKind::Spell),
+                Tab::Recipes => Some(RefKind::Recipe),
                 _ => None,
             };
             if kind.is_some() {
@@ -385,6 +390,22 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     |ids| rust2d_engine::skills::SpellDef::new(&unique("spell", ids), "New spell", "", SpriteRef::default(), 5, 1.0, rust2d_engine::skills::SpellEffect::Heal { amount: 4 }),
                     |d| &mut d.id,
                 ),
+                Tab::Recipes => {
+                    // Listed by what they make.
+                    let names: std::collections::HashMap<String, String> = db.items.iter().map(|d| (d.id.clone(), d.name.clone())).collect();
+                    list_ui(
+                        ui,
+                        &mut db.recipes,
+                        sel,
+                        |d| {
+                            let made = names.get(&d.result).cloned().unwrap_or_else(|| d.result.clone());
+                            let at = if d.station.is_empty() { String::new() } else { format!(" @ {}", d.station) };
+                            format!("{made}{at}  ({})", d.id)
+                        },
+                        |ids| rust2d_engine::crafting::RecipeDef::new(&unique("recipe", ids), "", 1, Vec::new(), ""),
+                        |d| &mut d.id,
+                    )
+                }
                 Tab::Quests => list_ui(
                     ui,
                     &mut db.quests,
@@ -488,6 +509,11 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Spells => {
                         if let Some(d) = db.spells.get_mut(i) {
                             spell_form(ui, d, &mut cx);
+                        }
+                    }
+                    Tab::Recipes => {
+                        if let Some(d) = db.recipes.get_mut(i) {
+                            recipe_form(ui, d, &mut cx);
                         }
                     }
                     Tab::Structures => {
@@ -2294,6 +2320,53 @@ fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &m
     ui.separator();
     ui.heading("Icon");
     widgets::sprite_field(ui, "skill_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
+}
+
+fn recipe_form(ui: &mut egui::Ui, d: &mut rust2d_engine::crafting::RecipeDef, cx: &mut Cx) {
+    ui.heading("Recipe");
+    rename_row(ui, RefKind::Recipe, &d.id, cx.rename);
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::hover());
+        if let Some(it) = cx.db.item(&d.result) {
+            widgets::paint_sprite(ui, cx.tex, cx.assets, &it.icon, rect);
+        }
+        ui.label("Makes");
+        ui.add(egui::DragValue::new(&mut d.count).range(1..=999));
+        ui.label("x");
+        widgets::suggest(ui, "recipe_result", &mut d.result, &cx.refs.items, 140.0);
+    });
+    if !d.result.is_empty() && cx.db.item(&d.result).is_none() {
+        ui.colored_label(egui::Color32::YELLOW, format!("There is no item '{}'.", d.result));
+    }
+    ui.separator();
+    ui.heading("Ingredients");
+    ui.weak("Used up when the recipe is made (from the inventory, then what the player wears).");
+    widgets::carried_ui(ui, "recipe_ing", &mut d.ingredients, &cx.refs.items);
+    ui.separator();
+    egui::Grid::new("recipe_where").num_columns(2).show(ui, |ui| {
+        ui.label("Station");
+        ui.horizontal(|ui| {
+            widgets::suggest(ui, "recipe_station", &mut d.station, &cx.refs.stations, 120.0);
+            if d.station.is_empty() {
+                ui.weak("(none)");
+            }
+        })
+        .response
+        .on_hover_text("Where it is made: the 'Open crafting' action / open_crafting(station) shows the recipes of a station, e.g. on a workbench prop's Interact trigger");
+        ui.end_row();
+        ui.label("Requires skill");
+        ui.horizontal(|ui| {
+            widgets::suggest(ui, "recipe_skill", &mut d.skill, &cx.refs.skills, 120.0);
+            if !d.skill.is_empty() {
+                ui.label("at level");
+                ui.add(egui::DragValue::new(&mut d.level).range(0..=99));
+            } else {
+                ui.weak("(none)");
+            }
+        });
+        ui.end_row();
+    });
+    ui.weak("Players make it in the crafting window: give a prop (a workbench, an anvil, an alchemy table) an Interact trigger with the 'Open crafting' action for this station. Scripts: open_crafting(station[, title]), can_craft(recipe).");
 }
 
 fn spell_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SpellDef, cx: &mut Cx) {

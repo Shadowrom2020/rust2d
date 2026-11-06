@@ -33,6 +33,14 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   by enemies, regain HP when it is calm, and run their own triggers when talked to. Knocked out
   they go home; dismissed they stay (own map) or go home. Example: the town guard comes along to
   Whisperwood once the elder's quest is accepted. Game `status` prints `companions=`.
+- **Crafting**: recipes (`defs/recipes.ron`, *Database › Recipes*: result and count,
+  ingredients, station, optional skill level) are made in a crafting window opened by the new
+  **Open crafting** action / `open_crafting(station[, title])`; `can_craft(recipe)` checks one.
+  The window shows each recipe's ingredients with what the player has and a *Make* button
+  (Shift: ten). Recipes are asset-library assets (with their items) and follow item renames.
+  Example: an alchemy table in Tilda's shop with four brews, Healing Herbs and Red Caps along the
+  forest path (new items), herbs for sale at Tilda's. Game `status` prints `crafting=`, autoplay
+  `craft K` clicks a recipe's *Make* button.
 - **Changed:** the player's attacks (melee, arrows, spells, clicking to attack) only hit hostile
   characters. Friendly characters with HP (companions, the guard) can't be hurt by the player;
   make a huntable animal hostile with 0 damage.

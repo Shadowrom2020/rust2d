@@ -160,6 +160,33 @@
         lock: None,
     ),
     (
+        id: "alchemy_table",
+        name: "Alchemy Table",
+        sprite: (
+            sheet: "props",
+            frame: 72,
+        ),
+        solid: true,
+        default_state: "default",
+        states: [],
+        hitbox: (52.0, 20.0),
+        triggers: [
+            (
+                on: Interact,
+                conditions: [],
+                actions: [
+                    OpenCrafting(
+                        station: "alchemy",
+                        title: "Alchemy Table",
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        container: None,
+        lock: None,
+    ),
+    (
         id: "double_gate",
         name: "Double Gate",
         sprite: (

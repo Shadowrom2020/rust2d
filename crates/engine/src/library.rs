@@ -35,7 +35,7 @@ const PACK_VERSION: u32 = 1;
 pub type AssetRef = (RefKind, String);
 
 /// Asset kinds in dependency order (things later in the list may refer to earlier ones).
-pub const KINDS: [RefKind; 9] = [RefKind::Tileset, RefKind::Sheet, RefKind::Sound, RefKind::Item, RefKind::Prop, RefKind::Character, RefKind::Structure, RefKind::Skill, RefKind::Spell];
+pub const KINDS: [RefKind; 10] = [RefKind::Tileset, RefKind::Sheet, RefKind::Sound, RefKind::Item, RefKind::Prop, RefKind::Character, RefKind::Structure, RefKind::Skill, RefKind::Spell, RefKind::Recipe];
 
 pub fn kind_label(k: RefKind) -> &'static str {
     match k {
@@ -49,6 +49,7 @@ pub fn kind_label(k: RefKind) -> &'static str {
         RefKind::Structure => "Structure",
         RefKind::Skill => "Skill",
         RefKind::Spell => "Spell",
+        RefKind::Recipe => "Recipe",
     }
 }
 
@@ -75,6 +76,8 @@ struct Manifest {
     skills: Vec<crate::skills::SkillDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     spells: Vec<crate::skills::SpellDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recipes: Vec<crate::crafting::RecipeDef>,
     /// Script functions by name (their whole source text).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     scripts: BTreeMap<String, String>,
@@ -144,6 +147,7 @@ pub fn exists(db: &Database, a: &AssetRef) -> bool {
         RefKind::Structure => db.structure(id).is_some(),
         RefKind::Skill => db.skill(id).is_some(),
         RefKind::Spell => db.spell(id).is_some(),
+        RefKind::Recipe => db.recipe(id).is_some(),
         RefKind::Map => false,
     }
 }
@@ -157,6 +161,7 @@ pub fn deps(db: &Database, a: &AssetRef) -> Vec<AssetRef> {
         RefKind::Structure => db.structure(&a.1).map(refactor::refs_of_structure),
         RefKind::Skill => db.skill(&a.1).map(refactor::refs_of_skill),
         RefKind::Spell => db.spell(&a.1).map(refactor::refs_of_spell),
+        RefKind::Recipe => db.recipe(&a.1).map(refactor::refs_of_recipe),
         _ => None,
     };
     refs.unwrap_or_default().into_iter().filter(|r| r.0 != RefKind::Map).collect()
@@ -174,6 +179,7 @@ pub fn all_assets(db: &Database) -> Vec<AssetRef> {
     out.extend(db.structures.iter().map(|d| (RefKind::Structure, d.id.clone())));
     out.extend(db.skills.iter().map(|d| (RefKind::Skill, d.id.clone())));
     out.extend(db.spells.iter().map(|d| (RefKind::Spell, d.id.clone())));
+    out.extend(db.recipes.iter().map(|d| (RefKind::Recipe, d.id.clone())));
     out
 }
 
@@ -293,6 +299,7 @@ impl Bundle {
             structures: db.structures.iter().filter(|d| has(RefKind::Structure, &d.id)).cloned().collect(),
             skills: db.skills.iter().filter(|d| has(RefKind::Skill, &d.id)).cloned().collect(),
             spells: db.spells.iter().filter(|d| has(RefKind::Spell, &d.id)).cloned().collect(),
+            recipes: db.recipes.iter().filter(|d| has(RefKind::Recipe, &d.id)).cloned().collect(),
             quests: Vec::new(),
         };
         let mut files = BTreeMap::new();
@@ -355,6 +362,7 @@ impl Bundle {
             structures: self.db.structures.clone(),
             skills: self.db.skills.clone(),
             spells: self.db.spells.clone(),
+            recipes: self.db.recipes.clone(),
             scripts: self.scripts.clone(),
         };
         let cfg = ron::ser::PrettyConfig::default().struct_names(false);
@@ -394,7 +402,7 @@ impl Bundle {
             f.read_to_end(&mut data)?;
             files.insert(rel, data);
         }
-        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters, structures: m.structures, skills: m.skills, spells: m.spells };
+        let db = Database { tilesets: m.tilesets, sheets: m.sheets, sounds: m.sounds, items: m.items, props: m.props, quests: Vec::new(), characters: m.characters, structures: m.structures, skills: m.skills, spells: m.spells, recipes: m.recipes };
         let b = Bundle { name: m.name, tile_size: m.tile_size, db, files, scripts: m.scripts };
         for rel in b.db.tilesets.iter().map(|d| &d.image).chain(b.db.sheets.iter().map(|d| &d.image)).chain(b.db.sounds.iter().map(|d| &d.file)) {
             if !rel.is_empty() && !b.files.contains_key(rel) {
@@ -465,6 +473,7 @@ impl Bundle {
             RefKind::Structure => self.db.structures.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Skill => self.db.skills.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Spell => self.db.spells.iter_mut().for_each(|d| set(&mut d.id)),
+            RefKind::Recipe => self.db.recipes.iter_mut().for_each(|d| set(&mut d.id)),
             RefKind::Map => {}
         }
         let mut cfg = ProjectConfig::new("");
@@ -488,6 +497,7 @@ impl Bundle {
             RefKind::Structure => db.structure(id) == self.db.structure(id),
             RefKind::Skill => db.skill(id) == self.db.skill(id),
             RefKind::Spell => db.spell(id) == self.db.spell(id),
+            RefKind::Recipe => db.recipe(id) == self.db.recipe(id),
             RefKind::Map => true,
         }
     }
@@ -560,6 +570,7 @@ impl Bundle {
         self.db.structures.retain(|d| new(RefKind::Structure, &d.id));
         self.db.skills.retain(|d| new(RefKind::Skill, &d.id));
         self.db.spells.retain(|d| new(RefKind::Spell, &d.id));
+        self.db.recipes.retain(|d| new(RefKind::Recipe, &d.id));
         let used = files_of(&self.db);
         self.files.retain(|rel, _| used.contains(rel));
         let mut report = self.merge_into(db, root)?;
@@ -654,6 +665,7 @@ impl Bundle {
                 RefKind::Structure => db.structures.extend(self.db.structure(id).cloned()),
                 RefKind::Skill => db.skills.extend(self.db.skill(id).cloned()),
                 RefKind::Spell => db.spells.extend(self.db.spell(id).cloned()),
+                RefKind::Recipe => db.recipes.extend(self.db.recipe(id).cloned()),
                 RefKind::Map => {}
             }
             report.added.push(a);
@@ -710,6 +722,7 @@ pub fn remove_assets(project: &mut Project, assets: &[AssetRef]) -> Result<()> {
     db.structures.retain(|d| keep(RefKind::Structure, &d.id));
     db.skills.retain(|d| keep(RefKind::Skill, &d.id));
     db.spells.retain(|d| keep(RefKind::Spell, &d.id));
+    db.recipes.retain(|d| keep(RefKind::Recipe, &d.id));
     let files_after = files_of(&project.db);
     for f in files_before.difference(&files_after) {
         if safe_rel(f) {
@@ -907,6 +920,21 @@ mod tests {
         for p in [root, dest, other] {
             let _ = std::fs::remove_dir_all(p);
         }
+    }
+
+    #[test]
+    fn recipes_bring_their_items() {
+        let (root, mut db) = source("recipes");
+        db.recipes.push(crate::crafting::RecipeDef::new("fletch", "arrows", 10, vec![crate::inventory::ItemStack::new("bow", 1)], "bench"));
+        let r = (RefKind::Recipe, "fletch".to_string());
+        let b = Bundle::collect(&db, &root, 16, "x", std::slice::from_ref(&r)).unwrap();
+        assert!(b.db.item("arrows").is_some() && b.db.item("bow").is_some() && b.db.sheet("items").is_some());
+        let b = Bundle::from_pack(&b.to_pack().unwrap()).unwrap();
+        assert_eq!(b.db.recipe("fletch"), db.recipe("fletch"));
+        // Renaming an item in a project follows into its recipes.
+        let mut cfg = ProjectConfig::new("p");
+        assert_eq!(refactor::rename_in_db(&mut db, &mut cfg, RefKind::Item, "bow", "longbow"), 1, "only the recipe ingredient refers to the bow");
+        assert_eq!(db.recipe("fletch").unwrap().ingredients[0].item, "longbow");
     }
 
     #[test]
