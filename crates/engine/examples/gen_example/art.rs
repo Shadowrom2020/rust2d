@@ -446,7 +446,7 @@ fn pine_tier(c: &mut Canvas, cx: f32, y: f32, k: f32, h: f32) {
 
 pub fn terrain(out: &Path) {
     let cols = 8;
-    let mut c = Canvas::new(cols * TS, 5 * TS);
+    let mut c = Canvas::new(cols * TS, 25 * TS);
     let mut rng = Rng(7);
     let n = TS as i32;
     let oak = tree_pair(false);
@@ -467,69 +467,18 @@ pub fn terrain(out: &Path) {
                     c.px(x + 1, y + 2, hex(0x2f6e2a));
                 }
             }
-            t::PATH => {
-                c.ground(0xc2a46e, 0xd4b886, 0xab8d5a, &mut rng, 0.22);
-                for _ in 0..5 {
-                    let (x, y) = (rng.range(TS) as i32, rng.range(TS) as i32);
-                    c.wrap(x, y, hex(0x9c8158));
-                    c.wrap(x + 1, y, hex(0x9c8158));
-                    c.wrap(x, y - 1, hex(0xe6d2a6));
-                }
-            }
-            t::WATER | t::WATER_2 | t::WATER_3 => {
-                // Same speckles each frame; the wave crests drift right.
-                let mut wrng = Rng(77);
-                c.ground(0x3a72c8, 0x4682d6, 0x3268ba, &mut wrng, 0.12);
-                let shift = match i {
+            t::PATH => path(&mut c, &mut rng),
+            t::WATER | t::WATER_2 | t::WATER_3 => water(
+                &mut c,
+                match i {
                     t::WATER => 0,
                     t::WATER_2 => 4,
                     _ => 8,
-                };
-                for (k, x) in [(0, 3), (1, 18), (2, 9), (3, 25)] {
-                    let y = 4 + k * 8;
-                    for d in 0..7 {
-                        let lift = if d == 0 || d == 6 { 1 } else { 0 };
-                        c.wrap(x + shift + d, y + lift, hex(0x9ccbf5));
-                        c.wrap(x + shift + d, y + 1 + lift, hex(0x5a92dc));
-                    }
-                }
-                c.wrap(12 + shift * 2, 15, hex(0xffffff));
-            }
-            t::SAND => {
-                c.ground(0xe2cf92, 0xf0e0aa, 0xcdb878, &mut rng, 0.18);
-                for y in [7, 22] {
-                    for x in 0..n {
-                        if (x / 4) % 3 != 0 {
-                            c.px(x, y + ((x / 4) % 2), hex(0xd2bd80));
-                        }
-                    }
-                }
-            }
-            t::STONE_FLOOR => {
-                for (x, y) in [(0, 0), (16, 0), (0, 16), (16, 16)] {
-                    let tone = if (x + y) % 32 == 0 { 0x8d8d96 } else { 0x85858e };
-                    c.shade_box(x, y, 16, 16, ramp(tone));
-                    for _ in 0..6 {
-                        c.px(x + 2 + rng.range(12) as i32, y + 2 + rng.range(12) as i32, hex(mul(tone, 0.88)));
-                    }
-                }
-            }
-            t::WOOD_FLOOR => {
-                for (row, y) in (0..n).step_by(8).enumerate() {
-                    let tone = [0xa0703f, 0x98693a, 0xa87644, 0x9c6c3c][row % 4];
-                    c.rect(0, y, n, 8, hex(tone));
-                    c.hline(0, y, n, hex(mul(tone, 1.15)));
-                    c.hline(0, y + 7, n, hex(0x5e3d1e));
-                    let seam = [5, 21, 13, 27][row % 4];
-                    c.vline(seam, y, 8, hex(0x5e3d1e));
-                    c.px(seam - 2, y + 3, hex(0x4a2e14));
-                    c.px(seam + 2, y + 3, hex(0x4a2e14));
-                    for _ in 0..3 {
-                        let (x, gy) = (rng.range(TS) as i32, y + 2 + rng.range(4) as i32);
-                        c.hline(x, gy, 4, hex(mul(tone, 0.88)));
-                    }
-                }
-            }
+                },
+            ),
+            t::SAND => sand(&mut c, &mut rng),
+            t::STONE_FLOOR => stone_floor(&mut c, &mut rng),
+            t::WOOD_FLOOR => wood_floor(&mut c, &mut rng),
             t::VOID => c.rect(0, 0, n, n, hex(0x0d0d14)),
             t::STONE_WALL | t::CLIFF => {
                 let base = if i == t::CLIFF { 0x6b5d52 } else { 0x8a8a94 };
@@ -687,25 +636,7 @@ pub fn terrain(out: &Path) {
                 c.rect(0, 0, n, 3, hex(WOOD[0]));
                 c.rect(0, 29, n, 3, hex(WOOD[0]));
             }
-            t::RUG => {
-                // Seamless woven pattern: a gold diamond lattice with blue centres.
-                c.rect(0, 0, n, n, hex(0xa83a3a));
-                for y in 0..n {
-                    for x in 0..n {
-                        let (dx, dy) = ((x - 16).abs(), (y - 16).abs());
-                        let d = dx + dy;
-                        if d == 15 || d == 16 {
-                            c.px(x, y, hex(0xe8c05a));
-                        } else if d == 13 || d == 18 {
-                            c.px(x, y, hex(0x7e2626));
-                        } else if d < 4 {
-                            c.px(x, y, hex(if d < 2 { 0x6f97d6 } else { 0x3f6fb5 }));
-                        } else if (x + y) % 4 == 0 && d > 6 && d < 11 {
-                            c.px(x, y, hex(0xc04848));
-                        }
-                    }
-                }
-            }
+            t::RUG => rug(&mut c),
             t::TABLE => {
                 c.shadow(16.0, 28.0, 14.0, 3.0);
                 c.shade_box(2, 6, 28, 16, WOOD);
@@ -760,22 +691,7 @@ pub fn terrain(out: &Path) {
                     c.rect(1, y + 12, 30, 2, hex(WOOD[2]));
                 }
             }
-            t::FOREST_FLOOR => {
-                c.ground(0x356b33, 0x427d3d, 0x2b5a29, &mut rng, 0.25);
-                for _ in 0..4 {
-                    let (x, y) = (rng.range(TS) as i32, rng.range(TS) as i32);
-                    let col = [0x8a6d2e, 0x6b8a2e, 0xa0522d][rng.range(3) as usize];
-                    c.wrap(x, y, hex(col));
-                    c.wrap(x + 1, y, hex(col));
-                    c.wrap(x + 1, y + 1, hex(mul(col, 0.8)));
-                }
-                for _ in 0..2 {
-                    let (x, y) = (rng.range(TS) as i32, rng.range(TS) as i32);
-                    for k in 0..4 {
-                        c.wrap(x + k, y + k / 2, hex(0x5a4020));
-                    }
-                }
-            }
+            t::FOREST_FLOOR => forest_floor(&mut c, &mut rng),
             t::MUSHROOM => {
                 for (cx, cy, r, stem) in [(12.0f32, 14.0f32, 9.0f32, 7), (24.0, 22.0, 5.0, 4)] {
                     let sx = cx as i32;
@@ -802,16 +718,297 @@ pub fn terrain(out: &Path) {
                 c.rrect(5, 8, 22, 24, 10, hex(0x120d0a));
                 c.rect(8, 26, 16, 6, hex(0x1e1712));
             }
-            t::SNOW => {
-                c.ground(0xeef2f7, 0xffffff, 0xd8e0ec, &mut rng, 0.14);
-                for _ in 0..4 {
-                    c.px(rng.range(TS) as i32, rng.range(TS) as i32, hex(0xb8c8e0));
-                }
-            }
+            t::SNOW => snow(&mut c, &mut rng),
             _ => {}
         }
     }
+    terrain_edges(&mut c);
     c.save(&out.join("tilesets/terrain.png"));
+}
+
+fn sand(c: &mut Canvas, rng: &mut Rng) {
+    let n = TS as i32;
+    c.ground(0xe2cf92, 0xf0e0aa, 0xcdb878, rng, 0.18);
+    for y in [7, 22] {
+        for x in 0..n {
+            if (x / 4) % 3 != 0 {
+                c.px(x, y + ((x / 4) % 2), hex(0xd2bd80));
+            }
+        }
+    }
+}
+
+fn stone_floor(c: &mut Canvas, rng: &mut Rng) {
+    for (x, y) in [(0, 0), (16, 0), (0, 16), (16, 16)] {
+        let tone = if (x + y) % 32 == 0 { 0x8d8d96 } else { 0x85858e };
+        c.shade_box(x, y, 16, 16, ramp(tone));
+        for _ in 0..6 {
+            c.px(x + 2 + rng.range(12) as i32, y + 2 + rng.range(12) as i32, hex(mul(tone, 0.88)));
+        }
+    }
+}
+
+fn wood_floor(c: &mut Canvas, rng: &mut Rng) {
+    let n = TS as i32;
+    for (row, y) in (0..n).step_by(8).enumerate() {
+        let tone = [0xa0703f, 0x98693a, 0xa87644, 0x9c6c3c][row % 4];
+        c.rect(0, y, n, 8, hex(tone));
+        c.hline(0, y, n, hex(mul(tone, 1.15)));
+        c.hline(0, y + 7, n, hex(0x5e3d1e));
+        let seam = [5, 21, 13, 27][row % 4];
+        c.vline(seam, y, 8, hex(0x5e3d1e));
+        c.px(seam - 2, y + 3, hex(0x4a2e14));
+        c.px(seam + 2, y + 3, hex(0x4a2e14));
+        for _ in 0..3 {
+            let (x, gy) = (rng.range(TS) as i32, y + 2 + rng.range(4) as i32);
+            c.hline(x, gy, 4, hex(mul(tone, 0.88)));
+        }
+    }
+}
+
+fn rug(c: &mut Canvas) {
+    let n = TS as i32;
+    // Seamless woven pattern: a gold diamond lattice with blue centres.
+    c.rect(0, 0, n, n, hex(0xa83a3a));
+    for y in 0..n {
+        for x in 0..n {
+            let (dx, dy) = ((x - 16).abs(), (y - 16).abs());
+            let d = dx + dy;
+            if d == 15 || d == 16 {
+                c.px(x, y, hex(0xe8c05a));
+            } else if d == 13 || d == 18 {
+                c.px(x, y, hex(0x7e2626));
+            } else if d < 4 {
+                c.px(x, y, hex(if d < 2 { 0x6f97d6 } else { 0x3f6fb5 }));
+            } else if (x + y) % 4 == 0 && d > 6 && d < 11 {
+                c.px(x, y, hex(0xc04848));
+            }
+        }
+    }
+}
+
+fn forest_floor(c: &mut Canvas, rng: &mut Rng) {
+    c.ground(0x356b33, 0x427d3d, 0x2b5a29, rng, 0.25);
+    for _ in 0..4 {
+        let (x, y) = (rng.range(TS) as i32, rng.range(TS) as i32);
+        let col = [0x8a6d2e, 0x6b8a2e, 0xa0522d][rng.range(3) as usize];
+        c.wrap(x, y, hex(col));
+        c.wrap(x + 1, y, hex(col));
+        c.wrap(x + 1, y + 1, hex(mul(col, 0.8)));
+    }
+    for _ in 0..2 {
+        let (x, y) = (rng.range(TS) as i32, rng.range(TS) as i32);
+        for k in 0..4 {
+            c.wrap(x + k, y + k / 2, hex(0x5a4020));
+        }
+    }
+}
+
+fn snow(c: &mut Canvas, rng: &mut Rng) {
+    c.ground(0xeef2f7, 0xffffff, 0xd8e0ec, rng, 0.14);
+    for _ in 0..4 {
+        c.px(rng.range(TS) as i32, rng.range(TS) as i32, hex(0xb8c8e0));
+    }
+}
+
+fn path(c: &mut Canvas, rng: &mut Rng) {
+    c.ground(0xc2a46e, 0xd4b886, 0xab8d5a, rng, 0.22);
+    for _ in 0..5 {
+        let (x, y) = (rng.range(TS) as i32, rng.range(TS) as i32);
+        c.wrap(x, y, hex(0x9c8158));
+        c.wrap(x + 1, y, hex(0x9c8158));
+        c.wrap(x, y - 1, hex(0xe6d2a6));
+    }
+}
+
+/// A water frame: the same speckles each frame; the wave crests drift right by `shift`.
+fn water(c: &mut Canvas, shift: i32) {
+    let mut wrng = Rng(77);
+    c.ground(0x3a72c8, 0x4682d6, 0x3268ba, &mut wrng, 0.12);
+    for (k, x) in [(0, 3), (1, 18), (2, 9), (3, 25)] {
+        let y = 4 + k * 8;
+        for d in 0..7 {
+            let lift = if d == 0 || d == 6 { 1 } else { 0 };
+            c.wrap(x + shift + d, y + lift, hex(0x9ccbf5));
+            c.wrap(x + shift + d, y + 1 + lift, hex(0x5a92dc));
+        }
+    }
+    c.wrap(12 + shift * 2, 15, hex(0xffffff));
+}
+
+/// How the edge tiles of an auto-tiling terrain look (`edge_block`).
+pub struct EdgeArt<'a> {
+    /// Draws the terrain filling a tile at the canvas origin (argument: the neighbour mask).
+    pub inside: &'a dyn Fn(&mut Canvas, usize),
+    /// Draws what surrounds the terrain, filling a tile at the canvas origin.
+    pub outside: &'a dyn Fn(&mut Canvas, usize),
+    /// Wobbly sides with round corners (ground, water); false: straight sides (rugs, paving).
+    pub natural: bool,
+    /// Width of the surroundings' band on the open sides, in px.
+    pub band: f32,
+    /// Colour of the terrain's rim along its border (None: the terrain a little darker).
+    pub rim_in: Option<u32>,
+    /// Width of that rim, in px.
+    pub rim_w: i32,
+    /// Colour of the surroundings' pixels touching the terrain (None: unchanged).
+    pub rim_out: Option<u32>,
+}
+
+impl EdgeArt<'_> {
+    /// Whether pixel `(x, y)` of the tile for neighbour mask `mask` shows the surroundings: a
+    /// band along every open side (whose neighbour isn't the terrain), with rounded corners. The
+    /// wobble repeats every 32 px, so the bands of neighbouring tiles join up.
+    fn outside_at(&self, mask: usize, x: i32, y: i32) -> bool {
+        use rust2d_engine::autotile::{EAST, NORTH, SOUTH, WEST};
+        let natural = self.natural;
+        let wob = |p: i32| {
+            if !natural {
+                return 0.0;
+            }
+            let a = p as f32 * std::f32::consts::TAU / 32.0;
+            1.2 * (2.0 * a).sin() + 0.7 * (3.0 * a + 1.0).sin()
+        };
+        let open = |bit: usize| mask & bit == 0;
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        let w = self.band;
+        let sides = [(NORTH, fy, w + wob(x)), (SOUTH, 32.0 - fy, w + wob(x + 16)), (WEST, fx, w + wob(y + 8)), (EAST, 32.0 - fx, w + wob(y + 24))];
+        if sides.iter().any(|&(bit, d, b)| open(bit) && d < b) {
+            return true;
+        }
+        let r = if natural { 6.0 } else { 2.5 };
+        for (a, b) in [(0, 2), (0, 3), (1, 2), (1, 3)] {
+            let ((ba, da, wa), (bb, db, wb)) = (sides[a], sides[b]);
+            if open(ba) && open(bb) && da < wa + r && db < wb + r {
+                let (u, v) = (wa + r - da, wb + r - db);
+                if u * u + v * v > r * r {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+/// A 4×4 block of a terrain's edge tiles in neighbour-mask order (row by row), its top-left
+/// tile at index `first` of a sheet `cols` tiles wide.
+pub fn edge_block(c: &mut Canvas, first: u32, cols: u32, art: &EdgeArt) {
+    let n = TS as i32;
+    for k in 0..16usize {
+        let i = rust2d_engine::autotile::Terrain::block_tile(first, cols, k);
+        c.at(i % cols * TS, i / cols * TS);
+        (art.inside)(c, k);
+        let mut g = Canvas::new(TS, TS);
+        (art.outside)(&mut g, k);
+        let out = |x: i32, y: i32| (0..n).contains(&x) && (0..n).contains(&y) && art.outside_at(k, x, y);
+        // Distance (in px, up to the rim width) from an inside pixel to the surroundings.
+        let near = |x: i32, y: i32, d: i32| (-d..=d).any(|dy| (-d..=d).any(|dx| (dx != 0 || dy != 0) && dx.abs() + dy.abs() <= d && out(x + dx, y + dy)));
+        for y in 0..n {
+            for x in 0..n {
+                if out(x, y) {
+                    let touching = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| (0..n).contains(&(x + dx)) && (0..n).contains(&(y + dy)) && !out(x + dx, y + dy));
+                    c.px(x, y, match art.rim_out {
+                        Some(col) if touching => hex(col),
+                        _ => g.get(x, y),
+                    });
+                } else if near(x, y, art.rim_w) {
+                    let col = c.get(x, y);
+                    c.px(x, y, art.rim_in.map_or(Color::new(col.r * 0.8, col.g * 0.8, col.b * 0.8, 1.0), hex));
+                }
+            }
+        }
+    }
+}
+
+/// Where a terrain's 4×4 block starts: blocks go two per band of four rows, from row `row0`
+/// of a sheet `cols` (8) tiles wide.
+pub fn block_start(row0: u32, block: u32) -> u32 {
+    (row0 + block / 2 * 4) * 8 + block % 2 * 4
+}
+
+/// The terrain tileset's auto-tiling terrains, in block order (rows 5–24 of terrain.png), with
+/// the tile each terrain's inside uses (the ordinary tile, so painted areas match the maps;
+/// `None` = the block's own full tile), what erasing leaves, and the terrains lying on it.
+const TERRAINS: [(&str, Option<u32>, u32, &[&str]); 10] = [
+    ("Dirt path", Some(t::PATH), t::GRASS, &["Forest path"]),
+    ("Pond", Some(t::WATER), t::GRASS, &[]),
+    ("Sand", Some(t::SAND), t::GRASS, &["Shore"]),
+    // Its own inside tile (animated like water): a tile belongs to one terrain only.
+    ("Shore", None, t::SAND, &[]),
+    ("Forest floor", Some(t::FOREST_FLOOR), t::GRASS, &["Snowfield", "Forest path", "Stream"]),
+    ("Snowfield", Some(t::SNOW), t::FOREST_FLOOR, &[]),
+    ("Forest path", None, t::FOREST_FLOOR, &["Dirt path"]),
+    ("Stream", None, t::FOREST_FLOOR, &[]),
+    ("Flagstones", Some(t::STONE_FLOOR), t::GRASS, &[]),
+    ("Rug", Some(t::RUG), t::WOOD_FLOOR, &[]),
+];
+
+/// Index of a terrain in `terrains()` by name.
+pub fn terrain_index(name: &str) -> usize {
+    TERRAINS.iter().position(|t| t.0 == name).unwrap()
+}
+
+/// The terrain tileset's auto-tiling terrains.
+pub fn terrains() -> Vec<rust2d_engine::autotile::Terrain> {
+    TERRAINS
+        .iter()
+        .enumerate()
+        .map(|(b, &(name, inside, base, joins))| {
+            let mut tr = rust2d_engine::autotile::Terrain { name: name.into(), base: Some(base), joins: joins.iter().map(|j| j.to_string()).collect(), ..Default::default() };
+            tr.fill_from_block(block_start(5, b as u32), 8);
+            if let Some(i) = inside {
+                tr.tiles[15] = Some(i);
+            }
+            tr
+        })
+        .collect()
+}
+
+/// Animations of the terrain tileset: the water, and the insides of the water terrains with
+/// their own tiles (Shore, Stream) cycling through the same frames.
+pub fn terrain_anims() -> Vec<rust2d_engine::defs::TileAnim> {
+    let frames = vec![t::WATER, t::WATER_2, t::WATER_3, t::WATER_2];
+    let mut v = vec![rust2d_engine::defs::TileAnim { tile: t::WATER, frames: frames.clone(), fps: 3.0 }];
+    for name in ["Shore", "Stream"] {
+        let inside = rust2d_engine::autotile::Terrain::block_tile(block_start(5, terrain_index(name) as u32), 8, 15);
+        v.push(rust2d_engine::defs::TileAnim { tile: inside, frames: frames.clone(), fps: 3.0 });
+    }
+    v
+}
+
+/// Solid tiles of the terrain tileset: `SOLID` plus the edge tiles of the water terrains
+/// (water you can't walk into, with a bank drawn on it).
+pub fn terrain_solid() -> Vec<u32> {
+    let water = ["Pond", "Shore", "Stream"].map(terrain_index);
+    let mut v: Vec<u32> = SOLID.to_vec();
+    for b in water {
+        v.extend((0..16).map(|k| rust2d_engine::autotile::Terrain::block_tile(block_start(5, b as u32), 8, k)));
+    }
+    v
+}
+
+/// Draws the edge blocks of `TERRAINS` into terrain.png.
+fn terrain_edges(c: &mut Canvas) {
+    let grass_out = |g: &mut Canvas, k: usize| grass(g, &mut Rng(900 + k as u64));
+    let forest_out = |g: &mut Canvas, k: usize| forest_floor(g, &mut Rng(930 + k as u64));
+    let sand_out = |g: &mut Canvas, k: usize| sand(g, &mut Rng(960 + k as u64));
+    let wood_out = |g: &mut Canvas, k: usize| wood_floor(g, &mut Rng(990 + k as u64));
+    let path_in = |c: &mut Canvas, k: usize| path(c, &mut Rng(500 + k as u64));
+    let water_in = |c: &mut Canvas, _: usize| water(c, 0);
+    let arts: [EdgeArt; 10] = [
+        EdgeArt { inside: &path_in, outside: &grass_out, natural: true, band: 6.0, rim_in: None, rim_w: 1, rim_out: Some(0x3d7a33) },
+        EdgeArt { inside: &water_in, outside: &grass_out, natural: true, band: 6.0, rim_in: Some(0x2c5aa8), rim_w: 1, rim_out: Some(0x3d7a33) },
+        EdgeArt { inside: &|c, k| sand(c, &mut Rng(600 + k as u64)), outside: &grass_out, natural: true, band: 6.0, rim_in: Some(0xcdb878), rim_w: 1, rim_out: Some(0x3d7a33) },
+        EdgeArt { inside: &water_in, outside: &sand_out, natural: true, band: 6.0, rim_in: Some(0xbfe3f7), rim_w: 1, rim_out: Some(0xc9b47a) },
+        EdgeArt { inside: &|c, k| forest_floor(c, &mut Rng(700 + k as u64)), outside: &grass_out, natural: true, band: 7.0, rim_in: Some(0x2b5a29), rim_w: 1, rim_out: None },
+        EdgeArt { inside: &|c, k| snow(c, &mut Rng(800 + k as u64)), outside: &forest_out, natural: true, band: 6.0, rim_in: Some(0xc8d4e6), rim_w: 1, rim_out: Some(0x2b5a29) },
+        EdgeArt { inside: &path_in, outside: &forest_out, natural: true, band: 6.0, rim_in: None, rim_w: 1, rim_out: Some(0x2b5a29) },
+        EdgeArt { inside: &water_in, outside: &forest_out, natural: true, band: 5.0, rim_in: Some(0x2c5aa8), rim_w: 1, rim_out: Some(0x2b5a29) },
+        EdgeArt { inside: &|c, k| stone_floor(c, &mut Rng(1000 + k as u64)), outside: &grass_out, natural: false, band: 3.0, rim_in: Some(0x5d5d66), rim_w: 2, rim_out: Some(0x3d7a33) },
+        EdgeArt { inside: &|c, _| rug(c), outside: &wood_out, natural: false, band: 3.0, rim_in: Some(0xe8c05a), rim_w: 2, rim_out: Some(0x5e3d1e) },
+    ];
+    for (b, art) in arts.iter().enumerate() {
+        edge_block(c, block_start(5, b as u32), 8, art);
+    }
 }
 
 // ------------------------------------------------------------------ characters

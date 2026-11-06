@@ -24,7 +24,7 @@ pub struct Extras {
 
 pub fn library_extras() -> Extras {
     let mut x = Extras { db: Database::default(), files: BTreeMap::new() };
-    for (id, canvas, solid, anims) in [desert(), mountains(), city(), dungeon()] {
+    for (id, canvas, solid, anims, terrains) in [desert(), mountains(), city(), dungeon()] {
         let image = format!("tilesets/{id}.png");
         x.files.insert(image.clone(), canvas.png());
         // Wall torches (dungeon) and wall lanterns (city) light up dark maps.
@@ -33,7 +33,7 @@ pub fn library_extras() -> Extras {
             "city" => vec![TileLight { tile: 15, light: LightSpec::new(4.0, [255, 226, 170], false) }],
             _ => vec![],
         };
-        x.db.tilesets.push(TilesetDef { id: id.into(), image, solid, animations: anims, lights });
+        x.db.tilesets.push(TilesetDef { id: id.into(), image, solid, animations: anims, lights, terrains });
     }
     props(&mut x);
     // Props that give light in their default state ("lit"; their "off" / "out" states don't).
@@ -52,9 +52,9 @@ pub fn library_extras() -> Extras {
 
 /// The dungeon tileset (for the example project's mine).
 pub fn dungeon_tileset() -> (TilesetDef, Vec<u8>) {
-    let (id, canvas, solid, animations) = dungeon();
+    let (id, canvas, solid, animations, terrains) = dungeon();
     let lights = vec![TileLight { tile: 10, light: LightSpec::torch(4.5) }];
-    (TilesetDef { id: id.into(), image: format!("tilesets/{id}.png"), solid, animations, lights }, canvas.png())
+    (TilesetDef { id: id.into(), image: format!("tilesets/{id}.png"), solid, animations, lights, terrains }, canvas.png())
 }
 
 // ------------------------------------------------------------------ shared tile helpers
@@ -167,7 +167,138 @@ fn sheet(rows: u32, tiles: &mut dyn FnMut(&mut Canvas, u32)) -> Canvas {
     c
 }
 
-type Tileset = (&'static str, Canvas, Vec<u32>, Vec<TileAnim>);
+type Tileset = (&'static str, Canvas, Vec<u32>, Vec<TileAnim>, Vec<rust2d_engine::autotile::Terrain>);
+
+// ------------------------------------------------------------------ auto-tiling terrains
+
+/// One auto-tiling terrain of a library tileset: name, the tile its inside uses (`None` = the
+/// block's own full tile), what erasing leaves, terrains lying on it, whether its edge tiles
+/// block movement, and how they look.
+struct TerrainSpec<'a> {
+    name: &'static str,
+    inside: Option<u32>,
+    base: u32,
+    joins: &'static [&'static str],
+    solid: bool,
+    art: EdgeArt<'a>,
+}
+
+/// Appends the terrains' 4×4 edge blocks below a sheet of `rows` rows (two blocks per band of
+/// four rows; the existing tiles keep their pixels and indices) and returns the grown sheet,
+/// the terrains and their solid tiles.
+fn add_terrains(c: Canvas, rows: u32, specs: &[TerrainSpec]) -> (Canvas, Vec<rust2d_engine::autotile::Terrain>, Vec<u32>) {
+    use rust2d_engine::autotile::Terrain;
+    let bands = (specs.len() as u32).div_ceil(2);
+    let mut big = Canvas::new(8 * TS, (rows + bands * 4) * TS);
+    for y in 0..c.img.height as u32 {
+        for x in 0..c.img.width as u32 {
+            big.img.set_pixel(x, y, c.img.get_pixel(x, y));
+        }
+    }
+    let mut terrains = Vec::new();
+    let mut solid = Vec::new();
+    for (b, spec) in specs.iter().enumerate() {
+        let first = block_start(rows, b as u32);
+        edge_block(&mut big, first, 8, &spec.art);
+        let mut t = Terrain { name: spec.name.into(), base: Some(spec.base), joins: spec.joins.iter().map(|j| j.to_string()).collect(), ..Default::default() };
+        t.fill_from_block(first, 8);
+        if let Some(i) = spec.inside {
+            t.tiles[15] = Some(i);
+        }
+        if spec.solid {
+            solid.extend((0..16).map(|k| Terrain::block_tile(first, 8, k)));
+        }
+        terrains.push(t);
+    }
+    (big, terrains, solid)
+}
+
+/// Edge-tile drawers matching tiles of the library tilesets (the sheets' own tile code keeps
+/// its random sequence, so these draw look-alikes with their own seeds).
+fn desert_sand(c: &mut Canvas, k: usize) {
+    c.ground(0xe3c27e, 0xeed294, 0xcfad68, &mut Rng(1100 + k as u64), 0.15);
+}
+fn hardpan(c: &mut Canvas, k: usize) {
+    c.ground(0xc49a62, 0xd2aa72, 0xb08854, &mut Rng(1120 + k as u64), 0.12);
+    for (x0, y0, x1, y1) in [(2, 5, 12, 11), (12, 11, 10, 22), (12, 11, 24, 8), (24, 8, 30, 15), (10, 22, 20, 28), (20, 28, 31, 26)] {
+        c.line(x0, y0, x1, y1, hex(0x8a6840));
+    }
+}
+fn rock_ground(c: &mut Canvas, k: usize) {
+    c.ground(0x7a7682, 0x8a8692, 0x6a6672, &mut Rng(1140 + k as u64), 0.25);
+}
+fn alpine_grass(c: &mut Canvas, k: usize) {
+    let mut rng = Rng(1160 + k as u64);
+    c.ground(0x7a9a52, 0x8aaa62, 0x6a8a46, &mut rng, 0.2);
+    for _ in 0..8 {
+        let (x, y) = (rng.range(TS) as i32, rng.range(TS) as i32);
+        c.wrap(x, y, hex(0x9a9688));
+    }
+}
+fn mountain_snow(c: &mut Canvas, k: usize) {
+    c.ground(0xeef2f8, 0xffffff, 0xd4dcea, &mut Rng(1180 + k as u64), 0.14);
+}
+fn mountain_dirt(c: &mut Canvas, k: usize) {
+    c.ground(0x9a8060, 0xaa9070, 0x8a7050, &mut Rng(1200 + k as u64), 0.22);
+}
+fn ice(c: &mut Canvas, k: usize) {
+    c.ground(0xa8d8ec, 0xc8ecf8, 0x90c4dc, &mut Rng(1220 + k as u64), 0.1);
+    c.line(3, 6, 14, 12, hex(0xffffff));
+    c.line(18, 20, 29, 26, hex(0xffffff));
+    c.line(14, 12, 18, 20, hex(0x80b4cc));
+}
+fn cobbles(c: &mut Canvas, k: usize) {
+    let mut rng = Rng(1240 + k as u64);
+    let n = TS as i32;
+    c.rect(0, 0, n, n, hex(0x4a4650));
+    for y in (0..n).step_by(8) {
+        let off = if (y / 8) % 2 == 0 { 0 } else { 4 };
+        for x in (-8 + off..n).step_by(8) {
+            let tone = mul(0x8a8692, 0.88 + rng.f() * 0.2);
+            for yy in 1..7 {
+                for xx in 1..7 {
+                    let corner = (xx == 1 || xx == 6) && (yy == 1 || yy == 6);
+                    if !corner {
+                        c.wrap(x + xx, y + yy, hex(if yy == 1 { mul(tone, 1.15) } else if yy == 6 { mul(tone, 0.8) } else { tone }));
+                    }
+                }
+            }
+        }
+    }
+}
+fn mosaic(c: &mut Canvas, _: usize) {
+    let n = TS as i32;
+    c.rect(0, 0, n, n, hex(0xd8d0c0));
+    for y in 0..n {
+        for x in 0..n {
+            let (dx, dy) = ((x - 16).abs(), (y - 16).abs());
+            if (dx + dy) % 8 == 0 {
+                c.px(x, y, hex(0x8a6a4a));
+            } else if (dx + dy) % 8 == 4 {
+                c.px(x, y, hex(0x3a6a9a));
+            }
+        }
+    }
+}
+fn dungeon_floor(c: &mut Canvas, k: usize) {
+    let mut rng = Rng(1260 + k as u64);
+    let n = TS as i32;
+    c.rect(0, 0, n, n, hex(0x1a181e));
+    for (x, y, w, h) in [(0, 0, 15, 11), (16, 0, 16, 11), (0, 12, 10, 9), (11, 12, 21, 9), (0, 22, 17, 10), (18, 22, 14, 10)] {
+        c.shade_box(x + 1, y + 1, w - 1, h - 1, ramp(mul(0x5a5662, 0.9 + rng.f() * 0.15)));
+    }
+}
+fn earth(c: &mut Canvas, k: usize) {
+    c.ground(0x4a3a2a, 0x5a4a38, 0x3a2c20, &mut Rng(1280 + k as u64), 0.3);
+}
+fn pit(c: &mut Canvas, k: usize) {
+    let mut rng = Rng(1300 + k as u64);
+    let n = TS as i32;
+    c.rect(0, 0, n, n, hex(0x050406));
+    for _ in 0..5 {
+        c.px(rng.range(TS) as i32, rng.range(TS) as i32, hex(0x16141a));
+    }
+}
 
 // ------------------------------------------------------------------ desert
 
@@ -333,8 +464,29 @@ fn desert() -> Tileset {
         _ => {}
     };
     let c = sheet(4, &mut t);
-    let solid = vec![8, 9, 10, 11, 13, 14, 15, 16, 18, 20];
-    ("desert", c, solid, vec![TileAnim { tile: 18, frames: vec![18, 24, 25, 24], fps: 3.0 }])
+    let mut solid = vec![8, 9, 10, 11, 13, 14, 15, 16, 18, 20];
+    let oasis_water = |c: &mut Canvas, _: usize| water(c, 0x2f8ab8, 0x9ad8f0, 0);
+    let specs = [
+        TerrainSpec {
+            name: "Oasis",
+            inside: Some(18),
+            base: 0,
+            joins: &[],
+            solid: true,
+            art: EdgeArt { inside: &oasis_water, outside: &desert_sand, natural: true, band: 6.0, rim_in: Some(0x9ad8f0), rim_w: 1, rim_out: Some(0xb89858) },
+        },
+        TerrainSpec {
+            name: "Hardpan",
+            inside: Some(4),
+            base: 0,
+            joins: &[],
+            solid: false,
+            art: EdgeArt { inside: &hardpan, outside: &desert_sand, natural: true, band: 6.0, rim_in: None, rim_w: 1, rim_out: None },
+        },
+    ];
+    let (c, terrains, more) = add_terrains(c, 4, &specs);
+    solid.extend(more);
+    ("desert", c, solid, vec![TileAnim { tile: 18, frames: vec![18, 24, 25, 24], fps: 3.0 }], terrains)
 }
 
 // ------------------------------------------------------------------ mountains
@@ -518,9 +670,37 @@ fn mountains() -> Tileset {
         _ => {}
     };
     let c = sheet(4, &mut t);
-    let solid = vec![8, 9, 10, 11, 12, 14, 15, 16, 18, 20, 22];
+    let mut solid = vec![8, 9, 10, 11, 12, 14, 15, 16, 18, 20, 22];
     let anims = vec![TileAnim { tile: 20, frames: vec![20, 24, 25], fps: 8.0 }, TileAnim { tile: 22, frames: vec![22, 26, 27, 26], fps: 3.0 }];
-    ("mountains", c, solid, anims)
+    let specs = [
+        TerrainSpec {
+            name: "Snowfield",
+            inside: Some(3),
+            base: 0,
+            joins: &["Frozen lake"],
+            solid: false,
+            art: EdgeArt { inside: &mountain_snow, outside: &rock_ground, natural: true, band: 6.0, rim_in: Some(0xd4dcea), rim_w: 1, rim_out: Some(0x5a5662) },
+        },
+        TerrainSpec {
+            name: "Mountain path",
+            inside: Some(6),
+            base: 2,
+            joins: &[],
+            solid: false,
+            art: EdgeArt { inside: &mountain_dirt, outside: &alpine_grass, natural: true, band: 6.0, rim_in: None, rim_w: 1, rim_out: Some(0x5a7a3e) },
+        },
+        TerrainSpec {
+            name: "Frozen lake",
+            inside: Some(5),
+            base: 3,
+            joins: &[],
+            solid: false,
+            art: EdgeArt { inside: &ice, outside: &mountain_snow, natural: true, band: 5.0, rim_in: Some(0x80b4cc), rim_w: 1, rim_out: None },
+        },
+    ];
+    let (c, terrains, more) = add_terrains(c, 4, &specs);
+    solid.extend(more);
+    ("mountains", c, solid, anims, terrains)
 }
 
 // ------------------------------------------------------------------ city
@@ -698,8 +878,29 @@ fn city() -> Tileset {
         _ => {}
     };
     let c = sheet(4, &mut t);
-    let solid = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
-    ("city", c, solid, vec![TileAnim { tile: 23, frames: vec![23, 26, 27, 26], fps: 3.0 }])
+    let mut solid = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
+    let canal_water = |c: &mut Canvas, _: usize| water(c, 0x3a6a8a, 0x8ab4d0, 0);
+    let specs = [
+        TerrainSpec {
+            name: "Canal",
+            inside: Some(23),
+            base: 0,
+            joins: &[],
+            solid: true,
+            art: EdgeArt { inside: &canal_water, outside: &cobbles, natural: false, band: 4.0, rim_in: Some(0x24465e), rim_w: 2, rim_out: Some(0xb8b0a4) },
+        },
+        TerrainSpec {
+            name: "Plaza",
+            inside: Some(3),
+            base: 0,
+            joins: &[],
+            solid: false,
+            art: EdgeArt { inside: &mosaic, outside: &cobbles, natural: false, band: 3.0, rim_in: Some(0x8a6a4a), rim_w: 2, rim_out: Some(0x3a3640) },
+        },
+    ];
+    let (c, terrains, more) = add_terrains(c, 4, &specs);
+    solid.extend(more);
+    ("city", c, solid, vec![TileAnim { tile: 23, frames: vec![23, 26, 27, 26], fps: 3.0 }], terrains)
 }
 
 // ------------------------------------------------------------------ dungeon
@@ -876,8 +1077,28 @@ fn dungeon() -> Tileset {
         _ => {}
     };
     let c = sheet(3, &mut t);
-    let solid = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 22];
-    ("dungeon", c, solid, vec![])
+    let mut solid = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 22];
+    let specs = [
+        TerrainSpec {
+            name: "Earth",
+            inside: Some(4),
+            base: 0,
+            joins: &[],
+            solid: false,
+            art: EdgeArt { inside: &earth, outside: &dungeon_floor, natural: true, band: 6.0, rim_in: Some(0x2e2318), rim_w: 1, rim_out: None },
+        },
+        TerrainSpec {
+            name: "Chasm",
+            inside: None,
+            base: 0,
+            joins: &[],
+            solid: true,
+            art: EdgeArt { inside: &pit, outside: &dungeon_floor, natural: true, band: 5.0, rim_in: Some(0x2a2832), rim_w: 2, rim_out: Some(0x6a6672) },
+        },
+    ];
+    let (c, terrains, more) = add_terrains(c, 3, &specs);
+    solid.extend(more);
+    ("dungeon", c, solid, vec![], terrains)
 }
 
 impl Canvas {

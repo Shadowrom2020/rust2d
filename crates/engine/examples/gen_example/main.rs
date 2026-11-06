@@ -264,6 +264,40 @@ fn trig(on: TriggerOn, conditions: Vec<Condition>, actions: Vec<Action>) -> Trig
     Trigger { on, conditions, actions, once: false }
 }
 
+/// Index of the terrain tileset's tile on `layer` at a cell, if any.
+fn tile_at(m: &Map, layer: usize, x: i32, y: i32) -> Option<u32> {
+    if !m.in_bounds(x, y) {
+        return None;
+    }
+    let (slot, i) = m.layers.get(layer)?.get(x as u32, y as u32).parts()?;
+    (m.tilesets.get(slot)? == "terrain").then_some(i)
+}
+
+/// Ground tile (layer 0) of the terrain tileset at a cell.
+fn ground(m: &Map, x: i32, y: i32) -> Option<u32> {
+    tile_at(m, 0, x, y)
+}
+
+/// Re-tiles a map's ground with the terrain tileset's auto-tiling terrains, as painting them
+/// with the editor's Terrain tool would: `class` says which terrain a cell is (by its plain
+/// tile and place); a cell counts as a terrain for its edges when it is of that terrain or of
+/// one it joins, or when `extra` says so (doors, bridges, caves the paths lead to).
+fn autotile_terrain(m: &mut Map, class: impl Fn(&Map, i32, i32) -> Option<&'static str>, extra: impl Fn(&Map, &str, i32, i32) -> bool) {
+    let terrains = terrains();
+    let slot = m.tileset_slot("terrain");
+    rust2d_engine::autotile::retile(
+        m,
+        0,
+        slot,
+        &terrains,
+        |m, x, y| class(m, x, y).map(terrain_index),
+        |m, k, x, y| {
+            let t = &terrains[k];
+            class(m, x, y).is_some_and(|c| c == t.name || t.joins.iter().any(|j| j == c)) || extra(m, &t.name, x, y)
+        },
+    );
+}
+
 fn village() -> Map {
     let (w, h) = (48, 36);
     let mut b = B::new("village", w, h);
@@ -440,6 +474,23 @@ fn village() -> Map {
     });
     guard.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "guard_talk".into() }])];
 
+    // A duck pond on the green with a footpath from the road (auto-tiled below).
+    // (Trees there go: trunks on the detail layer, crowns one row higher on the overhead one.)
+    for y in 23..30u32 {
+        for x in 18..27u32 {
+            b.m.layers[1].set(x, y + 1, Tile::EMPTY);
+            b.m.layers[2].set(x, y, Tile::EMPTY);
+        }
+    }
+    b.fill(0, 22, 20, 1, 5, t::PATH);
+    for (y, row) in ["...###..", "..#####.", ".######.", "..###..."].iter().enumerate() {
+        for (x, c) in row.bytes().enumerate() {
+            if c == b'#' {
+                b.set(0, 18 + x as i32, 25 + y as i32, t::WATER);
+            }
+        }
+    }
+
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
     b.m.triggers = vec![
         // A new game's intro: a cut-scene (the script's intro_cutscene()), then the welcome.
@@ -456,6 +507,19 @@ fn village() -> Map {
     b.m.background = [20, 40, 20];
     b.m.music = "music_village".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.7 };
+    // Auto-tiling (Database › Tilesets › Terrains): soft edges for the roads, the sandy pond
+    // and the duck pond. Paths run up to the doors.
+    autotile_terrain(
+        &mut b.m,
+        |m, x, y| match ground(m, x, y)? {
+            t::PATH => Some("Dirt path"),
+            t::SAND => Some("Sand"),
+            t::WATER if (18..26).contains(&x) && (25..29).contains(&y) => Some("Pond"),
+            t::WATER => Some("Shore"),
+            _ => None,
+        },
+        |m, terrain, x, y| terrain == "Dirt path" && tile_at(m, 1, x, y) == Some(t::DOOR),
+    );
     b.m
 }
 
@@ -571,6 +635,7 @@ fn shop() -> Map {
     b.entity(EntityKind::Prop, "barrel", 10, 8);
     b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
+    autotile_terrain(&mut b.m, |m, x, y| (ground(m, x, y)? == t::RUG).then_some("Rug"), |_, _, _, _| false);
     b.m
 }
 
@@ -611,6 +676,7 @@ fn house() -> Map {
     arrows.count = 20;
     b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
+    autotile_terrain(&mut b.m, |m, x, y| (ground(m, x, y)? == t::RUG).then_some("Rug"), |_, _, _, _| false);
     b.m
 }
 
@@ -779,6 +845,32 @@ fn forest() -> Map {
         o.name = format!("outlaw_{}", k + 1);
         o.active = false;
     }
+    // Auto-tiling: the forest floor gives way softly to the clearing and the grass patches;
+    // paths, the stream and the shrine's flagstones get their edges. The path is a forest path
+    // in the woods and a dirt path on the clearing's grass; it runs over the bridge and up to
+    // the caves.
+    let clearing = |x: i32, y: i32| (40..54).contains(&x) && (16..30).contains(&y);
+    // The path fades out on the clearing's grass instead of stopping at its edge.
+    for y in 16..30 {
+        if b.get(0, 39, y) == Some(t::PATH) {
+            b.fill(0, 40, y, 2, 1, t::PATH);
+        }
+    }
+    autotile_terrain(
+        &mut b.m,
+        |m, x, y| match ground(m, x, y)? {
+            t::FOREST_FLOOR => Some("Forest floor"),
+            t::PATH if clearing(x, y) => Some("Dirt path"),
+            t::PATH => Some("Forest path"),
+            t::WATER => Some("Stream"),
+            t::STONE_FLOOR => Some("Flagstones"),
+            _ => None,
+        },
+        |m, terrain, x, y| match terrain {
+            "Stream" | "Forest path" | "Dirt path" | "Forest floor" => ground(m, x, y) == Some(t::BRIDGE) || (terrain.ends_with("path") && tile_at(m, 1, x, y) == Some(t::CAVE)),
+            _ => false,
+        },
+    );
     b.m
 }
 
@@ -904,6 +996,18 @@ fn wilds() -> Map {
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.75 };
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
+    // Auto-tiling: lakes with sandy shores, soft edges between grass, forest and snow.
+    autotile_terrain(
+        &mut b.m,
+        |m, x, y| match ground(m, x, y)? {
+            t::WATER => Some("Shore"),
+            t::SAND => Some("Sand"),
+            t::FOREST_FLOOR => Some("Forest floor"),
+            t::SNOW => Some("Snowfield"),
+            _ => None,
+        },
+        |_, _, _, _| false,
+    );
     b.m
 }
 
@@ -1031,10 +1135,11 @@ fn database() -> Database {
         tilesets: vec![TilesetDef {
             id: "terrain".into(),
             image: "tilesets/terrain.png".into(),
-            solid: SOLID.to_vec(),
-            animations: vec![TileAnim { tile: t::WATER, frames: vec![t::WATER, t::WATER_2, t::WATER_3, t::WATER_2], fps: 3.0 }],
+            solid: terrain_solid(),
+            animations: terrain_anims(),
             // Lit windows glow a little at night.
             lights: vec![TileLight { tile: t::WINDOW, light: LightSpec { intensity: 0.7, ..LightSpec::new(1.8, [255, 205, 130], false) } }],
+            terrains: terrains(),
         },
         art::extra::dungeon_tileset().0],
         quests: vec![
@@ -1345,6 +1450,28 @@ fn mine() -> Map {
     b.m.lighting = MapLighting { mode: LightMode::Dark, darkness: 1.0 };
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
+    // Auto-tiling (the dungeon tileset's terrains): patches of earth in the cavern and the
+    // entrance hall, and a chasm at the cavern's east end.
+    let (dterrains, earth_tile, chasm_tile) = {
+        let ts = art::extra::dungeon_tileset().0.terrains;
+        let (e, c) = (ts[0].tile_for(15).unwrap(), ts[1].tile_for(15).unwrap());
+        (ts, e, c)
+    };
+    for (x, y) in [(6, 5), (7, 5), (7, 6), (8, 5), (6, 6), (12, 4), (13, 4), (13, 5), (12, 16), (13, 16), (14, 16), (13, 17), (14, 17), (15, 17), (13, 15)] {
+        set(&mut b, 0, x, y, earth_tile);
+    }
+    for (x, y) in [(19, 4), (19, 5), (20, 5), (20, 6), (19, 6), (21, 5)] {
+        set(&mut b, 0, x, y, chasm_tile);
+    }
+    let of = |m: &Map, x: i32, y: i32| m.layers[0].get(x as u32, y as u32).parts().filter(|p| p.0 == dg as usize).map(|p| p.1);
+    rust2d_engine::autotile::retile(
+        &mut b.m,
+        0,
+        dg,
+        &dterrains,
+        |m, x, y| of(m, x, y).and_then(|i| rust2d_engine::autotile::terrain_of(&dterrains, i)),
+        |m, k, x, y| of(m, x, y).is_some_and(|i| rust2d_engine::autotile::counts_as(&dterrains, k, i)),
+    );
     b.m
 }
 

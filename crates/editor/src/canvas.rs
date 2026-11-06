@@ -344,6 +344,7 @@ impl Editor {
             (KeyCode::Z, Tool::Zone),
             (KeyCode::T, Tool::Link),
             (KeyCode::H, Tool::Structure),
+            (KeyCode::A, Tool::Terrain),
         ];
         for (k, t) in tools {
             if is_key_pressed(k) {
@@ -455,6 +456,7 @@ impl Editor {
             return;
         }
         match self.tool {
+            Tool::Terrain => self.pick_terrain(tile),
             t if t.paints_tiles() => self.pick(tile),
             // Right-click clears the placing cursor (and the selection).
             Tool::Entity => {
@@ -489,6 +491,17 @@ impl Editor {
                 self.drag = Some(Drag::Paint { last: tile });
             }
             Tool::Rect if layer_ok => self.drag = Some(Drag::Rect { start: tile }),
+            Tool::Terrain if layer_ok => {
+                if self.active_terrain().is_none() {
+                    self.set_status("Pick a terrain in the left panel first");
+                    return;
+                }
+                if let Some(doc) = &mut self.doc {
+                    doc.begin_stroke(self.layer, false);
+                }
+                self.paint_terrain_at(tile, modifier_shift());
+                self.drag = Some(Drag::Paint { last: tile });
+            }
             Tool::Fill if layer_ok => {
                 let (bw, bh) = (self.brush.w, self.brush.h);
                 let tiles: Vec<Vec<Tile>> = (0..bh).map(|dy| (0..bw).map(|dx| self.stamp_tile(dx, dy)).collect()).collect();
@@ -599,6 +612,8 @@ impl Editor {
                             if let Some(doc) = &mut self.doc {
                                 doc.paint_collision(t.0, t.1, v as u8);
                             }
+                        } else if self.tool == Tool::Terrain {
+                            self.paint_terrain_at(t, free);
                         } else {
                             self.paint_stamp(t.0, t.1, self.tool == Tool::Erase);
                         }
@@ -814,7 +829,7 @@ impl Editor {
             for (i, l) in map.layers.iter().enumerate().filter(|(_, l)| l.visible && l.above_entities) {
                 let mut t = tint(i);
                 // Overhead layers get see-through while editing something below them.
-                if i != self.layer && self.tool.paints_tiles() {
+                if i != self.layer && (self.tool.paints_tiles() || self.tool == Tool::Terrain) {
                     t.a *= 0.6;
                 }
                 render::draw_layer(map, l, &sets, ts, view, t);
@@ -965,6 +980,10 @@ impl Editor {
                         );
                         draw_rectangle_lines(fx, fy, src.w, src.h, 1.5 * px, YELLOW);
                     }
+                }
+                (_, Tool::Terrain) => {
+                    let c = if modifier_shift() { RED } else { Color::new(0.4, 1.0, 0.5, 1.0) };
+                    draw_rectangle_lines(fx, fy, ts, ts, 2.0 * px, c);
                 }
                 (_, Tool::Erase) => {
                     draw_rectangle_lines(fx, fy, self.brush.w as f32 * ts, self.brush.h as f32 * ts, 2.0 * px, RED);

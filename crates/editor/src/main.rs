@@ -20,6 +20,7 @@ mod new_project;
 mod pixel;
 mod script_editor;
 mod structures;
+mod terrain;
 mod ui;
 mod wizard;
 mod widgets;
@@ -234,6 +235,24 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         "paste" => ed.start_paste(),
         "unpaste" => ed.stop_paste(),
+        // terrain NAME: arms a terrain (any tileset) and the Terrain tool
+        "terrain" => {
+            if !ed.select_terrain_named(&cmd[1..].join(" ")) {
+                println!("[script] terrain: no terrain named '{}'", cmd[1..].join(" "));
+            }
+        }
+        // terrainpaint X Y [erase]: one Terrain-tool click (erase = Shift+click), one undo step
+        "terrainpaint" => {
+            if let Some(d) = &mut ed.doc {
+                d.begin_stroke(ed.layer, false);
+            }
+            ed.paint_terrain_at((num(1) as i32, num(2) as i32), arg(3) == "erase");
+            if let Some(d) = &mut ed.doc {
+                d.end_stroke();
+            }
+        }
+        // terrainedit K [block]: Database › Tilesets: edit terrain K of the selected tileset
+        "terrainedit" => ed.db.terrain_pick = Some(terrain::TerrainPick { terrain: num(1) as usize, slot: 0, block: arg(2) == "block" }),
         "undo" => {
             if let Some(d) = &mut ed.doc {
                 d.undo(&ed.assets);
@@ -768,6 +787,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "fill" => Tool::Fill,
                 "erase" => Tool::Erase,
                 "structure" => Tool::Structure,
+                "terrain" => Tool::Terrain,
                 _ => Tool::Brush,
             }
         }
@@ -785,6 +805,16 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "view" => {
             ed.cam.center = vec2(num(1), num(2));
             ed.cam.zoom = num(3).max(0.01);
+        }
+        // viewopt zones|grid|collision on|off: the View toggles
+        "viewopt" => {
+            let on = arg(2) != "off";
+            match arg(1) {
+                "zones" => ed.view.zones = on,
+                "grid" => ed.view.grid = on,
+                "collision" => ed.view.collision = on,
+                _ => println!("[script] viewopt: zones|grid|collision on|off"),
+            }
         }
         // addaction LABEL...: appends the action template with that label (e.g. "Play effect") to
         // the selected entity's first trigger (testing the action editors)

@@ -65,6 +65,8 @@ pub struct DbState {
     pub art_focus: Option<(String, u32)>,
     /// Tilesets tab: clicks on the tile grid toggle light tiles.
     pub tile_light_pick: bool,
+    /// Tilesets tab: the terrain whose tiles clicks into the grid assign.
+    pub terrain_pick: Option<crate::terrain::TerrainPick>,
     /// The structure editor (Structures tab).
     pub st_edit: crate::structures::StructEdit,
 }
@@ -92,6 +94,7 @@ struct Cx<'a> {
     art: &'a mut Option<ArtAction>,
     st_edit: &'a mut crate::structures::StructEdit,
     tile_light_pick: &'a mut bool,
+    terrain_pick: &'a mut Option<crate::terrain::TerrainPick>,
 }
 
 /// An id not yet used in `ids`, based on `prefix`.
@@ -198,6 +201,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 ed.db.sel = 0;
                 ed.db.rename = RenameUi::default();
                 ed.db.anim_target = None;
+                ed.db.terrain_pick = None;
             }
         }
         ui.separator();
@@ -336,7 +340,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.tilesets,
                     sel,
                     |d| d.id.clone(),
-                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![], lights: vec![] },
+                    |ids| TilesetDef { id: unique("tileset", ids), image: "tilesets/new.png".into(), solid: vec![], animations: vec![], lights: vec![], terrains: vec![] },
                     |d| &mut d.id,
                 ),
                 Tab::Sheets => list_ui(
@@ -393,6 +397,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         if ed.db.sel != sel_before {
             ed.db.rename = RenameUi::default();
             ed.db.anim_target = None;
+            ed.db.terrain_pick = None;
         }
         let db_snapshot = ed.project.db.clone();
         let mut embed: Option<(String, (u32, u32), bool)> = None;
@@ -424,6 +429,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     art: &mut art,
                     st_edit: &mut ed.db.st_edit,
                     tile_light_pick: &mut ed.db.tile_light_pick,
+                    terrain_pick: &mut ed.db.terrain_pick,
                 };
                 let i = ed.db.sel;
                 let db = &mut ed.project.db;
@@ -1335,11 +1341,32 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
     if ui.selectable_label(*cx.tile_light_pick, ui::t(ui::ph::LIGHTBULB, "Pick light tiles in the grid")).on_hover_text("While on, clicking a tile below adds or removes its light").clicked() {
         *cx.tile_light_pick = !*cx.tile_light_pick;
         *cx.anim_target = None;
+        *cx.terrain_pick = None;
+    }
+
+    // ---- terrains
+    ui.separator();
+    let before = *cx.terrain_pick;
+    crate::terrain::terrains_form(ui, d, t.id(), ts, tile, cx.terrain_pick);
+    if cx.terrain_pick.is_some() && before.is_none() {
+        *cx.anim_target = None;
+        *cx.tile_light_pick = false;
     }
 
     // ---- tile grid
     ui.separator();
+    let editing_terrain = cx.terrain_pick.and_then(|p| d.terrains.get(p.terrain).map(|t| (p, t.name.clone())));
     match (*cx.anim_target, *cx.tile_light_pick) {
+        _ if editing_terrain.is_some() => {
+            let (p, name) = editing_terrain.clone().unwrap();
+            ui.label(if p.block {
+                format!("Click the top-left tile of a 4×4 block for terrain {name}.")
+            } else if p.slot == crate::terrain::BASE_SLOT {
+                format!("Click the tile that erasing {name} leaves.")
+            } else {
+                format!("Click the tile for slot {} of terrain {name} (cyan outline = its tiles).", p.slot + 1)
+            })
+        }
         (Some(k), _) => ui.label(format!("Click tiles to append frames to animation #{} (the first click also sets its base tile).", k + 1)),
         (None, true) => ui.label("Click tiles to add or remove their light (yellow bulb = gives light)."),
         (None, false) => ui.label("Click tiles to toggle solidity (red = blocks movement)."),
@@ -1362,6 +1389,9 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
             if animated.contains(&i) {
                 p.rect_stroke(r, 0.0, Stroke::new(2.0_f32, Color32::LIGHT_BLUE), StrokeKind::Inside);
             }
+            if editing_terrain.as_ref().is_some_and(|(p, _)| d.terrains[p.terrain].contains(i) || d.terrains[p.terrain].base == Some(i)) {
+                p.rect_stroke(r.shrink(2.0), 0.0, Stroke::new(2.0_f32, Color32::from_rgb(90, 220, 255)), StrokeKind::Inside);
+            }
             if d.lights.iter().any(|l| l.tile == i) {
                 p.text(r.right_top() + vec2(-3.0, 2.0), egui::Align2::RIGHT_TOP, ui::ph::LIGHTBULB, egui::FontId::proportional(16.0), Color32::YELLOW);
             }
@@ -1371,7 +1401,8 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
             if let Some(pos) = resp.interact_pointer_pos() {
                 let rel = pos - rect.min;
                 let i = (rel.y / cell) as u32 * ts.columns + (rel.x / cell) as u32;
-                if i < ts.count {
+                let terrain_click = i < ts.count && cx.terrain_pick.as_mut().is_some_and(|p| crate::terrain::grid_click(d, ts, p, i));
+                if i < ts.count && !terrain_click {
                     match cx.anim_target.and_then(|k| d.animations.get_mut(k)) {
                         Some(a) => {
                             if a.frames.is_empty() {

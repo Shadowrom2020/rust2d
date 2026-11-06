@@ -156,7 +156,7 @@ guard_talk` shows its dialog after closing. A play-test started by the editor (n
 started with `--dev` prints the refusal and reports `dev=off`. Not checked by a script: saving
 from the editor's script editor during a real play-test (the same file write as the harness).
 
-### [ ] Auto-tiling terrains — `feature/autotile`
+### [x] Auto-tiling terrains — `feature/autotile`
 
 **Goal.** Paint "grass" or "water" and the editor picks edge and corner tiles itself.
 
@@ -168,8 +168,49 @@ editor (pick the 16 tiles by clicking into the tileset, with a preview). The exa
 draws grass/dirt and grass/water edge tiles and defines the terrains; the starter library picks
 them up (bump `STARTER_RULES`). This is the biggest item of the release because of the art.
 
-**Verify.** Editor script: `tool terrain`, `terrain grass`, `drag …`, screenshot shows edges;
-undo; a map painted with v0.3.0 looks unchanged.
+**Decided while building.** The tool's key is **A**: T was already the Transition tool.
+`Terrain { name, tiles: [Option<u32>; 16], base: Option<u32>, joins: Vec<String> }` in the new
+`engine/src/autotile.rs`; a missing tile falls back to the inside (`tiles[15]`). `base` is what
+erasing (Shift) leaves, e.g. grass; if the base is another terrain's tile the cell is re-tiled
+as that terrain. Which cells belong to a terrain is read from their tiles, so maps store nothing
+new; a tile should belong to one terrain (the painted terrain wins for shared tiles). Only the
+four orthogonal neighbours matter. Cells outside the map count as every terrain (terrains
+continue past the edge). **Joins**: terrains lying on another count as it for its edges (Sand
+joins Shore, Forest floor joins Snowfield / Forest path / Stream), and painting re-tiles every
+neighbour with its own terrain; joins refer to names and follow renames. `autotile::paint`
+(one cell, the editor through `MapDoc::paint`, one stroke = one undo step) and
+`autotile::retile` (a whole layer with a membership function; the example generator's
+`autotile_terrain`). The terrain editor: 4×4 slots in mask order with arm icons, click a slot
+then a tile (the next slot follows), *Fill from a 4×4 block*, a base slot, *Joins* checkboxes, a
+sample preview; right-click with the tool picks the terrain under the cursor.
+Art and example (asked for after the first version: all starter tilesets and all example maps):
+a shared `edge_block` builder (inside / surroundings drawers, wobbly or straight sides, rim
+colours) draws 4×4 blocks below each sheet, two per band of four rows; the existing tiles keep
+their pixels and indices (checked), so libraries take the grown images. Terrains: *terrain*
+(Dirt path, Pond, Sand, Shore, Forest floor, Snowfield, Forest path, Stream, Flagstones, Rug;
+rows 5–24), *dungeon* (Earth, Chasm), *desert* (Oasis, Hardpan), *mountains* (Snowfield,
+Mountain path, Frozen lake), *city* (Canal, Plaza). Insides reuse the ordinary tile where it is
+unique (so painted areas match the maps); Shore, Stream and Forest path have their own inside
+tiles, the water ones animated with the water frames. Water and chasm edge tiles are solid.
+Maps (tiles only, uids unchanged): village roads up to the doors, the sandy pond (Sand + Shore)
+and a new duck pond with a footpath; forest floor, forest path (a dirt path on the clearing's
+grass, extended two tiles into it), stream joined to the bridge, shrine flagstones; Wilds
+lakes, sand, forests, snow; rugs in the house and shop; earth patches and a chasm in the mine.
+Existing asset libraries: starter rule 5 gives a tileset with no terrains and the same (or an
+upgraded) image the pack's terrains with their solid flags and animations.
+
+**Verify.** Done: unit tests for masks, painting, erasing, neighbours, the map edge, other
+tileset slots, joined terrains, whole-layer retiling, old tileset RON without the field, and the
+library rule. After regenerating, the old part of all five tileset images is pixel-identical.
+Editor script on scratch copies: `tool terrain`, right-click picks *Shore* on the sandy pond and
+*Pond* on the duck pond; painting and erasing give the tile indices the masks predict, with the
+joined sand re-tiled around shore water; undo restores the map. Screenshots of every new edge
+block, all six maps in the editor, the Terrains section of the project and of the library's
+mountains and city tilesets. In the game the player stops at the old pond's water and at the
+stream, crosses the bridge, and stops at the new pond's bank. A scratch library with terrains
+and terrain animations stripped and an old stamp gets them back. The map format is unchanged.
+Compile-checked only: clicks in the Terrains section (egui clicks; `terrainedit` opens it for
+the screenshot) and real Shift+drag erasing (`terrainpaint … erase` uses the same function).
 
 ### [ ] Event / dialog graph editor — `feature/event-graph`
 
