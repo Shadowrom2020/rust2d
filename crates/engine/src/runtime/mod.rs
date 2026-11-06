@@ -17,6 +17,7 @@ mod skills;
 mod lights;
 mod creator;
 mod patrol;
+mod portraits;
 mod schedule;
 mod progression;
 mod paperdoll;
@@ -230,6 +231,8 @@ pub struct Game {
     ach: achievements::Achievements,
     /// Lockpicking / fishing in progress (pauses the world).
     minigame: Option<minigame::Minigame>,
+    /// Whose portrait the open dialog shows.
+    portrait: Option<portraits::Speaker>,
     journal: journal::Journal,
     worldmap: worldmap::WorldMap,
     creator: Option<creator::Creator>,
@@ -327,6 +330,7 @@ impl Game {
             crafting: Default::default(),
             ach: Default::default(),
             minigame: None,
+            portrait: None,
             journal: Default::default(),
             worldmap: Default::default(),
             creator: None,
@@ -1771,6 +1775,7 @@ impl Game {
         self.draw_fps();
         self.ui.draw_toasts();
         self.ui.draw_dialog();
+        self.draw_dialog_portrait();
         self.draw_game_over();
         if self.creator.is_some() {
             self.draw_creator();
@@ -1862,21 +1867,23 @@ impl ActionHost for Game {
     fn execute(&mut self, action: &Action, ctx: &ActionCtx) -> Step {
         let ts = self.ts();
         match action {
-            Action::Dialog { speaker, text } => {
+            Action::Dialog { speaker: raw, text } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                let speaker = self.entity_names_in(speaker, ctx.owner);
+                let speaker = self.entity_names_in(raw, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
                 self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_dialog(&speaker, &text);
+                self.set_dialog_portrait(raw, &speaker, ctx.owner);
                 Step::Block
             }
-            Action::Choice { speaker, text, options, var } => {
+            Action::Choice { speaker: raw, text, options, var } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                let speaker = self.entity_names_in(speaker, ctx.owner);
+                let speaker = self.entity_names_in(raw, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
                 let options: Vec<String> = options.iter().map(|o| self.world.expand_text(o)).collect();
                 self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_choice(&speaker, &text, &options, var);
+                self.set_dialog_portrait(raw, &speaker, ctx.owner);
                 Step::Block
             }
             Action::Teleport { map, spawn } => {

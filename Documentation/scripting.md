@@ -293,7 +293,7 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | Function | Description |
 |---|---|
 | `say(text)` | Shows a dialog box and waits for the player. *(queued, blocks)* |
-| `say(speaker, text)` | Dialog with a speaker name. *(queued, blocks)* |
+| `say(speaker, text)` | Dialog with a speaker name. The dialog shows the speaker's portrait when the name fits a character: `"{player}"` (or the player's name) for the hero's own lines, a character on the map or a character definition otherwise (*Dialog portraits* in the README). *(queued, blocks)* |
 | `say(entity, text)` | Dialog with an entity's name as speaker: `say(SELF, "…")`. *(queued, blocks)* |
 | `choice(text, options, var)` | Asks a question with answers `["Yes", "No"]`; the chosen index (0 = first) goes into variable `var`. *(queued, blocks)* |
 | `wait(seconds)` | Pauses the queue. *(queued, blocks)* |

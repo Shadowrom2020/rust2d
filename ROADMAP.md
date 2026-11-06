@@ -80,7 +80,7 @@ Instructions for every session (people and coding agents) that implements roadma
 ## 0.5.0 — Living world and adventure
 
 Theme: the world moves without the player, and there is more to do in it: routines, weather,
-companions, crafting, achievements, minigames, water and height.
+companions, crafting, achievements, minigames, furniture and rest.
 
 ### [x] Weather — `feature/weather`
 
@@ -363,50 +363,78 @@ and Esc → `door=0`, no pause menu. Unit test: weighted catches. Not checked by
 chest (difficulty 2), the editor's Fishing spot fields and catch table, the Lockpicking game
 action fields (compile-checked).
 
-### [ ] Swimming and ladders — `feature/swim-climb`
+### [ ] The player uses furniture — `feature/furniture`
 
-**Goal.** Water the player can swim across (slowly, no attacks) and ladder tiles the player
-climbs (vertical only, slower, climbing pose), so maps gain height and water as terrain
-instead of walls.
+**Goal.** The player sits on chairs and benches and sleeps in beds: sitting is a short rest,
+sleeping skips the night (restored, the world moved on). Props become furniture with a *use
+spot*; NPC furniture (backlog: *Schedules across maps and with furniture*) reuses it later.
 
 **Design.**
-- `TilesetDef.water: Vec<u32>` and `TilesetDef.ladder: Vec<u32>` (`#[serde(default)]`, like
-  `solid`); the Tilesets form's grid gets two more pick modes (today: solid, animation, light).
-  `Loaded` gets `water` / `ladder` grids next to `solid` (`Assets::compute_solid` pattern). A
-  water tile marked swimmable is **not** solid for the player only: `rect_blocked(.., swimmer:
-  bool)`; NPCs, pathfinding, projectiles and sight keep treating it as today (solid if listed in
-  `solid`). Creators mark a tile either solid (a wall of water) or water (swimmable).
-- Swimming: when the player's feet are on water: speed × 0.5, no running, no attacking (toast
-  once), no interacting with props; the paperdoll is drawn with the lower 40 % of the frame
-  clipped (`draw_frame_colored_in` with a shortened source rect) and a 2 px bob, a blue tint;
-  a splash `effect` on entering; `status()` `swimming=true`. Leaving water restores everything.
-- Ladders: on a ladder tile only Up / Down move (× 0.6 speed), the player faces Up (climbing
-  pose = the Up row with the walk cycle), interact is allowed (so a ladder top can be a portal
-  zone, which is how "climbing down into the mine" works). `status()` `climbing=true`.
-- Save games don't change (position is enough). Old projects: no water / ladder tiles → nothing
-  changes.
+- *Use spots*: `PropDef.use_spot: Option<UseSpot { offset: (f32, f32), facing: Facing, pose:
+  Pose, sleep_until: f32, conditions: Vec<Condition>, refuse_text: String }>` with `Pose { Sit,
+  Lie, Stand }` (serde defaults; `sleep_until` default 7.0, only for beds). The spot is where the
+  user's feet go, relative to the prop's feet; `facing` the way the user looks. Editor:
+  *Database › Props › Use spot* (pose, offset with a preview of a character on the prop at that
+  spot, facing, the bed's wake-up hour, conditions with the condition editor and a refusal text).
+- *Using*: interacting with a prop that has a use spot (E / right-click, nothing else on the
+  tile in front) puts the player on the spot in its pose. *Sit* draws the paperdoll a few
+  pixels lower with the legs clipped (a shortened source rect, like the dialog portraits'
+  `draw_frame_part_in`); *Lie* draws it rotated 90° over the bed, with the bed's optional
+  "occupied" state on top (a blanket overlay, so the prop decides what covers the sleeper);
+  *Stand* only faces the furniture (counters, anvils). A movement key, Cancel or an attack
+  stands the player up at the tile in front of the prop. The prop's own *Interact* triggers run
+  first; the spot is used only when none of them started anything (a bed can still have its own
+  dialog). Not saved: a loaded game starts standing. `status` prints `pose=`.
+- *Sitting*: cosmetic plus a small rest bonus (HP / mana regenerate faster while sitting; a
+  project setting, default ×2), no attacks.
+- *Sleeping*: a bed asks "Sleep until morning?" (or until its `sleep_until` hour). Yes: fade
+  out, the clock jumps (a new day when it passes midnight), HP and mana are restored, timed
+  effects run out, spawners with *Respawn after* timers advance, scheduled characters are placed
+  at their new stops (`place_on_schedule` for every one), the weather and lighting follow the
+  hour; fade in, the player gets up beside the bed. Refused while hostile characters are in
+  sight ("You can't sleep with enemies nearby") and during cut-scenes; the spot's conditions
+  can refuse too (a paid inn room: flag `room_paid`). An autosave after waking.
+- *Events and scripts*: `TriggerOn::Sleep` (appended; map and prop triggers, after waking: a
+  dream, an ambush, a quest stage), `Action::Sleep { hours }` (appended) / script `sleep(hours)`
+  to rest without a bed (camping, an inn keeper's "Rest"), `is_sitting()` / `is_sleeping()`.
 
-**Touch points.** `defs.rs`, `render/mod.rs` (`TilesetTex` flags), `runtime/{mod,paperdoll}.rs`,
-`editor/src/database.rs` (tileset grid modes) and `canvas.rs` (overlay colours), gen_example
-(mark the village pond and the Wilds' lakes swimmable, keep the forest stream solid; a ladder
-tile in the dungeon tileset and a ladder in the mine leading to a lower shaft via portals),
-README.
+**Touch points.** `defs.rs` (`UseSpot`, `Pose`), `runtime/furniture.rs` (new: using, standing
+up, sleeping), `runtime/{mod,paperdoll,lights,spawner,schedule}.rs`, `events/mod.rs`,
+`script.rs`, `render/mod.rs` (rotated / clipped frames), editor `database.rs` (prop form) and
+`widgets.rs` (action fields), `script_editor.rs`, gen_example (a bed, chair and bench prop with
+art, placements), README, scripting.md.
 
-**Example.** The village pond becomes swimmable (the fishing spot stays on the rim); the mine
-gets a ladder down to a small lower shaft with the pick-only chest moved there.
+**Example.** A bed in the elder's house (sleep until 7:00, free), Tilda's "Rest (10 coins)"
+choice using `sleep(8)`, benches on the village green and chairs in the shop.
 
-**Verify.** Autoplay: walk into the pond, `status` `swimming=true` and the tile is water, speed
-halved (tiles per second from two statuses), `press x` doesn't attack, screenshot of the
-half-submerged hero; the forest stream still blocks; in the mine `hold up` on the ladder
-climbs (`climbing=true`), `hold left` doesn't move; an NPC never enters water (`ai=` positions).
+**Verify.** Autoplay: `press e` at a chair → `pose=sit` (screenshot), `hold left` stands up;
+at the bed at 22:00 with 5 HP: the choice, `press e` → `time=07:00`, full HP, Tomas at his 07:00
+stop, the autosave written; with a slime in sight the toast and no time jump; the sleeping
+hero under the blanket (screenshot); `sleep(8)` from the console; the editor's Use spot form
+(screenshot).
 
-### [ ] Dialog portraits — `feature/portraits`
+### [x] Dialog portraits — `feature/portraits`
 
 **Design.** Dialog boxes show a portrait of the speaker (paperdoll of the NPC's look, or the
 player's) at the left; nothing to configure per character, one project option turns it off.
 A proper node-graph dialog editor stays in the backlog.
 
-**Verify.** Screenshot of a dialog with the elder; the player's own lines show the hero.
+**Decided while building.** `runtime/portraits.rs`: `find_speaker(raw, shown, owner)` →
+`Speaker::{Player, Entity(uid), Def(id)}` in this order: none without a speaker; `{self}` /
+`{uid:N}` = that entity; `{player}` or the player's name = the hero; the trigger's owner if
+its entity / definition name fits; the nearest active character on the map whose name fits;
+a character definition whose name fits (`names_match`: case-insensitive, all words of the
+shorter name in the longer, so "Elder" speaks as "Elder Rowan"). The portrait is the idle
+front frame's head and shoulders (`BUST`, the top 56 % of a 32 x 48 frame; other frame sizes
+the top 60 %) without held items, drawn by `Assets::draw_frame_part_in`; the dialog box makes
+room for a 120 px square (`Ui::with_portrait`, `portrait_rect`). `ProjectConfig::
+dialog_portraits` (serde default true) with a checkbox in *Database › Project*. The example's
+intro cut-scene got a line of the hero's.
+
+**Verify (done).** Autoplay on a scratch copy: talking to the elder shows "Elder Rowan" with
+the elder's portrait (screenshot); the intro shows the guard's and the hero's lines with their
+portraits (screenshot); a unit test for the name matching. Not checked by script: the project
+option off (compile-checked; `find_speaker` returns none first thing).
 
 ## 0.6.0 — Everywhere (platforms and reach)
 
@@ -525,7 +553,7 @@ Options row *Language*; the editor exports a translation template. Large but mec
 - Gapless music loops: quad-snd (macroquad's mixer) leaves a short silence where a looped sound
   ends inside a mix buffer. The rain avoids it with a length of whole buffers; music files would
   need padding to whole buffers when loaded (decode, pad, re-encode) or a fixed quad-snd.
-- **Schedules across maps and with furniture** (improves *NPC schedules* of 0.5.0): a scheduled
+- **Schedules across maps and with furniture** (improves *NPC schedules* of 0.5.0; uses the `UseSpot` of *The player uses furniture*): a scheduled
   character can go to another map (into its house, the shop, the tavern) and use furniture
   there: sleep in a bed, sit on a chair or bench, stand at a counter. Ideas so far:
   - *Stops on other maps*: `ScheduleStop.map: String` (`#[serde(default)]`, "" = the
@@ -645,6 +673,27 @@ Options row *Language*; the editor exports a translation template. Large but mec
     into the companion tab), poison him below 40 % → he drinks it (`companions=` HP rises,
     inventory shrinks, toast); equip a bow on him → he shoots and his arrows run down; save /
     load keeps his bag; screenshot of the tab.
+- **Portrait images** (improves *Dialog portraits*): creators give characters a drawn portrait;
+  without one the automatic head-and-shoulders rendering stays.
+  - *Data*: `CharacterDef.portrait: Option<SpriteRef>` and `EntityInstance.portrait` (a placed
+    character's own, in the map's RON `Meta`), serde defaults; optional *moods* later:
+    `portraits: BTreeMap<String /* "happy", "angry" … */, SpriteRef>` picked by a dialog's
+    `mood` (`say("Elder Rowan", "...", #{ mood: "worried" })`, `Action::Dialog` gains `mood`
+    with a serde default). The player: `ProjectConfig.player_portrait` or the player
+    character's definition; with the character creator a portrait per body / sex.
+  - *Lookup*: `find_speaker` stays; `draw_dialog_portrait` draws the speaker's image (scaled to
+    fit the square, nearest-neighbour for pixel art) when there is one, else the paperdoll bust
+    as today. Any size works (a `SpriteRef` frame of any sheet, e.g. a 64 x 64 or 96 x 96
+    portrait sheet); the square grows to the image's aspect up to a maximum.
+  - *Editor*: *Portrait* field in *Database › Characters* and the placed-character inspector
+    (`widgets::sprite_field` chooser with a preview at dialog size and a *Clear* = automatic),
+    *New blank portrait* (a 64 x 64 frame on a `portraits` sheet, opened in the pixel editor),
+    and import of a PNG as a portrait (copied into `sprites/`, a sheet created). Library export
+    carries the portrait sheet with the character (`refs_of_character`), renames follow.
+  - *Example*: hand-drawn portraits for the elder and Tilda (generated art in `gen_example`),
+    the others keep the automatic one, to show both.
+  - *Verify*: the elder's dialog shows his image, the guard's the automatic bust (screenshots);
+    clearing the field falls back; library export of the elder includes the portrait sheet.
 - **NPC routines: visible activities** (only visual; builds on *NPC schedules*, the Tool slot of
   *Minigames* and the held sprites): characters are seen fishing at the pond, hoeing a field,
   hammering at an anvil, chopping wood, sweeping, reading — without producing anything.
@@ -737,36 +786,42 @@ Options row *Language*; the editor exports a translation template. Large but mec
   `settime` forward by days (`settime` gains a `+H` form that also advances `day`), re-enter,
   `status` shows the plot ripe, harvest → inventory; a rainy map grows faster; save / load
   keeps the growth.
-- **The player uses furniture** (builds on the `UseSpot` of the idea above; either can come
-  first): sit on chairs and benches, sleep in beds.
-  - *Using*: interacting with a prop that has a use spot (E / right-click, nothing else on the
-    tile in front) puts the player on the spot in its pose, drawn like a character's (sit: lower
-    with clipped legs, lie: rotated with the bed's "occupied" overlay). A movement key, Cancel or
-    an attack stands the player up at the tile in front of the prop. The prop's own *Interact*
-    triggers run first; the spot is used only when none of them ran (so a bed can still have a
-    "Sleep here?" dialog). Taken spots (an NPC sits there) refuse with a toast. Not saved: a
-    loaded game starts standing. `status` prints `pose=`; autoplay `press e` at a chair works.
-  - *Sitting*: cosmetic plus a small rest bonus (HP / mana regenerate faster while sitting, a
-    project setting, default ×2), no attacks; the camera stays.
-  - *Sleeping*: a bed asks "Sleep until morning?" (or *for N hours*: `UseSpot.sleep_until`
-    hour, default 7). Yes: fade out, the clock jumps, HP and mana are restored, timed effects
-    run out, spawners with *Respawn after* timers advance, scheduled characters are placed at
-    their new stops (`place_on_schedule` for every one), the weather and lighting follow the
-    hour; fade in, the player gets up beside the bed. Refused while hostile characters are in
-    sight ("You can't sleep with enemies nearby") and in cut-scenes. Optional conditions on the
-    spot (`UseSpot.conditions`, the condition editor; e.g. a paid inn room: flag `room_paid`)
-    with a refusal text.
-  - *Events and scripts*: `TriggerOn::Sleep` (appended; map and prop triggers, after waking: a
-    dream, an ambush, a quest stage), `Action::Sleep { hours }` / script `sleep(hours)` to rest
-    without a bed (camping, an inn keeper's "Rest" choice), `is_sitting()` / `is_sleeping()` in
-    conditions via `Cond::Script` or a `Cond::Activity { target: "player", pose }` shared with
-    the NPC idea. An autosave after waking (like map changes).
-  - *Example*: the bed in the elder's house (sleep until 7:00, free), Tilda's inn-style "Rest
-    (10 coins)" choice using `sleep(8)`, benches and chairs to sit on in the village and the
-    shop.
-  - *Verify*: autoplay `press e` at a chair → `pose=sit`, `hold left` stands up; at the bed at
-    22:00 with 5 HP: the choice, `press e` → `time=07:00`, full HP, Tomas at his 07:00 stop;
-    with a slime in sight the toast and no time jump; screenshots of sitting and sleeping.
+- **Swimming and ladders** (moved out of 0.5.0; design notes kept): water the player can swim
+  across and ladder tiles to climb, so maps gain height and water as terrain.
+  **Goal.** Water the player can swim across (slowly, no attacks) and ladder tiles the player
+  climbs (vertical only, slower, climbing pose), so maps gain height and water as terrain
+  instead of walls.
+
+  **Design.**
+  - `TilesetDef.water: Vec<u32>` and `TilesetDef.ladder: Vec<u32>` (`#[serde(default)]`, like
+    `solid`); the Tilesets form's grid gets two more pick modes (today: solid, animation, light).
+    `Loaded` gets `water` / `ladder` grids next to `solid` (`Assets::compute_solid` pattern). A
+    water tile marked swimmable is **not** solid for the player only: `rect_blocked(.., swimmer:
+    bool)`; NPCs, pathfinding, projectiles and sight keep treating it as today (solid if listed in
+    `solid`). Creators mark a tile either solid (a wall of water) or water (swimmable).
+  - Swimming: when the player's feet are on water: speed × 0.5, no running, no attacking (toast
+    once), no interacting with props; the paperdoll is drawn with the lower 40 % of the frame
+    clipped (`draw_frame_colored_in` with a shortened source rect) and a 2 px bob, a blue tint;
+    a splash `effect` on entering; `status()` `swimming=true`. Leaving water restores everything.
+  - Ladders: on a ladder tile only Up / Down move (× 0.6 speed), the player faces Up (climbing
+    pose = the Up row with the walk cycle), interact is allowed (so a ladder top can be a portal
+    zone, which is how "climbing down into the mine" works). `status()` `climbing=true`.
+  - Save games don't change (position is enough). Old projects: no water / ladder tiles → nothing
+    changes.
+
+  **Touch points.** `defs.rs`, `render/mod.rs` (`TilesetTex` flags), `runtime/{mod,paperdoll}.rs`,
+  `editor/src/database.rs` (tileset grid modes) and `canvas.rs` (overlay colours), gen_example
+  (mark the village pond and the Wilds' lakes swimmable, keep the forest stream solid; a ladder
+  tile in the dungeon tileset and a ladder in the mine leading to a lower shaft via portals),
+  README.
+
+  **Example.** The village pond becomes swimmable (its fishing spot covers the water: fishing is from the shore, not while swimming); the mine
+  gets a ladder down to a small lower shaft with the pick-only chest moved there.
+
+  **Verify.** Autoplay: walk into the pond, `status` `swimming=true` and the tile is water, speed
+  halved (tiles per second from two statuses), `press x` doesn't attack, screenshot of the
+  half-submerged hero; the forest stream still blocks; in the mine `hold up` on the ladder
+  climbs (`climbing=true`), `hold left` doesn't move; an NPC never enters water (`ai=` positions).
 
 ## Shipped
 

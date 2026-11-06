@@ -43,6 +43,13 @@ pub struct ProjectConfig {
     /// Experience and levels (off by default).
     #[serde(default)]
     pub progression: crate::progression::Progression,
+    /// Dialog boxes show the speaker's portrait (on by default).
+    #[serde(default = "yes")]
+    pub dialog_portraits: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_day_minutes() -> f32 {
@@ -144,6 +151,7 @@ impl ProjectConfig {
             start_hour: default_start_hour(),
             skills: Default::default(),
             progression: Default::default(),
+            dialog_portraits: true,
         }
     }
 }
