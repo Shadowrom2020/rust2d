@@ -1227,10 +1227,10 @@ impl Editor {
         match self.mode {
             Mode::Map => {
                 egui::SidePanel::left("left").resizable(true).default_width(290.0).show(ctx, |ui| {
-                    egui::ScrollArea::vertical().id_salt("left_scroll").show(ui, |ui| self.left_panel(ui));
+                    egui::ScrollArea::vertical().id_salt("left_scroll").auto_shrink(false).show(ui, |ui| self.left_panel(ui));
                 });
                 egui::SidePanel::right("right").resizable(true).default_width(340.0).show(ctx, |ui| {
-                    egui::ScrollArea::vertical().id_salt("right_scroll").show(ui, |ui| self.inspector(ui));
+                    egui::ScrollArea::vertical().id_salt("right_scroll").auto_shrink(false).show(ui, |ui| self.inspector(ui));
                 });
             }
             Mode::Database => {
