@@ -873,13 +873,23 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.cam.center = vec2(num(1), num(2));
             ed.cam.zoom = num(3).max(0.01);
         }
-        // viewopt zones|grid|collision on|off: the View toggles
+        // mapweather none|rain|snow|fog [PERCENT]: the open map's weather (map settings, undoable)
+        "mapweather" => {
+            if let (Some(doc), Some(k)) = (ed.doc.as_mut(), rust2d_engine::map::WeatherKind::from_id(arg(1))) {
+                let before = doc::Objects::of(&doc.map);
+                doc.map.weather = rust2d_engine::map::Weather::new(k, if arg(2).is_empty() { 0.6 } else { num(2) / 100.0 });
+                doc.record_objects(before, "script");
+                println!("[script] weather of {}: {:?}", doc.map.name, doc.map.weather);
+            }
+        }
+        // viewopt zones|grid|collision|weather on|off: the View toggles
         "viewopt" => {
             let on = arg(2) != "off";
             match arg(1) {
                 "zones" => ed.view.zones = on,
                 "grid" => ed.view.grid = on,
                 "collision" => ed.view.collision = on,
+                "weather" => ed.view.weather = on,
                 _ => println!("[script] viewopt: zones|grid|collision on|off"),
             }
         }

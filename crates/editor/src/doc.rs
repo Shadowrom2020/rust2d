@@ -20,6 +20,7 @@ pub struct Objects {
     pub music: String,
     pub lighting: rust2d_engine::map::MapLighting,
     pub fog: bool,
+    pub weather: rust2d_engine::map::Weather,
 }
 
 impl Objects {
@@ -34,6 +35,7 @@ impl Objects {
             music: map.music.clone(),
             lighting: map.lighting,
             fog: map.fog,
+            weather: map.weather,
         }
     }
     fn apply(&self, map: &mut Map) {
@@ -46,6 +48,7 @@ impl Objects {
         map.music = self.music.clone();
         map.lighting = self.lighting;
         map.fog = self.fog;
+        map.weather = self.weather;
     }
 }
 

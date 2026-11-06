@@ -3,6 +3,19 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## Unreleased
+
+### Gameplay
+- **Weather**: each map has a weather (map settings: clear, rain, snow or fog, with a strength).
+  Rain falls in streaks with splashes, darkens the map and plays a built-in rain loop; snow
+  drifts in flakes; fog moves over the map in soft clouds. The particles are drawn over the lit
+  scene and dim at night. The rain sound follows the new **Ambience volume** option
+  (environmental sounds, separate from music and effects). The **Set weather** action and `set_weather(kind, [intensity])`,
+  `set_map_weather(map, kind, intensity)`, `weather()`, `weather_intensity()` change and read it;
+  changes are kept in save games (`WorldState.weather`). The editor has *View › Weather
+  preview*. Example: fog over Whisperwood until the shrine is lit, rain in the Wilds.
+  Editor script `mapweather`, `viewopt weather`; game `status` prints `weather=`.
+
 ## 0.4.0 — 2026-11-06
 
 ### Editor

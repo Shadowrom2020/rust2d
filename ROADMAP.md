@@ -82,7 +82,7 @@ Instructions for every session (people and coding agents) that implements roadma
 Theme: the world moves without the player, and there is more to do in it: routines, weather,
 companions, crafting, achievements, minigames, water and height.
 
-### [ ] Weather — `feature/weather`
+### [x] Weather — `feature/weather`
 
 **Design.** Per-map `weather: Weather { kind: None|Rain|Snow|Fog, intensity }` in the map
 RON `Meta`; `Action::SetWeather` / script `set_weather(kind, intensity)` (saved override in
@@ -90,7 +90,48 @@ RON `Meta`; `Action::SetWeather` / script `set_weather(kind, intensity)` (saved 
 (moves with the camera), darker ambient for rain, built-in rain loop sound. The editor's
 lighting preview gets a weather toggle; the map inspector a weather row.
 
-**Verify.** `set_weather` via `call`, screenshots day and night; save / load keeps it.
+**Decided while building.** `WorldState.weather` is per map (`BTreeMap<map, Weather>`), so rain
+in the village doesn't follow the player indoors; `Action::SetWeather { map: "" = current,
+weather: None = back to the map's own }`. Scripts: `set_weather(kind, [intensity])` for the
+current map and `set_map_weather(map, kind, intensity)` for another one (one name per argument
+layout: the script check reads a call's first argument as a map), `weather()` /
+`weather_intensity()` read it (the game passes the weather with `PlayerInfo`); `"default"` goes
+back to the map's weather, unknown kinds are logged. Clear weather isn't written into map files
+(maps without weather stay byte-identical). Particles (`render/weather.rs`, shared with the
+editor) live in world coordinates and wrap around the camera view; density per area,
+intensity-scaled, capped. Fog = a grey veil plus slow soft clouds (a generated radial texture).
+The weather tints the ambient light (rain darker and bluer, fog and snow a little); when the map
+isn't dark otherwise (daylight, *Always bright*) the tint is applied without lights, so lanterns
+don't glow by day. Particles dim with the scene but stay visible at night. The rain loop is
+synthesized once at the mixer's 44.1 kHz: about 6 s of filtered noise with drop ticks, exactly 65
+mixer buffers of 4096 frames long (quad-snd 0.2.8 rewinds a looped sound that ends inside a
+buffer but writes the rest from the buffer's start again, leaving a short silence at every loop;
+sounds start on a buffer boundary, so whole buffers never hit it), with the tail faded into the
+start by an equal-power crossfade (a linear one dipped in loudness). It plays at 0.1–0.3 by
+intensity times the player's new *Options › Ambience volume* (environmental sounds, default
+70 %, `Settings.ambience_volume`); muted with `RUST2D_MUTE`. Music files loop through the same
+quad-snd code, so their loop point can have the same short gap (see Backlog). Particles and sound pause with the world
+(menus). The editor's *Weather preview* is a separate View toggle (cloud icon) next to the
+lighting preview; the map settings have a *Weather* row; the undo snapshot includes it.
+Example: fog (45 %) over Whisperwood, lifted by `shrine_awakening()` (`set_weather("none")`),
+rain (50 %) in the Wilds.
+
+**Verify.** Done: unit tests for the map file round trip, old saves without weather, ambient
+tint, particle counts / wrapping / kind change, the script functions (incl. default and an
+unknown kind) and the rain loop seam. Game (quick save, `--dev` console): the forest reports
+`weather=fog:0.45(map)`; `set_weather("rain", 0.8)` → `rain:0.80(set)`; F5, `default` → fog,
+F9 → rain again (kept in the save); `call shrine_awakening` lifts the fog (`weather=none`,
+flag `shrine_lit`). Screenshots: forest fog by day and at night, rain by day and at night (the
+guard's lantern lights the rain), snow in the village (no daylight glow), the Wilds' rain.
+Editor: weather preview of the forest's fog, `mapweather snow 70` and `undo` (back to Fog 45 %),
+the map settings' *Weather* row, the *Set weather* action editor. After the user's reports (rain
+too loud, the loop stopping and starting, then a remaining gap): the loop's loudness is
+unit-tested over two passes (no window below 80 % of the average; the old loop dipped to about
+72 %); a test replays quad-snd's mixing loop (bug included): the rain loops bit-exactly, a loop
+ending inside a buffer gets over 1000 silent frames; a silent run on the real device (master
+volume 0) showed no ALSA underruns; the Options page shows
+*Ambience volume* (screenshot) and saves `ambience_volume`; older settings files get the
+default. Not checked by ear: the rain sound itself (tests run muted).
 
 ### [ ] NPC schedules — `feature/schedules`
 
@@ -367,6 +408,9 @@ Options row *Language*; the editor exports a translation template. Large but mec
 - 47-tile corner auto-tiling (the 16-tile sets of 0.4.0 first); parallax background layers.
 - Code signing and notarization of the Windows and macOS packages (today: unsigned, documented).
 - Gamepad button glyphs in the HUD and hints (Steam Deck); rebinding gamepad buttons.
+- Gapless music loops: quad-snd (macroquad's mixer) leaves a short silence where a looped sound
+  ends inside a mix buffer. The rain avoids it with a length of whole buffers; music files would
+  need padding to whole buffers when loaded (decode, pad, re-encode) or a fixed quad-snd.
 
 ## Shipped
 

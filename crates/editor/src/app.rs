@@ -153,6 +153,8 @@ pub struct ViewOpts {
     /// Shows the map's darkness and lights at `hour` (outdoor maps) in the editor.
     pub lighting: bool,
     pub hour: f32,
+    /// Shows the map's weather (particles, darker rain) in the editor.
+    pub weather: bool,
 }
 
 pub struct Cam {
@@ -271,6 +273,8 @@ pub struct Editor {
     pub library_mode: bool,
     /// Lighting preview: renderer and the map's tile lights (refreshed twice a second).
     pub light_pass: Option<rust2d_engine::render::lighting::LightPass>,
+    /// Weather preview particles.
+    pub weather_fx: rust2d_engine::render::weather::WeatherFx,
     pub light_cache: (f64, String, Vec<rust2d_engine::render::lighting::Light>),
     /// Main editor: the Asset Library window it started.
     pub lib_window: crate::library_window::LibWindow,
@@ -385,8 +389,9 @@ impl Editor {
             capture: Default::default(),
             place_recent: Vec::new(),
             zone_template: ZoneTemplate::Spawn,
-            view: ViewOpts { grid: true, collision: false, zones: true, dim_layers: false, minimap: true, lighting: false, hour: 22.0 },
+            view: ViewOpts { grid: true, collision: false, zones: true, dim_layers: false, minimap: true, lighting: false, hour: 22.0, weather: false },
             light_pass: None,
+            weather_fx: Default::default(),
             light_cache: (-1.0, String::new(), Vec::new()),
             status: (String::new(), 0.0),
             new_map: None,
@@ -1474,6 +1479,7 @@ impl Editor {
                     ui.checkbox(&mut self.view.dim_layers, "Dim inactive layers");
                     ui.checkbox(&mut self.view.minimap, "Minimap");
                     ui.checkbox(&mut self.view.lighting, "Lighting preview");
+                    ui.checkbox(&mut self.view.weather, "Weather preview");
                 });
                 ui.menu_button("Play", |ui| {
                     if ui.button(ui::t(ph::PLAY, "Play here   F5")).clicked() {
@@ -1557,6 +1563,7 @@ impl Editor {
                     ui::toggle(ui, &mut self.view.dim_layers, ph::STACK, "Dim inactive layers", "", "Fades every layer except the active one");
                     ui::toggle(ui, &mut self.view.minimap, ph::MAP_TRIFOLD, "Minimap", "", "Overview in the corner of the map");
                     ui::toggle(ui, &mut self.view.lighting, ph::LIGHTBULB, "Lighting preview", "", "Shows the map's darkness and its lights as in the game (outdoor maps at the hour chosen next to it)");
+                    ui::toggle(ui, &mut self.view.weather, ph::CLOUD_RAIN, "Weather preview", "", "Shows the map's rain, snow or fog as in the game (set it in the map's settings: nothing selected)");
                     let outdoor = self.doc.as_ref().is_some_and(|d| d.map.lighting.mode == rust2d_engine::map::LightMode::Outdoor);
                     if self.view.lighting && outdoor {
                         let mut h = self.view.hour;
@@ -2570,6 +2577,27 @@ impl Editor {
                         });
                         ui.weak("Lights: tiles (Database › Tilesets › Light tiles), props per state, characters and items (Database), and the player's equipped light. Preview: View › Lighting preview.");
                     }
+                }
+                ui.separator();
+                ui.heading("Weather");
+                {
+                    use rust2d_engine::map::WeatherKind;
+                    let w = &mut map.weather;
+                    ui.horizontal_wrapped(|ui| {
+                        for k in WeatherKind::ALL {
+                            ui.radio_value(&mut w.kind, k, k.label());
+                        }
+                    });
+                    if w.kind != WeatherKind::None {
+                        ui.horizontal(|ui| {
+                            ui.label("Strength");
+                            let mut pct = (w.intensity * 100.0).round();
+                            if ui.add(egui::Slider::new(&mut pct, 5.0..=100.0).suffix(" %")).changed() {
+                                w.intensity = pct / 100.0;
+                            }
+                        });
+                    }
+                    ui.weak("Rain also darkens the map and plays a rain sound. The Set weather action and set_weather() change it during the game (kept in save games). Preview: View › Weather preview.");
                 }
                 ui.separator();
                 ui.heading("Map screen");

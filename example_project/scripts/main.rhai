@@ -27,6 +27,8 @@
 //               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
 // Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
 //               random(n) current_map()
+// Weather:      set_weather(kind, [intensity]) set_map_weather(map, kind, intensity) (queued;
+//               "rain", "snow", "fog", "none", "default"); weather() weather_intensity()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -106,6 +108,7 @@ fn shrine_awakening() {
     set_flag("shrine_lit", true);
     set_quest_stage("strange_lights", 2);
     dim(0, 2);
+    set_weather("none");                        // the eerie fog lifts (kept in the save game)
     wait(1.5);
     emit("shrine_lit");
 }

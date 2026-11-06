@@ -1323,6 +1323,36 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                     .on_hover_text("1 = like a hit on the player. Players can switch shaking off in the Options.");
             });
         }
+        Action::SetWeather { map, weather } => {
+            use rust2d_engine::map::{Weather, WeatherKind};
+            labeled(ui, "map", |ui| {
+                let mut opts = vec![String::new()];
+                opts.extend(refs.maps.iter().cloned());
+                suggest(ui, &format!("{id}/wmap"), map, &opts, 120.0);
+            });
+            ui.weak("(empty map = the map the player is on)");
+            labeled(ui, "weather", |ui| {
+                let current = weather.map_or("Map's own", |w| w.kind.label());
+                egui::ComboBox::from_id_salt(format!("{id}/wkind")).selected_text(current).show_ui(ui, |ui| {
+                    if ui.selectable_label(weather.is_none(), "Map's own").on_hover_text("Back to the weather set on the map").clicked() {
+                        *weather = None;
+                    }
+                    for k in WeatherKind::ALL {
+                        let on = weather.is_some_and(|w| w.kind == k);
+                        if ui.selectable_label(on, k.label()).clicked() {
+                            *weather = Some(Weather::new(k, weather.map_or(0.6, |w| w.intensity)));
+                        }
+                    }
+                });
+                if let Some(w) = weather.as_mut().filter(|w| w.kind != WeatherKind::None) {
+                    let mut pct = (w.intensity * 100.0).round();
+                    if ui.add(egui::Slider::new(&mut pct, 5.0..=100.0).suffix(" %")).changed() {
+                        w.intensity = pct / 100.0;
+                    }
+                }
+            });
+            ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
+        }
         Action::Autosave => {
             ui.weak("Saves the game to the 'Autosave' slot once this event (dialogs, cut-scene) has finished. Map changes autosave by themselves.");
         }

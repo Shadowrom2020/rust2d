@@ -17,6 +17,8 @@ pub struct Settings {
     pub master_volume: f32,
     pub music_volume: f32,
     pub effects_volume: f32,
+    /// Environmental sounds: rain and other weather.
+    pub ambience_volume: f32,
     /// Dialog text speed multiplier (0 = instant).
     pub text_speed: f32,
     /// Screen shake and the red flash when hurt (off for players who find them unpleasant).
@@ -29,7 +31,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { fullscreen: false, zoom: 1.0, show_fps: false, master_volume: 1.0, music_volume: 0.8, effects_volume: 1.0, text_speed: 1.0, screen_effects: true, keys: Default::default() }
+        Settings { fullscreen: false, zoom: 1.0, show_fps: false, master_volume: 1.0, music_volume: 0.8, effects_volume: 1.0, ambience_volume: 0.7, text_speed: 1.0, screen_effects: true, keys: Default::default() }
     }
 }
 
@@ -74,6 +76,9 @@ impl Settings {
     pub fn effects(&self) -> f32 {
         (self.master_volume * self.effects_volume).clamp(0.0, 1.0)
     }
+    pub fn ambience(&self) -> f32 {
+        (self.master_volume * self.ambience_volume).clamp(0.0, 1.0)
+    }
 }
 
 #[cfg(test)]
@@ -93,6 +98,11 @@ mod tests {
         std::fs::write(&path, "(zoom: 1.5)").unwrap();
         assert_eq!(Settings::load("My Game"), Settings { zoom: 1.5, ..Default::default() });
         assert!((s.music() - 0.3).abs() < 1e-6);
+        // Files from before the ambience volume get its default.
+        std::fs::write(&path, "(effects_volume: 0.5)").unwrap();
+        let old = Settings::load("My Game");
+        assert_eq!((old.effects_volume, old.ambience_volume), (0.5, 0.7));
+        assert!((Settings { master_volume: 0.5, ..old }.ambience() - 0.35).abs() < 1e-6);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -36,6 +36,8 @@ pub enum Arg {
     Effect,
     /// A character definition id.
     Character,
+    /// "rain", "snow", "fog", "none", "default".
+    Weather,
     /// Event name for emit().
     Event,
     Text,
@@ -93,6 +95,11 @@ pub const API: &[ApiFn] = api! {
     "defeated_count"(character: Character) "How many characters of this definition the player has defeated (the bestiary's count), e.g. defeated_count(\"slime\")";
     "shake"(seconds: Num) "Shakes the screen like a hit for a while: earthquakes, explosions (queued)";
     "shake"(seconds: Num, strength: Num) "Shakes the screen; strength 1 = like a hit, 2 = twice as hard (queued)";
+    "set_weather"(kind: Weather) "Weather of the current map: \"rain\", \"snow\", \"fog\", \"none\" or \"default\" (the map's own); kept in the save game (queued)";
+    "set_weather"(kind: Weather, intensity: Num) "Weather of the current map with a strength from 0 to 1, e.g. set_weather(\"rain\", 0.8) (queued)";
+    "set_map_weather"(map: Map, kind: Weather, intensity: Num) "Weather of another map, e.g. set_map_weather(\"forest\", \"fog\", 0.5) (queued)";
+    "weather"() "The current map's weather: \"none\", \"rain\", \"snow\" or \"fog\"";
+    "weather_intensity"() "The current weather's strength (0 to 1)";
     "hp_of"(target: Target) "A character's HP right now: \"player\", \"self\" (also SELF), or a name on this map; -1 if there is no such character";
     "has_effect"(effect: Effect) "Whether the player has a status effect, e.g. has_effect(\"poison\")";
     "give_xp"(amount: Num) "Gives experience; enough of it raises the level (negative takes it away, the level never drops) (queued)";
@@ -469,6 +476,11 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                 Some(Arg::Dir) => ["up", "down", "left", "right"].iter().map(|d| c(d, "direction")).collect(),
                 Some(Arg::Character) => db.characters.iter().map(|q| c(&q.id, &q.name)).collect(),
                 Some(Arg::Effect) => rust2d_engine::effects::EffectKind::ALL.iter().map(|k| c(k.id(), k.label())).collect(),
+                Some(Arg::Weather) => {
+                    let mut v: Vec<Cand> = rust2d_engine::map::WeatherKind::ALL.iter().map(|k| c(k.id(), k.label())).collect();
+                    v.push(c("default", "the map's own weather"));
+                    v
+                }
                 _ => Vec::new(),
             };
             rank(list, partial)

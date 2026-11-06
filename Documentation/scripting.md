@@ -434,6 +434,35 @@ save. Scripts can add autosaves at important moments, e.g. after a boss fight or
 | `is_night()` | Whether it is night (dark on outdoor maps). |
 | `set_hour(hour)` | Sets the time of day, e.g. `set_hour(22)`. *(queued)* |
 
+### Weather
+
+Each map has its own weather (map settings: clear, rain, snow or fog, with a strength). Scripts
+and the *Set weather* action change it; the change is kept in the save game, so the map keeps
+that weather until it is set again. Weather names: `"none"`, `"rain"`, `"snow"`, `"fog"`, and
+`"default"` = back to the map's own weather.
+
+| Function | Description |
+|---|---|
+| `set_weather(kind)` | Weather of the current map at a medium strength (`0.6`). *(queued)* |
+| `set_weather(kind, intensity)` | The same with a strength from `0` to `1`, e.g. `set_weather("rain", 0.8)`. *(queued)* |
+| `set_map_weather(map, kind, intensity)` | Weather of another map, e.g. `set_map_weather("forest", "fog", 0.5)`. *(queued)* |
+| `weather()` | The current map's weather: `"none"`, `"rain"`, `"snow"` or `"fog"`. |
+| `weather_intensity()` | Its strength (`0` to `1`). |
+
+```rust
+fn storm_rolls_in() {
+    if weather() != "rain" {
+        say("Dark clouds gather over the hills.");
+        set_weather("rain", 0.9);
+    }
+}
+
+fn lift_the_curse() {
+    set_weather("default");             // back to whatever the map has
+    set_map_weather("forest", "none", 0);
+}
+```
+
 ### Sound
 
 | Function | Description |

@@ -177,6 +177,8 @@ pub struct Map {
     pub lighting: MapLighting,
     /// Fog of war: the map screen only shows what the player has explored.
     pub fog: bool,
+    /// Rain, snow or fog over the map (a save game can override it: `WorldState::weather`).
+    pub weather: Weather,
 }
 
 /// How dark a map is when nothing lights it.
@@ -201,6 +203,72 @@ pub struct MapLighting {
 
 fn default_darkness() -> f32 {
     0.7
+}
+
+/// What falls from the sky on a map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WeatherKind {
+    #[default]
+    None,
+    Rain,
+    Snow,
+    Fog,
+}
+
+impl WeatherKind {
+    pub const ALL: [WeatherKind; 4] = [WeatherKind::None, WeatherKind::Rain, WeatherKind::Snow, WeatherKind::Fog];
+    pub fn label(self) -> &'static str {
+        match self {
+            WeatherKind::None => "Clear",
+            WeatherKind::Rain => "Rain",
+            WeatherKind::Snow => "Snow",
+            WeatherKind::Fog => "Fog",
+        }
+    }
+    /// Script name: "none", "rain", "snow", "fog".
+    pub fn id(self) -> &'static str {
+        match self {
+            WeatherKind::None => "none",
+            WeatherKind::Rain => "rain",
+            WeatherKind::Snow => "snow",
+            WeatherKind::Fog => "fog",
+        }
+    }
+    pub fn from_id(s: &str) -> Option<WeatherKind> {
+        WeatherKind::ALL.into_iter().find(|k| k.id().eq_ignore_ascii_case(s.trim()) || (s.trim().eq_ignore_ascii_case("clear") && *k == WeatherKind::None))
+    }
+}
+
+/// A map's weather: kind and strength (0..1).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Weather {
+    pub kind: WeatherKind,
+    #[serde(default = "default_intensity")]
+    pub intensity: f32,
+}
+
+fn default_intensity() -> f32 {
+    0.6
+}
+
+impl Default for Weather {
+    fn default() -> Self {
+        Weather { kind: WeatherKind::None, intensity: default_intensity() }
+    }
+}
+
+impl Weather {
+    pub fn new(kind: WeatherKind, intensity: f32) -> Self {
+        Weather { kind, intensity: intensity.clamp(0.0, 1.0) }
+    }
+    /// No weather (not written into map files).
+    pub fn is_clear(&self) -> bool {
+        self.kind == WeatherKind::None
+    }
+    /// Whether anything shows (a kind other than none with some intensity).
+    pub fn active(&self) -> bool {
+        self.kind != WeatherKind::None && self.intensity > 0.0
+    }
 }
 
 impl Default for MapLighting {
@@ -233,6 +301,7 @@ impl Map {
             music: String::new(),
             lighting: MapLighting::default(),
             fog: false,
+            weather: Weather::default(),
         }
     }
 

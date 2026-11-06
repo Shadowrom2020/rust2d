@@ -494,6 +494,9 @@ pub enum Action {
     CureEffect { target: TargetName, kind: Option<crate::effects::EffectKind> },
     /// Shakes the screen (`strength` 1 = like a hit) - earthquakes, explosions, a boss landing.
     Shake { seconds: f32, strength: f32 },
+    /// Weather of a map ("" = the current one); `None` = back to the map's own weather. Kept
+    /// in the save game.
+    SetWeather { map: String, weather: Option<crate::map::Weather> },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -593,6 +596,7 @@ impl Action {
             Action::ApplyEffect { .. } => "Apply effect",
             Action::CureEffect { .. } => "Cure effect",
             Action::Shake { .. } => "Shake the screen",
+            Action::SetWeather { .. } => "Set weather",
         }
     }
 
@@ -652,6 +656,7 @@ impl Action {
             Action::ApplyEffect { target: "player".into(), effect: crate::effects::EffectSpec::template(crate::effects::EffectKind::Poison) },
             Action::CureEffect { target: "player".into(), kind: Some(crate::effects::EffectKind::Poison) },
             Action::Shake { seconds: 0.5, strength: 1.5 },
+            Action::SetWeather { map: s(), weather: Some(crate::map::Weather::new(crate::map::WeatherKind::Rain, 0.6)) },
         ]
     }
 }

@@ -25,6 +25,7 @@ pub mod input;
 mod mouse;
 mod spawner;
 mod thumbs;
+mod weather;
 mod ui;
 mod worldmap;
 
@@ -222,6 +223,8 @@ pub struct Game {
     runner: ActionRunner,
     /// Darkness and light renderer (created on first use).
     light_pass: Option<render::lighting::LightPass>,
+    /// Rain / snow / fog particles.
+    weather_fx: render::weather::WeatherFx,
     skills: skills::Skills,
     /// Set while a saved game is being loaded (see `enter_map`).
     resuming: bool,
@@ -278,6 +281,7 @@ impl Game {
         };
         let mut game = Game {
             light_pass: None,
+            weather_fx: Default::default(),
             skills: Default::default(),
             resuming: false,
             autosave_pending: false,
@@ -990,6 +994,7 @@ impl Game {
         // Effects and timed lights also play on during cut-scenes (they are part of the show).
         if !frozen || self.cutscene_active() {
             self.update_fx(dt);
+            self.update_weather(dt);
         }
         if let Some(m) = &mut self.click_marker {
             m.1 += dt;
@@ -1391,8 +1396,9 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
+            self.weather_status(),
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1611,11 +1617,17 @@ impl Game {
             render::draw_layer(m, layer, &sets, ts, view, WHITE);
         }
 
-        if let Some(ambient) = self.scene_ambient(render::lighting::ambient(self.loaded.map.lighting, self.world.hour)) {
-            let lights = self.lights();
+        // Darkness (map, time of day, cut-scene dimming), then the weather's tint on top.
+        let dark = self.scene_ambient(render::lighting::ambient(self.loaded.map.lighting, self.world.hour));
+        let scene_light = self.weather_ambient(dark);
+        if let Some(ambient) = scene_light {
+            // Lights show only where it is dark: weather alone (by day) just tints the scene.
+            let lights = if dark.is_some() { self.lights() } else { Vec::new() };
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(&cam, ambient, &lights, ts, get_time());
             set_camera(&cam);
         }
+        // Rain, snow, fog over the lit scene (and in save thumbnails).
+        self.draw_weather(view, scene_light);
         // A save's thumbnail: the world as it is now, before overlays, HUD and menus.
         self.capture_thumbnail();
 
@@ -1975,6 +1987,14 @@ impl ActionHost for Game {
             }
             Action::Shake { seconds, strength } => {
                 self.shake_screen(*seconds, *strength);
+                Step::Continue
+            }
+            Action::SetWeather { map, weather } => {
+                let map = if map.is_empty() { self.loaded.map.name.clone() } else { map.clone() };
+                match weather {
+                    Some(w) => self.world.weather.insert(map, crate::map::Weather::new(w.kind, w.intensity)),
+                    None => self.world.weather.remove(&map),
+                };
                 Step::Continue
             }
             Action::OpenShop { target } => {
