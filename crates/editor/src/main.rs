@@ -1,7 +1,7 @@
-//! rust2d editor: maps, entities, zones, transitions, definitions and scripts.
+//! R(ust)PG2D editor: maps, entities, zones, transitions, definitions and scripts.
 //!
-//! Usage: rust2d-editor [PROJECT_DIR]   (without a folder the welcome screen shows)
-//!        rust2d-editor --library [DIR]  (the Asset Library window; default: the shared library)
+//! Usage: rustpg2d-editor [PROJECT_DIR]   (without a folder the welcome screen shows)
+//!        rustpg2d-editor --library [DIR]  (the Asset Library window; default: the shared library)
 
 mod app;
 mod builder;
@@ -41,13 +41,13 @@ thread_local! {
 fn library_arg() -> Option<std::path::PathBuf> {
     let args: Vec<String> = std::env::args().collect();
     let i = args.iter().position(|a| a == "--library")?;
-    Some(args.get(i + 1).filter(|a| !a.starts_with("--")).map_or_else(rust2d_engine::library::library_dir, std::path::PathBuf::from))
+    Some(args.get(i + 1).filter(|a| !a.starts_with("--")).map_or_else(rustpg2d_engine::library::library_dir, std::path::PathBuf::from))
 }
 
 fn window_conf() -> Conf {
     let library = library_arg().is_some();
     Conf {
-        window_title: if library { "rust2d – Asset Library" } else { "rust2d editor" }.to_owned(),
+        window_title: if library { "R(ust)PG2D – Asset Library" } else { "R(ust)PG2D editor" }.to_owned(),
         window_width: if library { 1300 } else { 1600 },
         window_height: 900,
         high_dpi: true,
@@ -83,8 +83,8 @@ async fn main() {
         ctx.options_mut(|o| o.line_scroll_speed = WHEEL_POINTS_PER_NOTCH * EMQ_WHEEL_DIVISOR);
         ui::install_fonts(ctx);
     });
-    // Debug aid: RUST2D_EDITOR_SCRIPT="tool entity; select entity 3; wait 0.5; shot a.png; quit"
-    let mut script: VecDeque<Vec<String>> = std::env::var("RUST2D_EDITOR_SCRIPT")
+    // Debug aid: RUSTPG2D_EDITOR_SCRIPT="tool entity; select entity 3; wait 0.5; shot a.png; quit"
+    let mut script: VecDeque<Vec<String>> = std::env::var("RUSTPG2D_EDITOR_SCRIPT")
         .map(|s| s.split(';').map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>()).filter(|c| !c.is_empty()).collect())
         .unwrap_or_default();
     let mut wait = 0.3f32;
@@ -171,7 +171,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                     let default = def.container_of(e).cloned().unwrap_or_default();
                     let spec = e.container.get_or_insert(default);
                     if arg(0) == "containeradd" {
-                        spec.items.push(rust2d_engine::inventory::ItemStack::new(arg(1), num(2) as u32));
+                        spec.items.push(rustpg2d_engine::inventory::ItemStack::new(arg(1), num(2) as u32));
                     } else {
                         spec.size = num(1) as u32;
                     }
@@ -181,7 +181,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         // spawnermode never|enter|SECONDS  (selected zone)
         "spawnermode" => {
-            use rust2d_engine::map::{Respawn, ZoneKind};
+            use rustpg2d_engine::map::{Respawn, ZoneKind};
             if let (Some(doc), Selection::Zone(uid)) = (&mut ed.doc, ed.sel) {
                 if let Some(ZoneKind::Spawner { respawn, .. }) = doc.map.zones.iter_mut().find(|z| z.uid == uid).map(|z| &mut z.kind) {
                     *respawn = match arg(1) {
@@ -195,9 +195,9 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         "place" => {
             ed.place_kind = match arg(1) {
-                "character" => rust2d_engine::entity::EntityKind::Character,
-                "item" => rust2d_engine::entity::EntityKind::Item,
-                _ => rust2d_engine::entity::EntityKind::Prop,
+                "character" => rustpg2d_engine::entity::EntityKind::Character,
+                "item" => rustpg2d_engine::entity::EntityKind::Item,
+                _ => rustpg2d_engine::entity::EntityKind::Prop,
             };
             ed.place_def = arg(2).to_string();
         }
@@ -293,14 +293,14 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         "save" => ed.save_all(),
         // play [start]: F5 (from the camera / selected spawn) or F6 (project start); the game
-        // inherits the environment, so RUST2D_AUTOPLAY can drive the play-test
+        // inherits the environment, so RUSTPG2D_AUTOPLAY can drive the play-test
         "play" => ed.play(arg(1) != "start"),
         // Same code paths as the file dialogs, without the dialog.
         // import tiled FILE [NAME] · import lpc FILE [ID] [body|hair|beard|outfit|armor|held] ·
         // import aseprite FILE [ID]: the File › Import… imports (result printed and shown)
         "import" if matches!(arg(1), "tiled" | "lpc" | "aseprite") => {
             use import::ImportKind;
-            use rust2d_engine::defs::SheetKind;
+            use rustpg2d_engine::defs::SheetKind;
             let kind = match arg(1) {
                 "tiled" => ImportKind::Tiled,
                 "lpc" => ImportKind::Lpc,
@@ -435,7 +435,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             } else {
                 opts.appimage = matches!(arg(2), "appimage" | "all");
                 opts.flatpak = matches!(arg(2), "flatpak" | "all");
-                opts.app_id = if arg(3).is_empty() { package::default_app_id(&rust2d_engine::release::slug(&name)) } else { arg(3).to_string() };
+                opts.app_id = if arg(3).is_empty() { package::default_app_id(&rustpg2d_engine::release::slug(&name)) } else { arg(3).to_string() };
             }
             match ed.run_export(&name, arg(1), &opts) {
                 Ok(m) => println!("[export] {m}"),
@@ -443,7 +443,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         // exportdialog [appimage] [flatpak]: opens File → Export game with those packages ticked
-        // example: the welcome screen's "Example project" (packaged rust2d only)
+        // example: the welcome screen's "Example project" (packaged R(ust)PG2D only)
         "example" => ed.open_example(),
         "exportdialog" => {
             ed.open_export();
@@ -464,7 +464,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} clipboard={} pasting={} graph={},{} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} schedule={} clipboard={} pasting={} graph={},{} msg={}",
             ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
@@ -479,6 +479,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.audio.previewing(),
             ed.audio.current_music(),
             ed.sel,
+            schedule_text(ed),
             ed.clipboard.as_ref().map_or("empty".to_string(), |c| format!("{}x{},{}ents", c.w, c.h, c.entities.len())),
             ed.pasting,
             ed.graph.counts.0,
@@ -487,7 +488,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         ),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),
         "rename" => {
-            use rust2d_engine::refactor::RefKind;
+            use rustpg2d_engine::refactor::RefKind;
             let kind = match arg(1) {
                 "tileset" => RefKind::Tileset,
                 "sheet" => RefKind::Sheet,
@@ -595,7 +596,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "clear" => StTool::Clear,
                 "solid" => StTool::Collision(1),
                 "walkable" => StTool::Collision(2),
-                "auto" => StTool::Collision(rust2d_engine::defs::StructureDef::COLLISION_AUTO),
+                "auto" => StTool::Collision(rustpg2d_engine::defs::StructureDef::COLLISION_AUTO),
                 "prop" => StTool::Prop,
                 _ => StTool::Stamp,
             }
@@ -735,7 +736,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                     "name" => {
                         w.name = rest;
                         if !w.folder_edited {
-                            w.folder = rust2d_engine::release::slug(&w.name);
+                            w.folder = rustpg2d_engine::release::slug(&w.name);
                         }
                     }
                     "parent" => w.parent = rest,
@@ -745,9 +746,9 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                     }
                     "sex" => {
                         w.sex = match arg(2) {
-                            "male" => rust2d_engine::project::SexChoice::Male,
-                            "female" => rust2d_engine::project::SexChoice::Female,
-                            _ => rust2d_engine::project::SexChoice::Both,
+                            "male" => rustpg2d_engine::project::SexChoice::Male,
+                            "female" => rustpg2d_engine::project::SexChoice::Female,
+                            _ => rustpg2d_engine::project::SexChoice::Both,
                         }
                     }
                     "creator" => w.creator = arg(2) != "off",
@@ -769,9 +770,44 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         // routeedit on|off: edit the selected character's patrol route on the map
         "routeedit" => {
+            ed.route_kind = app::RouteKind::Patrol;
             ed.route_edit = match (arg(1), ed.sel) {
                 ("on", app::Selection::Entity(uid)) => Some(uid),
                 _ => None,
+            }
+        }
+        // scheduleedit on|off: edit the selected character's schedule on the map (on: adds a
+        // schedule with one stop at its tile when it has none, like "Add a schedule")
+        "scheduleedit" => {
+            ed.route_edit = None;
+            if let (Some(doc), app::Selection::Entity(uid), "on") = (&mut ed.doc, ed.sel, arg(1)) {
+                let ts = rustpg2d_engine::project::TILE_SIZE as f32;
+                let before = doc::Objects::of(&doc.map);
+                if let Some(e) = doc.map.entities.iter_mut().find(|e| e.uid == uid && e.kind == rustpg2d_engine::entity::EntityKind::Character) {
+                    if e.schedule.is_empty() {
+                        let tile = ((e.x / ts).floor() as i32, ((e.y - 1.0) / ts).floor() as i32);
+                        e.schedule.push(rustpg2d_engine::entity::ScheduleStop::new(8.0, tile.0, tile.1));
+                    }
+                    ed.route_edit = Some(uid);
+                    ed.route_kind = app::RouteKind::Schedule;
+                }
+                doc.record_objects(before, "schedule");
+            }
+        }
+        // stop K hour H | facing up|down|left|right|any | inside on|off: edit stop K of the
+        // selected character's schedule (as the inspector's row)
+        "stop" => {
+            if let (Some(doc), app::Selection::Entity(uid)) = (&mut ed.doc, ed.sel) {
+                let before = doc::Objects::of(&doc.map);
+                if let Some(s) = doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.schedule.get_mut(num(1) as usize)) {
+                    match arg(2) {
+                        "hour" => s.hour = num(3).rem_euclid(24.0),
+                        "facing" => s.facing = rustpg2d_engine::entity::Facing::ALL.into_iter().find(|f| f.label().eq_ignore_ascii_case(arg(3))),
+                        "inside" => s.inside = arg(3) == "on",
+                        _ => println!("[script] stop: unknown field {}", arg(2)),
+                    }
+                }
+                doc.record_objects(before, "schedule");
             }
         }
         // scriptsel FILE: what clicking a file in Database > Scripts does
@@ -821,6 +857,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "structures" => Tab::Structures,
                 "skills" => Tab::Skills,
                 "spells" => Tab::Spells,
+                "recipes" => Tab::Recipes,
+                "achievements" => Tab::Achievements,
                 _ => Tab::Items,
             };
             // tab KIND N, or tab KIND ID (sheets, tilesets, items, props, characters).
@@ -831,6 +869,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 Tab::Items => db.items.iter().position(|d| d.id == arg(2)),
                 Tab::Props => db.props.iter().position(|d| d.id == arg(2)),
                 Tab::Characters => db.characters.iter().position(|d| d.id == arg(2)),
+                Tab::Recipes => db.recipes.iter().position(|d| d.id == arg(2)),
+                Tab::Achievements => db.achievements.iter().position(|d| d.id == arg(2)),
                 _ => None,
             };
             ed.db.sel = by_id.unwrap_or(num(2) as usize);
@@ -873,13 +913,23 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.cam.center = vec2(num(1), num(2));
             ed.cam.zoom = num(3).max(0.01);
         }
-        // viewopt zones|grid|collision on|off: the View toggles
+        // mapweather none|rain|snow|fog [PERCENT]: the open map's weather (map settings, undoable)
+        "mapweather" => {
+            if let (Some(doc), Some(k)) = (ed.doc.as_mut(), rustpg2d_engine::map::WeatherKind::from_id(arg(1))) {
+                let before = doc::Objects::of(&doc.map);
+                doc.map.weather = rustpg2d_engine::map::Weather::new(k, if arg(2).is_empty() { 0.6 } else { num(2) / 100.0 });
+                doc.record_objects(before, "script");
+                println!("[script] weather of {}: {:?}", doc.map.name, doc.map.weather);
+            }
+        }
+        // viewopt zones|grid|collision|weather on|off: the View toggles
         "viewopt" => {
             let on = arg(2) != "off";
             match arg(1) {
                 "zones" => ed.view.zones = on,
                 "grid" => ed.view.grid = on,
                 "collision" => ed.view.collision = on,
+                "weather" => ed.view.weather = on,
                 _ => println!("[script] viewopt: zones|grid|collision on|off"),
             }
         }
@@ -888,7 +938,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "actionsheet" => {
             if let (Selection::Entity(uid), Some(doc)) = (ed.sel, ed.doc.as_mut()) {
                 let before = doc::Objects::of(&doc.map);
-                use rust2d_engine::events::Action as A;
+                use rustpg2d_engine::events::Action as A;
                 let sprite = doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.triggers.first_mut()).and_then(|t| {
                     t.actions.iter_mut().rev().find_map(|a| match a {
                         A::Effect { sprite, .. } | A::Fly { sprite, .. } => Some(sprite),
@@ -905,12 +955,12 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         // the selected entity's first trigger (testing the action editors)
         "addaction" => {
             let label = cmd[1..].join(" ");
-            let tpl = rust2d_engine::events::Action::templates().into_iter().find(|a| a.label() == label);
+            let tpl = rustpg2d_engine::events::Action::templates().into_iter().find(|a| a.label() == label);
             if let (Some(tpl), Selection::Entity(uid), Some(doc)) = (tpl, ed.sel, ed.doc.as_mut()) {
                 let before = doc::Objects::of(&doc.map);
                 if let Some(e) = doc.map.entities.iter_mut().find(|e| e.uid == uid) {
                     if e.triggers.is_empty() {
-                        e.triggers.push(rust2d_engine::events::Trigger::new(rust2d_engine::events::TriggerOn::Interact));
+                        e.triggers.push(rustpg2d_engine::events::Trigger::new(rustpg2d_engine::events::TriggerOn::Interact));
                     }
                     e.triggers[0].actions.push(tpl);
                 }
@@ -930,7 +980,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                     if arg(0) == "entequip" {
                         if let (Some(slot), Some(d)) = (db.item(arg(1)).and_then(|i| i.equip_slot()), &def) {
                             let eq = e.equipment.get_or_insert_with(|| d.equipment.clone());
-                            *eq.slot_mut(slot) = Some(rust2d_engine::inventory::ItemStack::new(arg(1), 1));
+                            *eq.slot_mut(slot) = Some(rustpg2d_engine::inventory::ItemStack::new(arg(1), 1));
                         }
                     } else if let (Ok(v), Some(d)) = (u32::from_str_radix(arg(1), 16), &def) {
                         let a = e.appearance.get_or_insert_with(|| d.appearance.clone());
@@ -944,4 +994,25 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         "collision" => ed.view.collision = arg(1) != "off",
         other => eprintln!("[editor script] unknown command '{other}'"),
     }
+}
+
+/// The selected character's schedule for `status`: "HH:MM@x,y[in][facing]" per stop, "-" if
+/// none; "(editing)" while edited on the map.
+fn schedule_text(ed: &Editor) -> String {
+    let Some(e) = ed.doc.as_ref().zip(match ed.sel {
+        app::Selection::Entity(uid) => Some(uid),
+        _ => None,
+    }).and_then(|(d, uid)| d.map.entity(uid)) else {
+        return "-".into();
+    };
+    if e.schedule.is_empty() {
+        return "-".into();
+    }
+    let stops: Vec<String> = e
+        .schedule
+        .iter()
+        .map(|s| format!("{}@{},{}{}{}", s.time_text(), s.x, s.y, if s.inside { "[in]" } else { "" }, s.facing.map_or(String::new(), |f| format!("[{}]", f.label()))))
+        .collect();
+    let editing = ed.route_edit == Some(e.uid) && ed.route_kind == app::RouteKind::Schedule;
+    format!("[{}]{}", stops.join(" "), if editing { "(editing)" } else { "" })
 }

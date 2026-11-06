@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn upgrades_16px_project() {
-        let tmp = std::env::temp_dir().join(format!("rust2d_migrate_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("rustpg2d_migrate_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         // A library with a 32px sheet, and a project holding a shrunken copy of it plus an
         // image of its own.
@@ -384,7 +384,7 @@ mod tests {
                 SheetDef { id: "own".into(), image: "sprites/own.png".into(), frame_w: 16, frame_h: 16, kind: Default::default(), female: false, playable: false, tags: vec![] },
             ],
             tilesets: vec![crate::defs::TilesetDef { id: "big".into(), image: "tilesets/big.png".into(), solid: vec![3, 7], animations: vec![], lights: vec![], terrains: vec![] }],
-            props: vec![PropDef { id: "p".into(), name: "P".into(), sprite: SpriteRef::new("own", 0), solid: true, hitbox: [12.0, 6.0], triggers: vec![], container: None, lock: None, default_state: "default".into(), states: vec![], light: None }],
+            props: vec![PropDef { id: "p".into(), name: "P".into(), sprite: SpriteRef::new("own", 0), solid: true, hitbox: [12.0, 6.0], triggers: vec![], container: None, lock: None, default_state: "default".into(), states: vec![], light: None, use_spot: None }],
             ..Default::default()
         };
         let p = Project { root: root.clone(), config: ProjectConfig { tile_size: 16, scale: 3.0, ..ProjectConfig::new("Old") }, db };

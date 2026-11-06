@@ -4,10 +4,10 @@
 //! Terrain-based ones go into the example project; city / dungeon / prop-based ones are
 //! library-only extras of the starter pack.
 
-use rust2d_engine::defs::StructureDef;
-use rust2d_engine::entity::{EntityInstance, EntityKind};
-use rust2d_engine::map::{CollisionOverride, Map, Tile};
-use rust2d_engine::project::TILE_SIZE;
+use rustpg2d_engine::defs::StructureDef;
+use rustpg2d_engine::entity::{EntityInstance, EntityKind};
+use rustpg2d_engine::map::{CollisionOverride, Map, Tile};
+use rustpg2d_engine::project::TILE_SIZE;
 
 use crate::art::t;
 

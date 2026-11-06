@@ -43,7 +43,7 @@ fn quick_rects() -> Vec<Rect> {
     (0..QUICK_SLOTS).map(|k| Rect::new(x0 + k as f32 * (QUICK_SLOT + GAP), sh - QUICK_SLOT - 12.0, QUICK_SLOT, QUICK_SLOT)).collect()
 }
 
-const EQUIP_SLOTS: [EquipSlot; 5] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
+const EQUIP_SLOTS: [EquipSlot; 6] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand, EquipSlot::Tool];
 const SHEET_W: f32 = 270.0;
 
 #[derive(Default)]
@@ -183,10 +183,10 @@ fn grid_size(n: usize, cols: usize) -> Vec2 {
 }
 
 /// Vertical distance of the equipment slots.
-const EQUIP_STEP: f32 = 56.0;
+const EQUIP_STEP: f32 = 50.0;
 
 /// Height of the character sheet panel.
-const SHEET_H: f32 = 500.0;
+const SHEET_H: f32 = 530.0;
 
 /// Container panels are at least this wide (title + "Take all" button).
 const MIN_CONTAINER_W: f32 = 300.0;
@@ -231,7 +231,7 @@ impl Game {
     }
 
     pub(super) fn inventory_open(&self) -> bool {
-        self.inv.is_open() || self.shop.is_open() || self.journal.is_open() || self.skills_open()
+        self.inv.is_open() || self.shop.is_open() || self.crafting.is_open() || self.journal.is_open() || self.skills_open()
     }
 
     fn container_name(&self, uid: u32) -> String {
@@ -870,6 +870,9 @@ fn cols_of(layout: &Layout, side: Side) -> usize {
 
 /// Short stat summary of an equippable item, e.g. "Damage 2 · every 0.35s · reach 1.1".
 fn item_stats_line(d: &crate::defs::ItemDef) -> Option<String> {
+    if !d.tool.is_empty() {
+        return Some(format!("Tool · {}", d.tool));
+    }
     if let Some(w) = &d.weapon {
         return Some(match &w.ranged {
             Some(r) => format!("Damage {} · every {:.2}s · range {:.0}", w.damage, w.cooldown, r.range),
@@ -911,6 +914,7 @@ impl Game {
                         EquipSlot::Weapon => "bare hands",
                         EquipSlot::Offhand if self.two_handed_equipped() => "(two-handed)",
                         EquipSlot::Offhand => "shield / light",
+                        EquipSlot::Tool => "fishing rod, ...",
                         _ => "empty",
                     };
                     draw_text(hint, r.x + r.w + 8.0, r.y + 38.0, 15.0, GRAY);

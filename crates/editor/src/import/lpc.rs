@@ -5,8 +5,8 @@
 //! 0 (standing, also the idle frame), 2, 4 and 6 of the walk. Other animations are dropped.
 
 use anyhow::{bail, Result};
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::render::character::LAYOUT_FRAMES;
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::render::character::LAYOUT_FRAMES;
 
 /// LPC frame size.
 pub const FRAME: u32 = 64;

@@ -21,6 +21,8 @@ pub enum RefKind {
     Structure,
     Skill,
     Spell,
+    /// Crafting recipe (`crafting::RecipeDef`).
+    Recipe,
 }
 
 struct Renamer<'a> {
@@ -88,6 +90,22 @@ impl Renamer<'_> {
         if let crate::skills::SpellEffect::Bolt { projectile, .. } = &mut d.effect {
             self.fix(RefKind::Sheet, &mut projectile.sheet);
         }
+    }
+
+    /// Furniture: the cover sprite (a bed's blanket) and the conditions.
+    fn use_spot(&mut self, s: &mut Option<crate::defs::UseSpot>) {
+        if let Some(s) = s {
+            self.fix(RefKind::Sheet, &mut s.cover.sheet);
+            self.conditions(&mut s.conditions);
+        }
+    }
+
+    fn recipe(&mut self, d: &mut crate::crafting::RecipeDef) {
+        self.fix(RefKind::Item, &mut d.result);
+        for s in &mut d.ingredients {
+            self.fix(RefKind::Item, &mut s.item);
+        }
+        self.fix(RefKind::Skill, &mut d.skill);
     }
 
     fn structure(&mut self, d: &mut crate::defs::StructureDef) {
@@ -174,7 +192,7 @@ impl Renamer<'_> {
             match a {
                 Action::GiveItem { item, .. } | Action::TakeItem { item, .. } => self.fix(RefKind::Item, item),
                 Action::Equip { item, .. } | Action::GiveItemTo { item, .. } | Action::TakeItemFrom { item, .. } => self.fix(RefKind::Item, item),
-                Action::Teleport { map, .. } | Action::SetSpawners { map, .. } => self.fix(RefKind::Map, map),
+                Action::Teleport { map, .. } | Action::SetSpawners { map, .. } | Action::SetWeather { map, .. } => self.fix(RefKind::Map, map),
                 Action::PlaySound { sound } | Action::PlayMusic { sound } => self.fix(RefKind::Sound, sound),
                 Action::Fly { sprite, .. } | Action::Effect { sprite, .. } => self.fix(RefKind::Sheet, &mut sprite.sheet),
                 Action::If { conditions, then, otherwise } => {
@@ -211,6 +229,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         r.triggers(&mut d.triggers);
         r.container(&mut d.container);
         r.lock(&mut d.lock);
+        r.use_spot(&mut d.use_spot);
     }
     for d in &mut db.characters {
         r.triggers(&mut d.triggers);
@@ -228,6 +247,13 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
     }
     for d in &mut db.spells {
         r.spell(d);
+    }
+    for d in &mut db.recipes {
+        r.recipe(d);
+    }
+    for d in &mut db.achievements {
+        r.fix(RefKind::Sheet, &mut d.icon.sheet);
+        r.conditions(&mut d.conditions);
     }
     r.fix(RefKind::Character, &mut config.player);
     let cc = &mut config.creation;
@@ -256,6 +282,7 @@ pub fn rename_in_map(map: &mut Map, kind: RefKind, old: &str, new: &str) -> usiz
         match &mut z.kind {
             ZoneKind::Portal { target_map, .. } | ZoneKind::Transition { target_map, .. } => r.fix(RefKind::Map, target_map),
             ZoneKind::Spawner { character, .. } => r.fix(RefKind::Character, character),
+            ZoneKind::FishingSpot { rod } => r.fix(RefKind::Item, rod),
             _ => {}
         }
         r.triggers(&mut z.triggers);
@@ -308,6 +335,14 @@ pub fn refs_of_spell(d: &crate::skills::SpellDef) -> Vec<(RefKind, String)> {
     r.found.unwrap_or_default()
 }
 
+/// The result and ingredient items and the skill of a recipe.
+pub fn refs_of_recipe(d: &crate::crafting::RecipeDef) -> Vec<(RefKind, String)> {
+    let mut d = d.clone();
+    let mut r = collector();
+    r.recipe(&mut d);
+    r.found.unwrap_or_default()
+}
+
 pub fn refs_of_prop(d: &crate::defs::PropDef) -> Vec<(RefKind, String)> {
     let mut d = d.clone();
     let mut r = collector();
@@ -318,6 +353,7 @@ pub fn refs_of_prop(d: &crate::defs::PropDef) -> Vec<(RefKind, String)> {
     r.triggers(&mut d.triggers);
     r.container(&mut d.container);
     r.lock(&mut d.lock);
+    r.use_spot(&mut d.use_spot);
     r.found.unwrap_or_default()
 }
 
@@ -447,6 +483,7 @@ mod tests {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),
@@ -461,6 +498,7 @@ mod tests {
         day_minutes: 24.0, start_hour: 8.0,
         skills: Default::default(),
         progression: Default::default(),
+        dialog_portraits: true,
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);

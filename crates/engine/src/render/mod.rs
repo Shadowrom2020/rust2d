@@ -5,8 +5,10 @@
 //! pixel per tile replaces the per-tile drawing, so even a 1024x1024 map renders fast.
 
 pub mod character;
+pub mod fish;
 pub mod lighting;
 pub mod recolor;
+pub mod weather;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -262,6 +264,25 @@ impl Assets {
     }
 
     /// Like [`draw_frame_colored`](Self::draw_frame_colored), scaled into `dest` (portraits).
+    /// Like [`draw_frame_colored`](Self::draw_frame_colored), centered at `center` and rotated
+    /// by `angle` radians (clockwise on screen): characters lying in a sideways bed.
+    pub fn draw_frame_colored_rotated(&self, sheet: &str, frame: u32, center: Vec2, angle: f32, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
+        let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
+        let pos = vec2((center.x - s.frame_w / 2.0).round(), (center.y - s.frame_h / 2.0).round());
+        draw_texture_ex(&tex, pos.x, pos.y, WHITE, DrawTextureParams { source: Some(s.src_rect(frame)), rotation: angle, ..Default::default() });
+        true
+    }
+
+    /// Draws part of a frame (`part`: fractions of the frame, e.g. the top half) into `dest`
+    /// (portraits: head and shoulders).
+    pub fn draw_frame_part_in(&self, sheet: &str, frame: u32, part: Rect, dest: Rect, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
+        let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
+        let r = s.src_rect(frame);
+        let src = Rect::new(r.x + part.x * r.w, r.y + part.y * r.h, part.w * r.w, part.h * r.h);
+        draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { source: Some(src), dest_size: Some(dest.size()), ..Default::default() });
+        true
+    }
+
     pub fn draw_frame_colored_in(&self, sheet: &str, frame: u32, dest: Rect, skin: Option<[u8; 3]>, hair: Option<[u8; 3]>) -> bool {
         let Some((tex, s)) = self.colored(sheet, skin, hair) else { return false };
         draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { source: Some(s.src_rect(frame)), dest_size: Some(dest.size()), ..Default::default() });

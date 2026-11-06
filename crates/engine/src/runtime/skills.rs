@@ -396,7 +396,7 @@ impl Game {
     fn aim_target(&self) -> Option<Vec2> {
         let i = self.entity_under(self.mouse_world())?;
         let e = &self.loaded.entities[i];
-        (e.max_hp > 0).then(|| e.body.pos - vec2(0.0, e.body.hitbox.y / 2.0))
+        (e.hostile && e.max_hp > 0).then(|| e.body.pos - vec2(0.0, e.body.hitbox.y / 2.0))
     }
 
     /// Aiming a bolt: left click fires at the enemy under the cursor (or at the clicked point),
@@ -473,7 +473,7 @@ impl Game {
         let targets: Vec<usize> = (0..self.loaded.entities.len())
             .filter(|&i| {
                 let e = &self.loaded.entities[i];
-                e.active && e.max_hp > 0 && e.invuln <= 0.0 && e.body.pos.distance(center) <= radius.max(0.5) * ts
+                e.active && e.hostile && e.max_hp > 0 && e.invuln <= 0.0 && e.body.pos.distance(center) <= radius.max(0.5) * ts
             })
             .collect();
         for i in targets {

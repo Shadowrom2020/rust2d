@@ -43,6 +43,13 @@ pub struct ProjectConfig {
     /// Experience and levels (off by default).
     #[serde(default)]
     pub progression: crate::progression::Progression,
+    /// Dialog boxes show the speaker's portrait (on by default).
+    #[serde(default = "yes")]
+    pub dialog_portraits: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_day_minutes() -> f32 {
@@ -144,6 +151,7 @@ impl ProjectConfig {
             start_hour: default_start_hour(),
             skills: Default::default(),
             progression: Default::default(),
+            dialog_portraits: true,
         }
     }
 }
@@ -200,7 +208,7 @@ pub struct Project {
     pub db: Database,
 }
 
-const DEFS: [&str; 10] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "structures", "skills", "spells"];
+const DEFS: [&str; 12] = ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "structures", "skills", "spells", "recipes", "achievements"];
 
 fn read_ron<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
     if !path.exists() {
@@ -239,6 +247,8 @@ impl Project {
             structures: read_ron(&d(DEFS[7]))?,
             skills: read_ron(&d(DEFS[8]))?,
             spells: read_ron(&d(DEFS[9]))?,
+            recipes: read_ron(&d(DEFS[10]))?,
+            achievements: read_ron(&d(DEFS[11]))?,
         };
         let mut db = db;
         db.upgrade_prop_states();
@@ -268,6 +278,12 @@ impl Project {
         }
         if !self.db.spells.is_empty() || d(DEFS[9]).exists() {
             write_ron(&d(DEFS[9]), &self.db.spells)?;
+        }
+        if !self.db.recipes.is_empty() || d(DEFS[10]).exists() {
+            write_ron(&d(DEFS[10]), &self.db.recipes)?;
+        }
+        if !self.db.achievements.is_empty() || d(DEFS[11]).exists() {
+            write_ron(&d(DEFS[11]), &self.db.achievements)?;
         }
         Ok(())
     }

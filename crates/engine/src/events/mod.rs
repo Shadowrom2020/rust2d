@@ -34,6 +34,8 @@ pub enum GameEvent {
     Lock,
     /// A character's HP dropped from `from` to `to` (fractions of its max HP, still alive).
     HpBelow { from: f32, to: f32 },
+    /// The player woke up after sleeping (in a bed, or the Sleep action).
+    Sleep,
 }
 
 /// Which events a trigger reacts to.
@@ -54,6 +56,8 @@ pub enum TriggerOn {
     Lock,
     /// The owning character's HP fell below `percent` of its max HP (and it is still alive).
     HpBelow { percent: u32 },
+    /// The player woke up after sleeping (map triggers; a bed's own triggers when slept in).
+    Sleep,
 }
 
 /// Where a trigger lives. The game only sends some events to each kind of owner (see
@@ -81,10 +85,10 @@ impl TriggerOwner {
         match (self, on) {
             // emit() / "Emit event" reach the map, its zones and its entities.
             (O::Map | O::Zone | O::Character | O::Prop | O::Pickup, T::Custom { .. }) => true,
-            (O::Map, T::MapEnter) => true,
+            (O::Map, T::MapEnter | T::Sleep) => true,
             (O::Zone, T::Enter | T::Leave | T::Interact) => true,
             (O::Character, T::Interact | T::UseItem { .. } | T::Defeat | T::HpBelow { .. }) => true,
-            (O::Prop, T::Interact | T::UseItem { .. } | T::Unlock | T::Lock) => true,
+            (O::Prop, T::Interact | T::UseItem { .. } | T::Unlock | T::Lock | T::Sleep) => true,
             (O::Pickup, T::Interact | T::UseItem { .. }) => true,
             (O::ItemUse, T::UseItem { .. }) => true,
             _ => false,
@@ -138,7 +142,8 @@ impl TriggerOn {
             | (TriggerOn::MapEnter, GameEvent::MapEnter)
             | (TriggerOn::Defeat, GameEvent::Defeat)
             | (TriggerOn::Unlock, GameEvent::Unlock)
-            | (TriggerOn::Lock, GameEvent::Lock) => true,
+            | (TriggerOn::Lock, GameEvent::Lock)
+            | (TriggerOn::Sleep, GameEvent::Sleep) => true,
             (TriggerOn::UseItem { item: want }, GameEvent::UseItem { item }) => {
                 want.is_empty() || want == item
             }
@@ -164,6 +169,7 @@ impl TriggerOn {
             TriggerOn::Unlock => "Unlocked",
             TriggerOn::Lock => "Locked again",
             TriggerOn::HpBelow { .. } => "HP below %",
+            TriggerOn::Sleep => "Woke up",
         }
     }
 
@@ -179,6 +185,7 @@ impl TriggerOn {
             TriggerOn::Unlock,
             TriggerOn::Lock,
             TriggerOn::HpBelow { percent: 50 },
+            TriggerOn::Sleep,
         ]
     }
 }
@@ -494,6 +501,24 @@ pub enum Action {
     CureEffect { target: TargetName, kind: Option<crate::effects::EffectKind> },
     /// Shakes the screen (`strength` 1 = like a hit) - earthquakes, explosions, a boss landing.
     Shake { seconds: f32, strength: f32 },
+    /// Weather of a map ("" = the current one); `None` = back to the map's own weather. Kept
+    /// in the save game.
+    SetWeather { map: String, weather: Option<crate::map::Weather> },
+    /// Makes a character follow its daily schedule again (`active`) or stop following it.
+    Schedule { target: TargetName, active: bool },
+    /// A placed character joins the player as a companion (`join`) or leaves (goes back to
+    /// where it is placed).
+    Companion { target: TargetName, join: bool },
+    /// Opens the crafting window with the recipes of `station` (`title` "" = "Crafting").
+    OpenCrafting { station: String, title: String },
+    /// Unlocks an achievement (the player's, kept across save games).
+    UnlockAchievement { id: String },
+    /// The lockpicking game for a custom puzzle: 1 (picked) or 0 goes into variable `var`;
+    /// blocks until it is over. `difficulty` like a lock's (the player's skill makes it easier).
+    Lockpick { difficulty: u32, var: String },
+    /// The player sleeps `hours` (camping, an inn's "Rest"): the screen fades, the clock jumps,
+    /// HP and mana are restored; blocks until the player is awake again.
+    Sleep { hours: f32 },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -593,6 +618,13 @@ impl Action {
             Action::ApplyEffect { .. } => "Apply effect",
             Action::CureEffect { .. } => "Cure effect",
             Action::Shake { .. } => "Shake the screen",
+            Action::SetWeather { .. } => "Set weather",
+            Action::Schedule { .. } => "Schedule",
+            Action::Companion { .. } => "Companion",
+            Action::OpenCrafting { .. } => "Open crafting",
+            Action::UnlockAchievement { .. } => "Unlock achievement",
+            Action::Lockpick { .. } => "Lockpicking game",
+            Action::Sleep { .. } => "Sleep",
         }
     }
 
@@ -652,6 +684,13 @@ impl Action {
             Action::ApplyEffect { target: "player".into(), effect: crate::effects::EffectSpec::template(crate::effects::EffectKind::Poison) },
             Action::CureEffect { target: "player".into(), kind: Some(crate::effects::EffectKind::Poison) },
             Action::Shake { seconds: 0.5, strength: 1.5 },
+            Action::SetWeather { map: s(), weather: Some(crate::map::Weather::new(crate::map::WeatherKind::Rain, 0.6)) },
+            Action::Schedule { target: "self".into(), active: false },
+            Action::Companion { target: "self".into(), join: true },
+            Action::OpenCrafting { station: s(), title: s() },
+            Action::UnlockAchievement { id: s() },
+            Action::Lockpick { difficulty: 1, var: "picked".into() },
+            Action::Sleep { hours: 8.0 },
         ]
     }
 }
@@ -717,7 +756,7 @@ mod tests {
         assert!(TriggerOwner::Prop.allows(&TriggerOn::Unlock) && !TriggerOwner::Character.allows(&TriggerOn::Unlock));
         assert!(TriggerOwner::Character.allows(&TriggerOn::Defeat) && !TriggerOwner::Prop.allows(&TriggerOn::Defeat));
         assert!(!TriggerOwner::ItemUse.allows(&TriggerOn::Custom { name: "x".into() }));
-        assert_eq!(TriggerOwner::Map.templates().iter().map(|t| t.label()).collect::<Vec<_>>(), vec!["Map enter", "Custom event"]);
+        assert_eq!(TriggerOwner::Map.templates().iter().map(|t| t.label()).collect::<Vec<_>>(), vec!["Map enter", "Custom event", "Woke up"]);
         assert_eq!(TriggerOwner::Map.replacement(&TriggerOn::Enter), TriggerOn::MapEnter);
         assert_eq!(TriggerOwner::Zone.replacement(&TriggerOn::MapEnter), TriggerOn::Enter);
     }

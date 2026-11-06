@@ -1,5 +1,5 @@
 (
-    name: "rust2d example",
+    name: "R(ust)PG2D example",
     tile_size: 32,
     start_map: "village",
     start_spawn: "start",
@@ -69,4 +69,5 @@
         mana_per_level: 2,
         skill_points_per_level: 1,
     ),
+    dialog_portraits: true,
 )

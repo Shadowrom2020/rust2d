@@ -3,10 +3,10 @@
 //! Layout of a bundle folder:
 //! ```text
 //! <slug>/
-//!   <slug>        the game executable (a copy of rust2d-game)
+//!   <slug>        the game executable (a copy of rustpg2d-game)
 //!   data/         project.ron, defs/, maps/, scripts/ and the images / sounds in use
 //!   README.txt
-//!   rust2d-LICENSE.txt   the engine's license (MIT): the game executable is rust2d's game
+//!   rustpg2d-LICENSE.txt   the engine's license (MIT): the game executable is R(ust)PG2D's game
 //!                        runner; the game itself is licensed as its creator decides
 //! ```
 //! Started without arguments, the game binary looks for `data/` next to itself (see
@@ -23,11 +23,11 @@ use crate::project::Project;
 /// Folder next to the executable that holds the project in a bundle.
 pub const DATA_DIR: &str = "data";
 
-/// rust2d's license (the repository's LICENSE file), shipped with every exported game for the
+/// R(ust)PG2D's license (the repository's LICENSE file), shipped with every exported game for the
 /// engine inside it.
 pub const ENGINE_LICENSE: &str = include_str!("../../../LICENSE");
 /// Its file name in exports and game packages.
-pub const ENGINE_LICENSE_FILE: &str = "rust2d-LICENSE.txt";
+pub const ENGINE_LICENSE_FILE: &str = "rustpg2d-LICENSE.txt";
 
 /// A file-name friendly version of a game name ("My Game!" → "my-game").
 pub fn slug(name: &str) -> String {
@@ -89,7 +89,7 @@ pub fn check(project: &Project) -> (Vec<String>, Check) {
     }
     let mut files: BTreeSet<String> = BTreeSet::new();
     files.insert("project.ron".into());
-    for d in ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "skills", "spells"] {
+    for d in ["tilesets", "sheets", "items", "props", "characters", "sounds", "quests", "skills", "spells", "recipes", "achievements"] {
         let rel = format!("defs/{d}.ron");
         if root.join(&rel).exists() {
             files.insert(rel);
@@ -172,7 +172,7 @@ pub fn export(project: &Project, name: &str, game_binary: &Path, out_dir: &Path,
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))?;
     }
     let readme = format!(
-        "{name}\n\nRun ./{slug} to play (Linux, x86_64).\nThe game data is in data/; save games are kept in ~/.local/share/{slug}/saves.\n\nMade with rust2d. The game executable is rust2d's game runner, licensed under the MIT License: see {ENGINE_LICENSE_FILE}.\n"
+        "{name}\n\nRun ./{slug} to play (Linux, x86_64).\nThe game data is in data/; save games are kept in ~/.local/share/{slug}/saves.\n\nMade with R(ust)PG2D. The game executable is R(ust)PG2D's game runner, licensed under the MIT License: see {ENGINE_LICENSE_FILE}.\n"
     );
     std::fs::write(folder.join("README.txt"), readme)?;
     std::fs::write(folder.join(ENGINE_LICENSE_FILE), ENGINE_LICENSE)?;
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn export_bundle() {
-        let tmp = std::env::temp_dir().join(format!("rust2d_release_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("rustpg2d_release_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let root = tmp.join("proj");
         std::fs::create_dir_all(root.join("sprites")).unwrap();
@@ -246,7 +246,7 @@ mod tests {
         map.zones.push(Zone { uid: 1, name: "start".into(), x: 1, y: 1, w: 1, h: 1, kind: ZoneKind::Spawn, triggers: vec![], loot: None });
         p.save_map(&map).unwrap();
         p.config.player = "nobody".into();
-        let bin = tmp.join("rust2d-game");
+        let bin = tmp.join("rustpg2d-game");
         std::fs::write(&bin, b"#!/bin/sh\n").unwrap();
         let out = tmp.join("out");
         let r = export(&p, "Test Quest", &bin, &out, true).unwrap();
@@ -263,7 +263,7 @@ mod tests {
         assert!(r.warnings.iter().any(|w| w.contains("player")));
         let zip_path = r.archive.unwrap();
         let mut za = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
-        assert!(za.by_name("test-quest/rust2d-LICENSE.txt").is_ok());
+        assert!(za.by_name("test-quest/rustpg2d-LICENSE.txt").is_ok());
         let exe = za.by_name("test-quest/test-quest").unwrap();
         assert_eq!(exe.unix_mode().map(|m| m & 0o777), Some(0o755));
         drop(exe);

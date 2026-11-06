@@ -120,20 +120,29 @@ impl Game {
     /// Unlocks (consuming the key) if possible. Returns true if the entity is now unlocked.
     pub(super) fn try_unlock(&mut self, i: usize, using: Option<&str>) -> bool {
         let Some(lock) = self.active_lock(i) else { return true };
-        // Lockpicking: a skill of at least the lock's difficulty opens it without the key.
-        let picked = using.is_none() && lock.pick_difficulty > 0 && self.lockpick_level() >= lock.pick_difficulty;
-        if picked {
-            self.ui.toast(if lock.key.is_empty() { "You pick the lock.".into() } else { format!("You pick the lock instead of using the {}.", self.item_name(&lock.key)) });
-            self.audio.play(&self.project.config.sfx.unlock);
-            self.apply_unlock(i, &lock.on_unlock);
+        // Lockpicking (without the key at hand): an expert (skill two above the difficulty)
+        // opens it at once; with some skill (at least 1, and at most one below the difficulty)
+        // the lockpicking game starts (the lock opens when it is won). The key, if the player
+        // has it, is used instead.
+        let has_key = !lock.key.is_empty() && self.world.item_count(&lock.key) > 0;
+        let level = self.lockpick_level();
+        if using.is_none() && !has_key && lock.pick_difficulty > 0 && self.skills_on() && level >= min_pick_level(lock.pick_difficulty) {
+            if level >= lock.pick_difficulty + 2 {
+                self.ui.toast("You pick the lock.".into());
+                self.audio.play(&self.project.config.sfx.unlock);
+                self.apply_unlock(i, &lock.on_unlock);
+                let uid = self.loaded.entities[i].uid;
+                self.fire(GameEvent::Unlock, Source::Entity(uid));
+                return true;
+            }
             let uid = self.loaded.entities[i].uid;
-            self.fire(GameEvent::Unlock, Source::Entity(uid));
-            return true;
+            self.start_lockpick(super::minigame::PickTarget::Entity(uid), lock.pick_difficulty as i32 - level as i32);
+            return false;
         }
         // Lock without a key that can only be picked.
         if lock.key.is_empty() && lock.pick_difficulty > 0 {
             if using.is_none() {
-                let msg = if lock.locked_text.is_empty() { format!("It's locked. A lockpicking skill of {} could open it.", lock.pick_difficulty) } else { lock.locked_text.clone() };
+                let msg = if lock.locked_text.is_empty() { format!("It's locked. A lockpicking skill of {} could open it.", min_pick_level(lock.pick_difficulty)) } else { lock.locked_text.clone() };
                 self.ui.toast(msg);
             }
             return false;
@@ -158,7 +167,7 @@ impl Game {
             None => self.world.item_count(&lock.key) > 0,
         };
         if !has_key {
-            let hint = if lock.pick_difficulty > 0 && self.skills_on() { format!(" (or lockpicking {})", lock.pick_difficulty) } else { String::new() };
+            let hint = if lock.pick_difficulty > 0 && self.skills_on() { format!(" (or lockpicking {})", min_pick_level(lock.pick_difficulty)) } else { String::new() };
             let msg = if lock.locked_text.is_empty() { format!("It's locked. You need the {key_name}{hint}.") } else { lock.locked_text.clone() };
             self.ui.toast(msg);
             return false;
@@ -230,5 +239,23 @@ impl Game {
             draw_rectangle(x, y, 6.0 * u, 5.0 * u, gold);
             draw_rectangle(x + 2.5 * u, y + 1.5 * u, u, 2.0 * u, dark);
         }
+    }
+}
+
+/// The Lockpick skill level needed to try a lock of `difficulty` (in the lockpicking game): at
+/// least 1, and at most one below the difficulty (that one is the hard version of the game).
+pub(super) fn min_pick_level(difficulty: u32) -> u32 {
+    difficulty.saturating_sub(1).max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picking_needs_some_skill() {
+        assert_eq!(min_pick_level(1), 1, "no picking without the skill");
+        assert_eq!(min_pick_level(2), 1);
+        assert_eq!(min_pick_level(3), 2);
     }
 }

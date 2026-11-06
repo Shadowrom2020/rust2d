@@ -102,6 +102,10 @@ pub struct EntityInstance {
     /// Characters: a route the NPC walks along (instead of its definition's behaviour).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patrol: Option<PatrolRoute>,
+    /// Characters: a daily routine of places to be at (instead of the patrol route; the
+    /// definition's behaviour applies at each stop).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub schedule: Vec<ScheduleStop>,
     /// Overrides the character definition's merchant spec (stock, prices).
     #[serde(default)]
     pub shop: Option<crate::defs::ShopSpec>,
@@ -188,6 +192,50 @@ impl PatrolRoute {
     }
 }
 
+/// One stop of a character's daily routine: from `hour` on, the character walks to the tile
+/// and stays there until the next stop's hour (the last stop lasts over midnight until the
+/// first one).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScheduleStop {
+    /// In-game hour the stop starts (0..24; 7.5 = 07:30).
+    pub hour: f32,
+    /// Tile the character goes to.
+    pub x: i32,
+    pub y: i32,
+    /// Direction it faces once there (None = as it arrived).
+    #[serde(default)]
+    pub facing: Option<Facing>,
+    /// It goes indoors there: out of sight (and out of reach) until the next stop.
+    #[serde(default)]
+    pub inside: bool,
+}
+
+impl ScheduleStop {
+    pub fn new(hour: f32, x: i32, y: i32) -> Self {
+        ScheduleStop { hour, x, y, facing: None, inside: false }
+    }
+
+    /// "07:30".
+    pub fn time_text(&self) -> String {
+        hour_text(self.hour)
+    }
+}
+
+/// "07:30" of an hour of the day.
+pub fn hour_text(hour: f32) -> String {
+    let m = (hour.rem_euclid(24.0) * 60.0).round() as u32 % (24 * 60);
+    format!("{:02}:{:02}", m / 60, m % 60)
+}
+
+/// Index of the stop that is current at `hour`: the last one started (stops in any order; the
+/// latest of the day carries over midnight). None without stops.
+pub fn current_stop(stops: &[ScheduleStop], hour: f32) -> Option<usize> {
+    let h = |k: usize| stops[k].hour.rem_euclid(24.0);
+    let now = hour.rem_euclid(24.0);
+    let latest = |it: &mut dyn Iterator<Item = usize>| it.max_by(|&a, &b| h(a).total_cmp(&h(b)));
+    latest(&mut (0..stops.len()).filter(|&k| h(k) <= now)).or_else(|| latest(&mut (0..stops.len())))
+}
+
 impl EntityInstance {
     pub fn new(uid: u32, kind: EntityKind, def: &str, x: f32, y: f32) -> Self {
         EntityInstance {
@@ -211,6 +259,7 @@ impl EntityInstance {
             equipment: None,
             inventory: None,
             patrol: None,
+            schedule: Vec::new(),
             loot: None,
         }
     }
@@ -222,5 +271,34 @@ impl EntityInstance {
         } else {
             format!("#{} {} ({})", self.uid, self.name, self.def)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schedule_stop_of_the_hour() {
+        let stops = vec![ScheduleStop::new(20.0, 1, 1), ScheduleStop::new(7.5, 2, 2), ScheduleStop::new(12.0, 3, 3)];
+        assert_eq!(current_stop(&stops, 8.0), Some(1));
+        assert_eq!(current_stop(&stops, 7.5), Some(1), "starts on the hour");
+        assert_eq!(current_stop(&stops, 13.0), Some(2));
+        assert_eq!(current_stop(&stops, 23.9), Some(0));
+        assert_eq!(current_stop(&stops, 3.0), Some(0), "the evening stop lasts over midnight");
+        assert_eq!(current_stop(&[], 3.0), None);
+        assert_eq!(hour_text(7.5), "07:30");
+        assert_eq!(hour_text(23.999), "00:00");
+    }
+
+    #[test]
+    fn old_entities_have_no_schedule() {
+        let e: EntityInstance = ron::from_str("(uid: 3, kind: Character, def: \"villager\", x: 1.0, y: 2.0)").unwrap();
+        assert!(e.schedule.is_empty());
+        let mut with = e.clone();
+        with.schedule = vec![ScheduleStop { inside: true, ..ScheduleStop::new(21.0, 4, 5) }];
+        let back: EntityInstance = ron::from_str(&ron::to_string(&with).unwrap()).unwrap();
+        assert_eq!(back, with);
+        assert!(!ron::to_string(&e).unwrap().contains("schedule"), "no schedule, nothing written");
     }
 }

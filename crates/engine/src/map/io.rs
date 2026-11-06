@@ -52,6 +52,9 @@ struct Meta {
     music: String,
     lighting: crate::map::MapLighting,
     fog: bool,
+    /// Clear weather isn't written (maps without weather stay as they were).
+    #[serde(skip_serializing_if = "crate::map::Weather::is_clear")]
+    weather: crate::map::Weather,
 }
 
 impl Default for Meta {
@@ -66,6 +69,7 @@ impl Default for Meta {
             music: String::new(),
             lighting: Default::default(),
             fog: false,
+            weather: Default::default(),
         }
     }
 }
@@ -148,6 +152,7 @@ pub fn encode(map: &Map) -> Result<Vec<u8>> {
         music: map.music.clone(),
         lighting: map.lighting,
         fog: map.fog,
+        weather: map.weather,
     };
     let core = CoreRef {
         name: &map.name,
@@ -168,7 +173,7 @@ pub fn encode(map: &Map) -> Result<Vec<u8>> {
 
 pub fn decode(bytes: &[u8]) -> Result<Map> {
     if bytes.len() < 10 || &bytes[..6] != MAGIC {
-        bail!("not a rust2d map file");
+        bail!("not an R(ust)PG2D map file");
     }
     let version = u32::from_le_bytes(bytes[6..10].try_into().unwrap());
     let raw = lz4_flex::decompress_size_prepended(&bytes[10..]).context("decompressing map")?;
@@ -191,6 +196,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map> {
                 music: String::new(),
                 lighting: Default::default(),
                 fog: false,
+                weather: Default::default(),
             }
         }
         2 => {
@@ -212,6 +218,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map> {
                 music: meta.music,
                 lighting: meta.lighting,
                 fog: meta.fog,
+                weather: meta.weather,
             }
         }
         v => bail!("unsupported map format version {v} (newest supported: {FORMAT_VERSION})"),
@@ -259,6 +266,7 @@ mod tests {
         m.music = "theme".into();
         m.lighting = crate::map::MapLighting { mode: crate::map::LightMode::Dark, darkness: 0.9 };
         m.fog = true;
+        m.weather = crate::map::Weather::new(crate::map::WeatherKind::Snow, 0.3);
         let uid = m.alloc_uid();
         let mut chest = EntityInstance::new(uid, EntityKind::Prop, "chest", 1.5, 2.0);
         chest.container = Some(crate::defs::ContainerSpec {
@@ -279,6 +287,7 @@ mod tests {
         assert_eq!(back.music, "theme");
         assert_eq!(back.lighting, m.lighting);
         assert!(back.fog);
+        assert_eq!(back.weather, m.weather);
         assert_eq!(back.entities, m.entities);
         assert_eq!(back.next_uid, m.next_uid);
     }

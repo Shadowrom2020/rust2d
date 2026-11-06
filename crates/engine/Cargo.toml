@@ -1,5 +1,5 @@
 [package]
-name = "rust2d-engine"
+name = "rustpg2d-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

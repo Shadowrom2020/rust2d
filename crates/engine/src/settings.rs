@@ -1,6 +1,6 @@
 //! Player options (graphics, sound, text): chosen in the game's Options menu and kept between
-//! sessions per game in `$XDG_CONFIG_HOME/rust2d/<game>/settings.ron` (`~/.config/...`;
-//! `$RUST2D_SETTINGS_DIR` overrides the folder).
+//! sessions per game in `$XDG_CONFIG_HOME/rustpg2d/<game>/settings.ron` (`~/.config/...`;
+//! `$RUSTPG2D_SETTINGS_DIR` overrides the folder).
 
 use std::path::PathBuf;
 
@@ -17,6 +17,8 @@ pub struct Settings {
     pub master_volume: f32,
     pub music_volume: f32,
     pub effects_volume: f32,
+    /// Environmental sounds: rain and other weather.
+    pub ambience_volume: f32,
     /// Dialog text speed multiplier (0 = instant).
     pub text_speed: f32,
     /// Screen shake and the red flash when hurt (off for players who find them unpleasant).
@@ -29,7 +31,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { fullscreen: false, zoom: 1.0, show_fps: false, master_volume: 1.0, music_volume: 0.8, effects_volume: 1.0, text_speed: 1.0, screen_effects: true, keys: Default::default() }
+        Settings { fullscreen: false, zoom: 1.0, show_fps: false, master_volume: 1.0, music_volume: 0.8, effects_volume: 1.0, ambience_volume: 0.7, text_speed: 1.0, screen_effects: true, keys: Default::default() }
     }
 }
 
@@ -41,11 +43,14 @@ pub const TEXT_SPEEDS: [(f32, &str); 4] = [(0.5, "Slow"), (1.0, "Normal"), (2.0,
 impl Settings {
     /// Folder of a game's settings (by the game's name).
     pub fn dir(game_name: &str) -> Option<PathBuf> {
-        if let Some(d) = std::env::var_os("RUST2D_SETTINGS_DIR") {
+        if let Some(d) = std::env::var_os("RUSTPG2D_SETTINGS_DIR") {
             return Some(PathBuf::from(d).join(crate::release::slug(game_name)));
         }
         let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-        Some(base.join("rust2d").join(crate::release::slug(game_name)))
+        let slug = crate::release::slug(game_name);
+        let dir = base.join("rustpg2d").join(&slug);
+        crate::legacy::adopt(&dir, &base.join(crate::legacy::OLD_NAME).join(&slug));
+        Some(dir)
     }
 
     /// The saved settings of a game (defaults if there are none or they can't be read).
@@ -74,6 +79,9 @@ impl Settings {
     pub fn effects(&self) -> f32 {
         (self.master_volume * self.effects_volume).clamp(0.0, 1.0)
     }
+    pub fn ambience(&self) -> f32 {
+        (self.master_volume * self.ambience_volume).clamp(0.0, 1.0)
+    }
 }
 
 #[cfg(test)]
@@ -82,8 +90,8 @@ mod tests {
 
     #[test]
     fn round_trip_and_defaults() {
-        let dir = std::env::temp_dir().join(format!("rust2d_settings_{}", std::process::id()));
-        std::env::set_var("RUST2D_SETTINGS_DIR", &dir);
+        let dir = std::env::temp_dir().join(format!("rustpg2d_settings_{}", std::process::id()));
+        std::env::set_var("RUSTPG2D_SETTINGS_DIR", &dir);
         assert_eq!(Settings::load("My Game"), Settings::default());
         let s = Settings { fullscreen: true, zoom: 2.0, music_volume: 0.3, ..Default::default() };
         let path = s.save("My Game").unwrap();
@@ -93,6 +101,11 @@ mod tests {
         std::fs::write(&path, "(zoom: 1.5)").unwrap();
         assert_eq!(Settings::load("My Game"), Settings { zoom: 1.5, ..Default::default() });
         assert!((s.music() - 0.3).abs() < 1e-6);
+        // Files from before the ambience volume get its default.
+        std::fs::write(&path, "(effects_volume: 0.5)").unwrap();
+        let old = Settings::load("My Game");
+        assert_eq!((old.effects_volume, old.ambience_volume), (0.5, 0.7));
+        assert!((Settings { master_volume: 0.5, ..old }.ambience() - 0.35).abs() < 1e-6);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -91,6 +91,6 @@ jobs:
       - uses: ./.github/actions/packages
       - uses: actions/upload-artifact@v7
         with:
-          name: rust2d-packages
+          name: rustpg2d-packages
           path: dist/
           retention-days: 14

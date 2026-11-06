@@ -1,6 +1,6 @@
 //! Mouse controls: left click walks (or attacks an enemy), right click walks over and interacts.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use macroquad::prelude::*;
 
@@ -135,24 +135,11 @@ impl Game {
 
     /// Plans a path for a goal (tiles occupied by solid entities are avoided).
     fn plan(&self, goal: Goal) -> Option<VecDeque<TilePos>> {
-        let ts = self.ts();
         let ignore = match goal {
             Goal::Interact(u) | Goal::Attack(u) => Some(u),
             _ => None,
         };
-        let mut occupied: HashSet<TilePos> = HashSet::new();
-        for e in self.loaded.entities.iter().filter(|e| e.active && e.solid && Some(e.uid) != ignore) {
-            let r = e.body.rect();
-            for ty in (r.y / ts).floor() as i32..=((r.y + r.h) / ts).floor() as i32 {
-                for tx in (r.x / ts).floor() as i32..=((r.x + r.w) / ts).floor() as i32 {
-                    // Any real overlap blocks the tile (small hitboxes sit at the bottom of their tile).
-                    let inner = Rect::new(tx as f32 * ts + 2.0, ty as f32 * ts + 2.0, ts - 4.0, ts - 4.0);
-                    if r.overlaps(&inner) {
-                        occupied.insert((tx, ty));
-                    }
-                }
-            }
-        }
+        let occupied = self.solid_entity_tiles(|e| Some(e.uid) != ignore);
         let blocked = |x: i32, y: i32| self.tile_solid(x, y) || occupied.contains(&(x, y));
         let near = |a: TilePos, b: TilePos| (a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1;
         let start = self.player_tile();
@@ -204,7 +191,7 @@ impl Game {
             return;
         }
         let goal = match self.entity_under(w) {
-            Some(i) if self.loaded.entities[i].max_hp > 0 => Goal::Attack(self.loaded.entities[i].uid),
+            Some(i) if self.loaded.entities[i].hostile && self.loaded.entities[i].max_hp > 0 => Goal::Attack(self.loaded.entities[i].uid),
             Some(i) if right => Goal::Interact(self.loaded.entities[i].uid),
             None if right => Goal::InteractTile(tile),
             _ => Goal::Walk(tile),
@@ -369,7 +356,7 @@ impl Game {
             Some(i) => {
                 let e = &self.loaded.entities[i];
                 let r = self.entity_click_rect(e);
-                let c = if e.max_hp > 0 { Color::new(1.0, 0.3, 0.3, 0.9) } else { Color::new(1.0, 1.0, 0.4, 0.9) };
+                let c = if e.hostile && e.max_hp > 0 { Color::new(1.0, 0.3, 0.3, 0.9) } else { Color::new(1.0, 1.0, 0.4, 0.9) };
                 draw_rectangle_lines(r.x, r.y, r.w, r.h, u, c);
             }
             None => {

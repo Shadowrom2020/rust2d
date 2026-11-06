@@ -1,7 +1,107 @@
 # Changelog
 
-All notable changes to rust2d (engine, game runner and editor). Versions follow
+All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
+
+## 0.5.0 — 2026-11-06
+
+### Gameplay
+- **Weather**: each map has a weather (map settings: clear, rain, snow or fog, with a strength).
+  Rain falls in streaks with splashes, darkens the map and plays a built-in rain loop; snow
+  drifts in flakes; fog moves over the map in soft clouds. The particles are drawn over the lit
+  scene and dim at night. The rain sound follows the new **Ambience volume** option
+  (environmental sounds, separate from music and effects). The **Set weather** action and `set_weather(kind, [intensity])`,
+  `set_map_weather(map, kind, intensity)`, `weather()`, `weather_intensity()` change and read it;
+  changes are kept in save games (`WorldState.weather`). The editor has *View › Weather
+  preview*. Example: fog over Whisperwood until the shrine is lit, rain in the Wilds.
+  Editor script `mapweather`, `viewopt weather`; game `status` prints `weather=`.
+- **NPC schedules**: a placed character can have a *Daily schedule* (map inspector): stops with a
+  time, a tile, an optional facing and *inside* (the character goes indoors there, out of sight
+  until the next stop). At each time it walks to the stop (A*, like patrols) and stays there,
+  wandering around it if its behaviour is Wander; entering a map puts scheduled characters at
+  the stop of the hour. Stops are placed, dragged and removed on the map like patrol waypoints
+  and drawn as a dashed loop with their times. The **Schedule** action (follow / stop, kept in
+  save games: `EntityState.schedule_off`) and `stop_schedule(target)` / `follow_schedule(target)`
+  control it. Example: Tomas in the village spends the day at the shop, the duck pond and the big
+  pond and goes home into the elder's house at night; his lines depend on the time of day.
+  Editor script `scheduleedit`, `stop K hour|facing|inside V`, `status` prints `schedule=`; game
+  `status` prints `schedule=`.
+- **Companions**: the **Companion** action and `follow(target)` / `stop_following(target)`
+  (plus `is_companion(name)`, `companion_count()`) let a placed, friendly character follow the
+  player from map to map (`WorldState.companions`: where it is placed and its HP). Companions
+  walk behind the player, fight hostile characters nearby with their weapon, are hunted and hurt
+  by enemies, regain HP when it is calm, and run their own triggers when talked to. Knocked out
+  they go home; dismissed they stay (own map) or go home. Example: the town guard comes along to
+  Whisperwood once the elder's quest is accepted. Game `status` prints `companions=`.
+- **Crafting**: recipes (`defs/recipes.ron`, *Database › Recipes*: result and count,
+  ingredients, station, optional skill level) are made in a crafting window opened by the new
+  **Open crafting** action / `open_crafting(station[, title])`; `can_craft(recipe)` checks one.
+  The window shows each recipe's ingredients with what the player has and a *Make* button
+  (Shift: ten). Recipes are asset-library assets (with their items) and follow item renames.
+  Example: an alchemy table in Tilda's shop with four brews, Healing Herbs and Red Caps along the
+  forest path (new items), herbs for sale at Tilda's. Game `status` prints `crafting=`, autoplay
+  `craft K` clicks a recipe's *Make* button.
+- **Achievements**: `defs/achievements.ron` (*Database › Achievements*: name, description, icon,
+  hidden, unlock conditions), checked twice a second while playing; the **Unlock achievement**
+  action and `unlock_achievement(id)` / `achievement_unlocked(id)` for the rest. Unlocks belong
+  to the player (`achievements.ron` next to the settings), show a toast (also over the pause
+  menu) and are listed on a new *Achievements* page of the title and pause menus with their
+  dates and a *Reset*. Example: six achievements, one of them hidden. Game `status` prints
+  `achievements=`.
+- **Minigames**: picking a lock is a short game now (three pins: press while the marker is in
+  the green spot; harder locks have smaller spots and faster markers, the Lockpick skill — level 1 or more — eases
+  them, three misses and it holds); experts still pick at once, and the key is used when the
+  player has it. The **Lockpicking game** action / `lockpick(difficulty, var)` plays it for
+  any puzzle. **Fishing** spots (a new zone kind over the water, with the item needed and a catch table;
+  fish shadows glide through it): facing it from the shore, cast, wait for the bite, strike,
+  reel in without snapping the line. Example: a Fishing Rod at
+  Tilda's, Trout and Old Boot, the village pond as a fishing spot. Game `status` prints
+  `minigame=`; autoplay `minigame hit|miss|bite` presses at the right (or wrong) moment.
+- **Tool slot**: a sixth equipment slot for tools. Items get a *Tool kind* (*Database › Items ›
+  Equipment: Tool*; `ItemDef.tool`, `Equipment.tool`, both optional in older files) and go into
+  it; activities ask for them, and the character holds the tool's *Held sprite* in the right
+  hand while using it. Fishing puts the rod into the Tool slot by itself if it is in the bag and
+  shows it in the hand with the line leaving its tip (example: `held_rod`). `unequip(target,
+  "tool")`.
+- **Dialog portraits**: dialogs and choices show the speaker's head and shoulders, drawn from
+  their layered model; the speaker is found from the speaker name (`{player}`, `{self}`, a
+  character on the map or a definition whose name fits). *Database › Project › Dialog
+  portraits* (`ProjectConfig::dialog_portraits`, on by default) turns them off. The example's
+  intro has a line of the hero's.
+- **Furniture**: props can be furniture (`PropDef.use_spot`: pose *Sit* / *Lie* / *Stand*,
+  spot, facing, wake-up hour, a cover sprite drawn over a sleeper, conditions). The player sits
+  on chairs and benches (HP and mana come back faster) and sleeps in beds: the night passes
+  (clock, HP, mana, effects, respawns, schedules), the new *Woke up* trigger runs, the game
+  autosaves; not with enemies nearby. **Sleep** action / `sleep(hours)`, `is_sitting()`,
+  `is_sleeping()`. Chairs face any of the four directions (a cover draws a backrest
+  over the sitter), beds stand upright or sideways (the sleeper is drawn turned). Example: the
+  elder's house has an upright bed (instead of the bed tiles), a sideways guest bed and a table
+  with four chairs; a chair at Tilda's, benches by the village road. Game `status` prints `pose=`.
+- **Changed:** picking a lock you have the key for uses the key (it used to pick it).
+- **Changed:** the player's attacks (melee, arrows, spells, clicking to attack) only hit hostile
+  characters. Friendly characters with HP (companions, the guard) can't be hurt by the player;
+  make a huntable animal hostile with 0 damage.
+
+### Fixes
+- Patrolling (and scheduled) characters plan their way around solid props such as the village
+  statue instead of walking into them and getting stuck.
+
+### Maintenance
+- **rust2d is now R(ust)PG2D** (another project already uses the name rust2d). The technical
+  name is `rustpg2d`: binaries `rustpg2d-editor` / `rustpg2d-game`, crates `rustpg2d-engine` /
+  `rustpg2d-packaging`, environment variables `RUSTPG2D_*`, packages
+  `rustpg2d-X.Y.Z-x86_64.AppImage` / `rustpg2d-X.Y.Z.flatpak`, Flatpak id
+  `io.github.Shadowrom2020.rustpg2d` (install it anew; the old Flatpak can be removed),
+  repository `Shadowrom2020/rustpg2d`.
+- Folders move to the new name and are copied over on first use, the old ones are left alone:
+  game settings and achievements (`~/.config/rust2d/<game>` → `~/.config/rustpg2d/<game>`, also
+  for games exported with older versions once they are exported again), the asset library
+  (`~/.local/share/rustpg2d/library`), the editor's recent projects and the AppImage runtime
+  cache. An example copy in `~/rust2d/example_project` keeps being opened there. Save games,
+  projects, maps and `.r2dpack` packages are unchanged.
+- Game exports suggest the Flatpak id `org.rustpg2d.<game>`. To update a game already shipped as a
+  Flatpak, type its old id (`org.rust2d.<game>`) into the export dialog so it stays the same app
+  and its players keep their saves.
 
 ## 0.4.0 — 2026-11-06
 

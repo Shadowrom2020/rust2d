@@ -1762,60 +1762,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust2d-editor"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "egui-macroquad",
- "egui-phosphor",
- "flate2",
- "macroquad",
- "quick-xml",
- "rfd",
- "rhai",
- "ron",
- "rust2d-engine",
- "rust2d-packaging",
-]
-
-[[package]]
-name = "rust2d-engine"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "gilrs",
- "libm",
- "lz4_flex",
- "macroquad",
- "png 0.18.1",
- "postcard",
- "rhai",
- "ron",
- "serde",
- "vorbis_rs",
- "zip",
-]
-
-[[package]]
-name = "rust2d-game"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "macroquad",
- "ron",
- "rust2d-engine",
-]
-
-[[package]]
-name = "rust2d-packaging"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "backhand",
- "rust2d-engine",
-]
-
-[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1835,6 +1781,60 @@ dependencies = [
  "libc",
  "linux-raw-sys",
  "windows-sys",
+]
+
+[[package]]
+name = "rustpg2d-editor"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "egui-macroquad",
+ "egui-phosphor",
+ "flate2",
+ "macroquad",
+ "quick-xml",
+ "rfd",
+ "rhai",
+ "ron",
+ "rustpg2d-engine",
+ "rustpg2d-packaging",
+]
+
+[[package]]
+name = "rustpg2d-engine"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "gilrs",
+ "libm",
+ "lz4_flex",
+ "macroquad",
+ "png 0.18.1",
+ "postcard",
+ "rhai",
+ "ron",
+ "serde",
+ "vorbis_rs",
+ "zip",
+]
+
+[[package]]
+name = "rustpg2d-game"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "macroquad",
+ "ron",
+ "rustpg2d-engine",
+]
+
+[[package]]
+name = "rustpg2d-packaging"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "backhand",
+ "rustpg2d-engine",
 ]
 
 [[package]]
@@ -2737,11 +2737,11 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
- "rust2d-engine",
- "rust2d-packaging",
+ "rustpg2d-engine",
+ "rustpg2d-packaging",
 ]
 
 [[package]]

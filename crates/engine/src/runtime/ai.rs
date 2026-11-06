@@ -65,13 +65,28 @@ impl Game {
             return self.walk_home(i, dt);
         }
 
-        let target = self.player.pos;
+        let eye = pos - vec2(0.0, e.body.hitbox.y / 2.0 + 2.0);
+        // Noticed within sight; behind walls and trees only when closer than half of it. The
+        // player and companions that can be hurt: it goes for the nearest it notices.
+        let notices = |feet: Vec2, mid: Vec2| {
+            let d = feet.distance(pos);
+            d <= sight * ts && (d <= sight * ts * 0.5 || self.line_clear(eye, mid))
+        };
+        let mut seen: Vec<Vec2> = Vec::new();
+        if notices(self.player.pos, self.player.pos - vec2(0.0, self.player.hitbox.y / 2.0)) {
+            seen.push(self.player.pos);
+        }
+        for (c, mid) in self.companion_targets() {
+            let feet = self.loaded.entities[c].body.pos;
+            if notices(feet, mid) {
+                seen.push(feet);
+            }
+        }
+        let nearest = seen.into_iter().min_by(|a, b| a.distance(pos).total_cmp(&b.distance(pos)));
+        let sees = nearest.is_some();
+        let target = nearest.unwrap_or(self.player.pos);
         let to = target - pos;
         let dist = to.length();
-        let eye = pos - vec2(0.0, e.body.hitbox.y / 2.0 + 2.0);
-        let player_mid = target - vec2(0.0, self.player.hitbox.y / 2.0);
-        // Noticed within sight; behind walls and trees only when closer than half of it.
-        let sees = dist <= sight * ts && (dist <= sight * ts * 0.5 || self.line_clear(eye, player_mid));
         let hurt = e.max_hp > 0 && flee_below > 0.0 && (e.hp as f32) < flee_below * e.max_hp as f32;
         let ranged = e.weapon.as_ref().and_then(|w| w.ranged.as_ref()).map(|r| r.range * ts);
         let e = &mut self.loaded.entities[i];
@@ -140,7 +155,7 @@ impl Game {
     /// Moves character `i` along `dir` at its speed; when an obstacle stops most of that step it
     /// slides along it (the direction 45 or 90 degrees off that gets farthest along `dir`).
     /// `face`: look that way instead of where it walks (backing off while aiming).
-    fn step_towards_dir(&mut self, i: usize, dir: Vec2, dt: f32, face: Option<Vec2>) {
+    pub(super) fn step_towards_dir(&mut self, i: usize, dir: Vec2, dt: f32, face: Option<Vec2>) {
         let e = &self.loaded.entities[i];
         let (body, uid) = (e.body.clone(), e.uid);
         let full = body.speed * dt;

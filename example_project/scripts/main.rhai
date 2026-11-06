@@ -11,6 +11,9 @@
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
 //               open_shop(target) set_state(target, state)
 //               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
+//               follow(target) stop_following(target) is_companion(name) companion_count()
+//               unlock_achievement(id) achievement_unlocked(id) open_crafting(station[, title]) can_craft(recipe)
+//               stop_schedule(target) follow_schedule(target)
 // Cut-scenes:   cutscene(fn) walk_to(target, x, y) approach(target, other) place(target, x, y)
 //               hide_ui() show_ui() dim(amount, seconds) disable_spawners(map) enable_spawners(map)
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
@@ -27,6 +30,8 @@
 //               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
 // Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
 //               random(n) current_map()
+// Weather:      set_weather(kind, [intensity]) set_map_weather(map, kind, intensity) (queued;
+//               "rain", "snow", "fog", "none", "default"); weather() weather_intensity()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -106,6 +111,7 @@ fn shrine_awakening() {
     set_flag("shrine_lit", true);
     set_quest_stage("strange_lights", 2);
     dim(0, 2);
+    set_weather("none");                        // the eerie fog lifts (kept in the save game)
     wait(1.5);
     emit("shrine_lit");
 }
@@ -147,17 +153,40 @@ fn intro_cutscene() {
     wait(0.4);
     approach("guard", "player");
     say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("{player}", "I came as fast as I could. What is going on?");
     say("Guard", "Something is not right in Whisperwood, east of town. Strange lights flicker between the trees at night, and the slimes grow bolder every day.");
     say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well in the middle of town.");
     wait(0.3);
 }
 
+// Once the player took on the elder's quest, the guard offers to come along: follow(target)
+// makes a character a companion (it follows from map to map and fights by the player's side),
+// stop_following(target) sends it home; is_companion(name) tells.
 fn guard_talk() {
-    if flag("shrine_lit") {
+    if is_companion("guard") {
+        choice("Shall I go back to my post, {player}?", ["Yes, thank you", "No, stay with me"], "guard_leave");
+        then_call("guard_answer");
+    } else if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
         stop_patrol("guard");
+    } else if flag("quest_accepted") {
+        say("Guard", "Whisperwood, is it? You shouldn't go alone - the slimes grow bolder every day.");
+        choice("Take the guard along?", ["Come with me", "I'll manage"], "guard_join");
+        then_call("guard_answer");
     } else {
         say("Guard", "Halt! Oh, it's you, {player}. Careful in Whisperwood, {sir|ma'am} - strange lights out there.");
+    }
+}
+
+fn guard_answer() {
+    if is_companion("guard") {
+        if get_var("guard_leave") == 0 {
+            say("Guard", "Back to the road, then. Good luck, {player}!");
+            stop_following("guard");
+        }
+    } else if get_var("guard_join") == 0 {
+        say("Guard", "Lead the way, {player}!");
+        follow("guard");
     }
 }
 

@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui};
-use rust2d_engine::defs::{ContainerSpec, LockSpec, LootEntry, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
-use rust2d_engine::effects::{EffectKind, EffectSpec};
-use rust2d_engine::inventory::ItemStack;
-use rust2d_engine::entity::Facing;
-use rust2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, TriggerOwner, VarOp};
-use rust2d_engine::render::Assets;
+use rustpg2d_engine::defs::{ContainerSpec, LockSpec, LootEntry, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
+use rustpg2d_engine::effects::{EffectKind, EffectSpec};
+use rustpg2d_engine::inventory::ItemStack;
+use rustpg2d_engine::entity::Facing;
+use rustpg2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, TriggerOwner, VarOp};
+use rustpg2d_engine::render::Assets;
 
 /// egui copies of tileset and sprite sheet images.
 #[derive(Default)]
@@ -16,9 +16,9 @@ pub struct Textures {
     pub tilesets: HashMap<String, TextureHandle>,
     pub sheets: HashMap<String, TextureHandle>,
     /// Idle front layers of layered character definitions (painted for `@char:` sprites).
-    pub characters: HashMap<String, Vec<rust2d_engine::render::character::Layer>>,
+    pub characters: HashMap<String, Vec<rustpg2d_engine::render::character::Layer>>,
     /// Recolored body / hair sheets of layered characters, made on first use.
-    colored: std::cell::RefCell<HashMap<rust2d_engine::render::ColorKey, TextureHandle>>,
+    colored: std::cell::RefCell<HashMap<rustpg2d_engine::render::ColorKey, TextureHandle>>,
 }
 
 impl Textures {
@@ -37,8 +37,8 @@ impl Textures {
 
     /// Refreshes the layers of the character definitions (cheap; every frame, so previews
     /// follow edits at once).
-    pub fn set_characters(&mut self, db: &rust2d_engine::defs::Database) {
-        use rust2d_engine::render::character;
+    pub fn set_characters(&mut self, db: &rustpg2d_engine::defs::Database) {
+        use rustpg2d_engine::render::character;
         self.characters.clear();
         for d in &db.characters {
             self.characters.insert(d.id.clone(), character::layers(db, &d.appearance, &d.equipment, Facing::Down, 0, false));
@@ -54,7 +54,7 @@ impl Textures {
         let mut cache = self.colored.borrow_mut();
         let t = cache.entry((sheet.to_string(), skin, hair)).or_insert_with(|| {
             let mut px = img.bytes.clone();
-            rust2d_engine::render::recolor::recolor(&mut px, skin, hair);
+            rustpg2d_engine::render::recolor::recolor(&mut px, skin, hair);
             let ci = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &px);
             ctx.load_texture(format!("shc:{sheet}:{skin:?}:{hair:?}"), ci, egui::TextureOptions::NEAREST)
         });
@@ -64,7 +64,7 @@ impl Textures {
 
 /// Paints a character's layers (see `render::character::layers`) into `rect`, keeping the
 /// aspect ratio, bottom-centered. False if none of its sheets exist.
-pub fn paint_character(ui: &Ui, tex: &Textures, assets: &Assets, layers: &[rust2d_engine::render::character::Layer], rect: Rect) -> bool {
+pub fn paint_character(ui: &Ui, tex: &Textures, assets: &Assets, layers: &[rustpg2d_engine::render::character::Layer], rect: Rect) -> bool {
     let Some(base) = layers.iter().find_map(|l| assets.sheets.get(&l.sheet)) else { return false };
     let (fw, fh) = (base.frame_w, base.frame_h);
     let scale = (rect.width() / fw).min(rect.height() / fh);
@@ -87,7 +87,7 @@ pub const CHAR_PREFIX: &str = "@char:";
 
 /// The thumbnail sprite of a character definition: a `@char:` marker that [`paint_sprite`]
 /// paints from its layers.
-pub fn character_sprite(d: &rust2d_engine::defs::CharacterDef) -> SpriteRef {
+pub fn character_sprite(d: &rustpg2d_engine::defs::CharacterDef) -> SpriteRef {
     SpriteRef::new(&format!("{CHAR_PREFIX}{}", d.id), 0)
 }
 
@@ -147,7 +147,7 @@ pub fn frame_thumb(ui: &mut Ui, tex: &Textures, assets: &Assets, sheet: &str, fr
 /// Editor for a key lock: key item, consumption, effect and messages.
 /// `prop`: the prop definition (its states are offered as "switch to" targets and previewed).
 #[allow(clippy::too_many_arguments)]
-pub fn lock_ui(ui: &mut Ui, id: &str, lock: &mut LockSpec, refs: &Refs, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database, prop: Option<&PropDef>) {
+pub fn lock_ui(ui: &mut Ui, id: &str, lock: &mut LockSpec, refs: &Refs, tex: &Textures, assets: &Assets, db: &rustpg2d_engine::defs::Database, prop: Option<&PropDef>) {
     let sprite = prop.map(|p| &p.sprite);
     ui.horizontal(|ui| {
         ui.label("Key item");
@@ -305,7 +305,7 @@ pub fn lock_ui(ui: &mut Ui, id: &str, lock: &mut LockSpec, refs: &Refs, tex: &Te
 /// Editor for a container: size, starting contents, lock conditions and open frame.
 /// `states`: the prop's state names (for the "when opened" state).
 #[allow(clippy::too_many_arguments)]
-pub fn container_ui(ui: &mut Ui, id: &str, spec: &mut ContainerSpec, refs: &Refs, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database, states: &[String]) {
+pub fn container_ui(ui: &mut Ui, id: &str, spec: &mut ContainerSpec, refs: &Refs, tex: &Textures, assets: &Assets, db: &rustpg2d_engine::defs::Database, states: &[String]) {
     ui.horizontal(|ui| {
         ui.label("Slots");
         ui.add(egui::DragValue::new(&mut spec.size).range(1..=64));
@@ -366,7 +366,7 @@ pub fn container_ui(ui: &mut Ui, id: &str, spec: &mut ContainerSpec, refs: &Refs
 }
 
 /// Loot table editor: item, drop chance in percent and amount (min-max) per line.
-pub fn loot_ui(ui: &mut Ui, id: &str, table: &mut Vec<LootEntry>, refs: &Refs, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database) {
+pub fn loot_ui(ui: &mut Ui, id: &str, table: &mut Vec<LootEntry>, refs: &Refs, tex: &Textures, assets: &Assets, db: &rustpg2d_engine::defs::Database) {
     let mut remove = None;
     if !table.is_empty() {
         egui::Grid::new(format!("{id}/loot")).num_columns(5).striped(true).show(ui, |ui| {
@@ -421,7 +421,7 @@ pub fn loot_ui(ui: &mut Ui, id: &str, table: &mut Vec<LootEntry>, refs: &Refs, t
 }
 
 /// Merchant editor: currency, sell rate, and the stock with quantities and prices.
-pub fn shop_ui(ui: &mut Ui, id: &str, spec: &mut ShopSpec, refs: &Refs, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database) {
+pub fn shop_ui(ui: &mut Ui, id: &str, spec: &mut ShopSpec, refs: &Refs, tex: &Textures, assets: &Assets, db: &rustpg2d_engine::defs::Database) {
     ui.horizontal(|ui| {
         ui.label("Shop title");
         ui.add(egui::TextEdit::singleline(&mut spec.title).hint_text("(character name)").desired_width(180.0));
@@ -624,10 +624,14 @@ pub struct Refs {
     pub quest_stages: HashMap<String, Vec<String>>,
     pub skills: Vec<String>,
     pub spells: Vec<String>,
+    /// Crafting stations named by recipes.
+    pub stations: Vec<String>,
+    /// Achievement ids.
+    pub achievements: Vec<String>,
     /// Sprite sheet ids (effects).
     pub sheets: Vec<String>,
     /// Named animations of sprite sheets (Aseprite tags).
-    pub sheet_tags: HashMap<String, Vec<rust2d_engine::defs::SheetTag>>,
+    pub sheet_tags: HashMap<String, Vec<rustpg2d_engine::defs::SheetTag>>,
 }
 
 /// Placeholders understood in dialog / choice texts (and quest texts).
@@ -704,7 +708,7 @@ fn speaker_field(ui: &mut Ui, id: &str, speaker: &mut String, refs: &Refs) {
 }
 
 /// The animated sprite of the Fly / Effect actions.
-fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs, shake: bool) {
+fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rustpg2d_engine::events::FxSprite, refs: &Refs, shake: bool) {
     labeled(ui, "sheet", |ui| suggest(ui, &format!("{id}/sheet"), &mut s.sheet, &refs.sheets, 120.0));
     // Named animations of the sheet (e.g. Aseprite tags) fill in the frames and speed.
     if let Some(tags) = refs.sheet_tags.get(&s.sheet).filter(|t| !t.is_empty()) {
@@ -891,7 +895,7 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                     suggest(ui, &format!("{id}/q"), quest, &refs.quests, 100.0);
                     ui.label("is");
                     egui::ComboBox::from_id_salt(format!("{id}/qc")).selected_text(check.label()).show_ui(ui, |ui| {
-                        for c in rust2d_engine::quest::QuestCheck::ALL {
+                        for c in rustpg2d_engine::quest::QuestCheck::ALL {
                             ui.selectable_value(check, c, c.label());
                         }
                     });
@@ -946,7 +950,7 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                 Cond::PlayerSex { sex } => {
                     ui.label("player is");
                     egui::ComboBox::from_id_salt(format!("{id}/sex")).selected_text(sex.label()).show_ui(ui, |ui| {
-                        for s in rust2d_engine::state::Sex::ALL {
+                        for s in rustpg2d_engine::state::Sex::ALL {
                             ui.selectable_value(sex, s, s.label());
                         }
                     });
@@ -1069,7 +1073,7 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             target_field(ui, id, target, refs);
             labeled(ui, "slot", |ui| {
                 egui::ComboBox::from_id_salt(format!("{id}/slot")).selected_text(slot.label()).show_ui(ui, |ui| {
-                    for s in rust2d_engine::defs::EquipSlot::ALL {
+                    for s in rustpg2d_engine::defs::EquipSlot::ALL {
                         ui.selectable_value(slot, s, s.label());
                     }
                 });
@@ -1217,11 +1221,11 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "quest", |ui| suggest(ui, &format!("{id}/q"), quest, &refs.quests, 120.0));
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt(format!("{id}/qop")).selected_text(op.label()).show_ui(ui, |ui| {
-                    for o in rust2d_engine::quest::QuestOp::ALL {
+                    for o in rustpg2d_engine::quest::QuestOp::ALL {
                         ui.selectable_value(op, o, o.label());
                     }
                 });
-                if *op == rust2d_engine::quest::QuestOp::SetStage {
+                if *op == rustpg2d_engine::quest::QuestOp::SetStage {
                     quest_stage_field(ui, &format!("{id}/qs"), quest, stage, refs);
                 }
             });
@@ -1321,6 +1325,86 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
                 ui.label("strength");
                 ui.add(egui::DragValue::new(strength).range(0.1..=5.0).speed(0.05).prefix("x "))
                     .on_hover_text("1 = like a hit on the player. Players can switch shaking off in the Options.");
+            });
+        }
+        Action::SetWeather { map, weather } => {
+            use rustpg2d_engine::map::{Weather, WeatherKind};
+            labeled(ui, "map", |ui| {
+                let mut opts = vec![String::new()];
+                opts.extend(refs.maps.iter().cloned());
+                suggest(ui, &format!("{id}/wmap"), map, &opts, 120.0);
+            });
+            ui.weak("(empty map = the map the player is on)");
+            labeled(ui, "weather", |ui| {
+                let current = weather.map_or("Map's own", |w| w.kind.label());
+                egui::ComboBox::from_id_salt(format!("{id}/wkind")).selected_text(current).show_ui(ui, |ui| {
+                    if ui.selectable_label(weather.is_none(), "Map's own").on_hover_text("Back to the weather set on the map").clicked() {
+                        *weather = None;
+                    }
+                    for k in WeatherKind::ALL {
+                        let on = weather.is_some_and(|w| w.kind == k);
+                        if ui.selectable_label(on, k.label()).clicked() {
+                            *weather = Some(Weather::new(k, weather.map_or(0.6, |w| w.intensity)));
+                        }
+                    }
+                });
+                if let Some(w) = weather.as_mut().filter(|w| w.kind != WeatherKind::None) {
+                    let mut pct = (w.intensity * 100.0).round();
+                    if ui.add(egui::Slider::new(&mut pct, 5.0..=100.0).suffix(" %")).changed() {
+                        w.intensity = pct / 100.0;
+                    }
+                }
+            });
+            ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
+        }
+        Action::Sleep { hours } => {
+            ui.horizontal(|ui| {
+                ui.label("hours");
+                ui.add(egui::DragValue::new(hours).range(0.25..=48.0).speed(0.25));
+            });
+            ui.weak("the player sleeps (camping, an inn's rest): the screen fades, the clock moves on, HP and mana are restored; 'Woke up' triggers run after. Not with enemies nearby.");
+        }
+        Action::Lockpick { difficulty, var } => {
+            ui.horizontal(|ui| {
+                ui.label("difficulty");
+                ui.add(egui::DragValue::new(difficulty).range(0..=10)).on_hover_text("Like a lock's 'Lockpicking' difficulty: higher = a smaller sweet spot and a faster marker (the player's lockpicking skill makes it easier)");
+            });
+            labeled(ui, "result into", |ui| suggest(ui, &format!("{id}/lpvar"), var, &refs.vars, 120.0));
+            ui.weak("the lockpicking game; 1 (picked) or 0 goes into the variable, test it with a Variable condition afterwards");
+        }
+        Action::UnlockAchievement { id: ach } => {
+            labeled(ui, "achievement", |ui| suggest(ui, &format!("{id}/ach"), ach, &refs.achievements, 140.0));
+            ui.weak("unlocks it for the player (kept across save games; Database \u{203A} Achievements)");
+        }
+        Action::OpenCrafting { station, title } => {
+            labeled(ui, "station", |ui| suggest(ui, &format!("{id}/station"), station, &refs.stations, 120.0));
+            labeled(ui, "title", |ui| {
+                ui.add(egui::TextEdit::singleline(title).desired_width(140.0).hint_text("Crafting"));
+            });
+            ui.weak("shows the recipes of this station (Database \u{203A} Recipes); empty station = recipes without one");
+        }
+        Action::Companion { target, join } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.radio_value(join, true, "joins");
+                ui.radio_value(join, false, "leaves");
+            });
+            ui.weak(if *join {
+                "a placed, friendly character follows the player from map to map and fights hostile characters near them (saved)"
+            } else {
+                "the companion stays where it is on its own map, or goes back to where it is placed"
+            });
+        }
+        Action::Schedule { target, active } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.radio_value(active, true, "follow");
+                ui.radio_value(active, false, "stop");
+            });
+            ui.weak(if *active {
+                "the character heads for the stop of the current hour again (map inspector: Daily schedule)"
+            } else {
+                "the character stays where it is and does what its definition says (kept in the save game)"
             });
         }
         Action::Autosave => {
@@ -1439,7 +1523,7 @@ struct Chooser {
 }
 
 /// Who uses which frames of a sheet: frame → names (item icons, prop states).
-fn frame_users(db: &rust2d_engine::defs::Database, sheet: &str, columns: u32) -> HashMap<u32, Vec<String>> {
+fn frame_users(db: &rustpg2d_engine::defs::Database, sheet: &str, columns: u32) -> HashMap<u32, Vec<String>> {
     let mut out: HashMap<u32, Vec<String>> = HashMap::new();
     let mut add = |s: &SpriteRef, who: String| {
         if s.sheet != sheet {
@@ -1468,7 +1552,7 @@ fn frame_users(db: &rust2d_engine::defs::Database, sheet: &str, columns: u32) ->
 /// as thumbnails, the chosen sheet as a zoomable grid (frame numbers and users on hover),
 /// click to pick (drag for several cells if `multi`), double-click to pick and close.
 #[allow(clippy::too_many_arguments)]
-pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database, multi: bool) -> bool {
+pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Textures, assets: &Assets, db: &rustpg2d_engine::defs::Database, multi: bool) -> bool {
     let key = egui::Id::new(("sprite_chooser", id));
     let mut st: Chooser = ui.ctx().data(|d| d.get_temp(key)).unwrap_or_default();
     let requested = OPEN_CHOOSER.with(|r| r.borrow().as_deref() == Some(id));
@@ -1699,8 +1783,8 @@ pub fn sprite_field(ui: &mut Ui, id: &str, sprite: &mut SpriteRef, tex: &Texture
 
 /// Edits an optional light: on / off, radius (tiles), color, strength, flicker and presets.
 /// Returns true if it changed.
-pub fn light_ui(ui: &mut Ui, id: &str, l: &mut Option<rust2d_engine::defs::LightSpec>, label: &str) -> bool {
-    use rust2d_engine::defs::LightSpec;
+pub fn light_ui(ui: &mut Ui, id: &str, l: &mut Option<rustpg2d_engine::defs::LightSpec>, label: &str) -> bool {
+    use rustpg2d_engine::defs::LightSpec;
     let before = l.clone();
     let mut on = l.is_some();
     if ui.checkbox(&mut on, label).changed() {
@@ -1779,8 +1863,8 @@ pub fn carried_ui(ui: &mut Ui, id: &str, inv: &mut Vec<ItemStack>, items: &[Stri
 }
 
 /// The four directions of a character, side by side (idle frames).
-pub fn character_preview(ui: &mut Ui, tex: &Textures, assets: &Assets, db: &rust2d_engine::defs::Database, a: &rust2d_engine::defs::Appearance, eq: &rust2d_engine::state::Equipment) {
-    use rust2d_engine::render::character;
+pub fn character_preview(ui: &mut Ui, tex: &Textures, assets: &Assets, db: &rustpg2d_engine::defs::Database, a: &rustpg2d_engine::defs::Appearance, eq: &rustpg2d_engine::state::Equipment) {
+    use rustpg2d_engine::render::character;
     ui.horizontal(|ui| {
         for f in [Facing::Down, Facing::Left, Facing::Up, Facing::Right] {
             let (rect, _) = ui.allocate_exact_size(vec2(64.0, 96.0), Sense::hover());

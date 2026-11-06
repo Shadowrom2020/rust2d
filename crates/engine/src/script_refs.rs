@@ -27,6 +27,9 @@ pub enum IdKind {
     Sheet,
     /// A character definition.
     Character,
+    /// A crafting recipe.
+    Recipe,
+    Achievement,
 }
 
 impl IdKind {
@@ -42,6 +45,8 @@ impl IdKind {
             IdKind::Spell => "spell",
             IdKind::Sheet => "sprite sheet",
             IdKind::Character => "character",
+            IdKind::Recipe => "recipe",
+            IdKind::Achievement => "achievement",
         }
     }
     /// The definition kind renamed together with this id kind.
@@ -54,6 +59,7 @@ impl IdKind {
             IdKind::Skill => Some(RefKind::Skill),
             IdKind::Spell => Some(RefKind::Spell),
             IdKind::Character => Some(RefKind::Character),
+            IdKind::Recipe => Some(RefKind::Recipe),
             _ => None,
         }
     }
@@ -66,6 +72,7 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("has_item", 0, IdKind::Item),
     ("item_count", 0, IdKind::Item),
     ("teleport", 0, IdKind::Map),
+    ("set_map_weather", 0, IdKind::Map),
     ("teleport", 1, IdKind::Spawn),
     ("disable_spawners", 0, IdKind::Map),
     ("enable_spawners", 0, IdKind::Map),
@@ -90,6 +97,9 @@ pub const API_IDS: &[(&str, usize, IdKind)] = &[
     ("take_item_from", 1, IdKind::Item),
     ("effect", 0, IdKind::Sheet),
     ("defeated_count", 0, IdKind::Character),
+    ("can_craft", 0, IdKind::Recipe),
+    ("unlock_achievement", 0, IdKind::Achievement),
+    ("achievement_unlocked", 0, IdKind::Achievement),
 ];
 
 /// A string literal argument of a function call.
@@ -457,6 +467,8 @@ pub fn check_script(src: &str, db: &Database, maps: &[String], spawns: &HashMap<
             IdKind::Spell => db.spell(v).is_some(),
             IdKind::Sheet => db.sheet(v).is_some(),
             IdKind::Character => db.character(v).is_some(),
+            IdKind::Recipe => db.recipe(v).is_some(),
+            IdKind::Achievement => db.achievement(v).is_some(),
         };
         if !known {
             let extra = match kind {
@@ -557,6 +569,7 @@ fn reward() {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
         });
         let maps = vec!["village".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("village".to_string(), vec!["gate".to_string()])].into();

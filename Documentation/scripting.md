@@ -1,6 +1,6 @@
-# Scripting in rust2d
+# Scripting in R(ust)PG2D
 
-rust2d games are mostly built in the editor: maps, characters, items, triggers and their
+R(ust)PG2D games are mostly built in the editor: maps, characters, items, triggers and their
 actions. **Scripts** are for everything the editor's actions can't express on their own:
 conversations that remember what was said, counters, quests with conditions, scripted skills
 and spells, traps and other effects.
@@ -103,7 +103,7 @@ A condition should only look at the game, not change it. Actions it queues (`say
 
 ## Immediate and queued functions
 
-This is the most important rule of rust2d scripting.
+This is the most important rule of R(ust)PG2D scripting.
 
 - **Immediate** functions read or change the game state at once, while the function runs:
   `flag`, `set_flag`, `get_var`, `set_var`, `add_var`, `item_count`, `has_item`, `give_item`,
@@ -293,7 +293,7 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | Function | Description |
 |---|---|
 | `say(text)` | Shows a dialog box and waits for the player. *(queued, blocks)* |
-| `say(speaker, text)` | Dialog with a speaker name. *(queued, blocks)* |
+| `say(speaker, text)` | Dialog with a speaker name. The dialog shows the speaker's portrait when the name fits a character: `"{player}"` (or the player's name) for the hero's own lines, a character on the map or a character definition otherwise (*Dialog portraits* in the README). *(queued, blocks)* |
 | `say(entity, text)` | Dialog with an entity's name as speaker: `say(SELF, "…")`. *(queued, blocks)* |
 | `choice(text, options, var)` | Asks a question with answers `["Yes", "No"]`; the chosen index (0 = first) goes into variable `var`. *(queued, blocks)* |
 | `wait(seconds)` | Pauses the queue. *(queued, blocks)* |
@@ -316,6 +316,20 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target)` | Starts the character's own patrol route (set in the editor). *(queued)* |
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
+| `stop_schedule(target)` | The character stops following its daily schedule (set in the editor) and stays where it is. Saved. *(queued)* |
+| `sleep(hours)` | The player sleeps (camping, an inn keeper's "Rest"): the screen fades, the clock moves on, HP and mana are restored, timed effects end, then *Woke up* triggers run. Refused with enemies nearby. *(queued, blocks)* |
+| `is_sitting()` / `is_sleeping()` | Whether the player sits on furniture / lies in a bed (or the night is passing). |
+| `lockpick(difficulty, var)` | Plays the lockpicking game (like a lock with that *Lockpicking* difficulty; the player's skill makes it easier) and puts 1 (picked) or 0 into the variable, e.g. `lockpick(2, "vault"); then_call("vault_result");`. *(queued, blocks until it is over)* |
+| `unlock_achievement(id)` | Unlocks an achievement (*Database › Achievements*) for the player: a toast, kept across save games. *(queued)* |
+| `achievement_unlocked(id)` | Whether the player has unlocked an achievement (in any game). |
+| `open_crafting(station)` | Opens the crafting window with the recipes of a station (*Database › Recipes*), e.g. `open_crafting("alchemy")` on an alchemy table's trigger. *(queued)* |
+| `open_crafting(station, title)` | The same with a window title, e.g. `open_crafting("anvil", "Smithy")`. *(queued)* |
+| `can_craft(recipe)` | Whether the player has the ingredients (and the skill level) to make a recipe once. |
+| `follow(target)` | The character joins the player as a companion: it follows from map to map and fights hostile characters near the player. Only placed, friendly characters can. Saved. *(queued)* |
+| `stop_following(target)` | The companion leaves: on its own map it stays where it is, elsewhere it goes back to where it is placed. *(queued)* |
+| `is_companion(name)` | Whether the character with that name follows the player. |
+| `companion_count()` | How many companions follow the player. |
+| `follow_schedule(target)` | The character follows its daily schedule again: it heads for the stop of the current hour. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 | `defeated_count(character)` | How many characters of a definition the player has defeated (the bestiary's count), e.g. `defeated_count("slime")`. |
 | `hp_of(target)` | A character's HP right now: `"player"`, `"self"` (or `SELF`) or the name of a character on this map; `-1` if there is none (or it can't be hurt). |
@@ -378,7 +392,7 @@ Changes are saved with the game.
 | Function | Description |
 |---|---|
 | `equip(target, item)` | Puts an item into its slot (clothing, armor, weapon, left hand); what was worn there goes to the character's carried items. For `"player"` the item comes from the inventory (or is given). *(queued)* |
-| `unequip(target, slot)` | Takes off what is worn in `"clothing"`, `"head"`, `"body"`, `"weapon"` or `"offhand"` (into the carried items; the player: the inventory). *(queued)* |
+| `unequip(target, slot)` | Takes off what is worn in `"clothing"`, `"head"`, `"body"`, `"weapon"`, `"offhand"` or `"tool"` (into the carried items; the player: the inventory). *(queued)* |
 | `give_item_to(target, item, count)` | Adds items to what a character carries (the player: the inventory). *(queued)* |
 | `take_item_from(target, item, count)` | Takes items from what a character carries. *(queued)* |
 
@@ -433,6 +447,35 @@ save. Scripts can add autosaves at important moments, e.g. after a boss fight or
 | `hour()` | Time of day in hours, `0` to `24` (`13.5` = half past one in the afternoon). |
 | `is_night()` | Whether it is night (dark on outdoor maps). |
 | `set_hour(hour)` | Sets the time of day, e.g. `set_hour(22)`. *(queued)* |
+
+### Weather
+
+Each map has its own weather (map settings: clear, rain, snow or fog, with a strength). Scripts
+and the *Set weather* action change it; the change is kept in the save game, so the map keeps
+that weather until it is set again. Weather names: `"none"`, `"rain"`, `"snow"`, `"fog"`, and
+`"default"` = back to the map's own weather.
+
+| Function | Description |
+|---|---|
+| `set_weather(kind)` | Weather of the current map at a medium strength (`0.6`). *(queued)* |
+| `set_weather(kind, intensity)` | The same with a strength from `0` to `1`, e.g. `set_weather("rain", 0.8)`. *(queued)* |
+| `set_map_weather(map, kind, intensity)` | Weather of another map, e.g. `set_map_weather("forest", "fog", 0.5)`. *(queued)* |
+| `weather()` | The current map's weather: `"none"`, `"rain"`, `"snow"` or `"fog"`. |
+| `weather_intensity()` | Its strength (`0` to `1`). |
+
+```rust
+fn storm_rolls_in() {
+    if weather() != "rain" {
+        say("Dark clouds gather over the hills.");
+        set_weather("rain", 0.9);
+    }
+}
+
+fn lift_the_curse() {
+    set_weather("default");             // back to whatever the map has
+    set_map_weather("forest", "none", 0);
+}
+```
 
 ### Sound
 

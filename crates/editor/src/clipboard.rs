@@ -8,9 +8,9 @@
 use std::collections::HashSet;
 
 use egui_macroquad::egui;
-use rust2d_engine::defs::StructureDef;
-use rust2d_engine::entity::EntityInstance;
-use rust2d_engine::map::Map;
+use rustpg2d_engine::defs::StructureDef;
+use rustpg2d_engine::entity::EntityInstance;
+use rustpg2d_engine::map::Map;
 
 use crate::app::{Editor, Selection, Tool};
 use crate::ui::{self, ph};
@@ -52,7 +52,7 @@ pub fn clip_rect(map: &Map, a: (i32, i32), b: (i32, i32)) -> Option<(u32, u32, u
 
 /// Entities whose feet are inside a tile rectangle (what a copy takes along).
 fn entities_in(map: &Map, r: (u32, u32, u32, u32)) -> usize {
-    let ts = rust2d_engine::project::TILE_SIZE as f32;
+    let ts = rustpg2d_engine::project::TILE_SIZE as f32;
     let (l, t) = (r.0 as f32 * ts, r.1 as f32 * ts);
     let (rt, b) = (l + r.2 as f32 * ts, t + r.3 as f32 * ts);
     map.entities.iter().filter(|e| e.x >= l && e.x < rt && e.y >= t && e.y < b).count()
@@ -241,7 +241,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust2d_engine::entity::EntityKind;
+    use rustpg2d_engine::entity::EntityKind;
 
     #[test]
     fn pasted_names_stay_unique() {

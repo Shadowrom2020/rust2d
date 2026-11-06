@@ -11,7 +11,7 @@ use crate::settings::{Settings, TEXT_SPEEDS, ZOOMS};
 
 const W: f32 = 520.0;
 const ROW_H: f32 = 40.0;
-const MAX_ROWS: usize = 11;
+const MAX_ROWS: usize = 12;
 const MAX_NAME: usize = 32;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +36,10 @@ enum Page {
     Controls,
     /// The player was defeated: continue from the last save, start over or quit.
     Defeated,
+    /// The game's achievements, unlocked ones with their date (title and pause menus).
+    Achievements,
+    /// Forget every unlocked achievement?
+    ConfirmResetAchievements,
 }
 
 /// An entry of the Options page.
@@ -47,6 +51,8 @@ enum Opt {
     Master,
     Music,
     Effects,
+    /// Environmental sounds (rain).
+    Ambience,
     TextSpeed,
     /// Screen shake and the hurt flash.
     ScreenEffects,
@@ -56,7 +62,7 @@ enum Opt {
     Back,
 }
 
-const OPTS: [Opt; 11] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::TextSpeed, Opt::ScreenEffects, Opt::Controls, Opt::Reset, Opt::Back];
+const OPTS: [Opt; 12] = [Opt::Fullscreen, Opt::Zoom, Opt::ShowFps, Opt::Master, Opt::Music, Opt::Effects, Opt::Ambience, Opt::TextSpeed, Opt::ScreenEffects, Opt::Controls, Opt::Reset, Opt::Back];
 
 struct SaveInfo {
     slot: String,
@@ -127,6 +133,13 @@ enum Row {
     ResetKeys,
     /// Controls page: back to the Options page.
     BackToOptions,
+    /// Opens the Achievements page.
+    AchievementsMenu,
+    /// An achievement on the Achievements page (nothing to do on Enter).
+    Achievement(String),
+    ResetAchievements,
+    /// Back to the previous page.
+    Back,
 }
 
 pub(super) fn now_secs() -> u64 {
@@ -203,6 +216,9 @@ impl Game {
                 })
                 .collect()
         };
+        // The Achievements row of the title and pause menus (games that have achievements).
+        let (got, all) = (self.ach.progress.unlocked.keys().filter(|id| self.project.db.achievement(id).is_some()).count(), self.project.db.achievements.len());
+        let achievements_row: Option<(Row, String, String)> = (all > 0).then(|| (Row::AchievementsMenu, "Achievements".into(), format!("{got} of {all} unlocked")));
         let latest_save = |m: &Menu| m.saves.first().map(|s| format!("{} · {} · {}", display_name(&s.slot), s.map, ago(s.saved)));
         match &self.menu.page {
             Page::Defeated => vec![
@@ -214,21 +230,54 @@ impl Game {
                 let latest = self.menu.saves.first().map_or("no saved game yet".to_string(), |s| {
                     format!("{} · {} · {}", display_name(&s.slot), s.map, ago(s.saved))
                 });
-                vec![
+                let mut v = vec![
                     (Row::NewGame, "New game".into(), String::new()),
                     (Row::Continue, "Continue".into(), latest),
                     (Row::LoadMenu, "Load game".into(), String::new()),
                     (Row::OptionsMenu, "Options".into(), String::new()),
-                    (Row::Exit, "Exit".into(), String::new()),
-                ]
+                ];
+                v.extend(achievements_row.clone());
+                v.push((Row::Exit, "Exit".into(), String::new()));
+                v
             }
-            Page::Main => vec![
-                (Row::Resume, "Resume".into(), String::new()),
-                (Row::SaveMenu, "Save game".into(), String::new()),
-                (Row::LoadMenu, "Load game".into(), String::new()),
-                (Row::OptionsMenu, "Options".into(), "Graphics, sound and text".into()),
-                (Row::SaveQuit, "Save and quit".into(), format!("Saves to \"{}\" and returns to the main menu", display_name(&self.save_quit_slot()))),
-                (Row::Quit, "Quit".into(), "Back to the main menu without saving".into()),
+            Page::Main => {
+                let mut v = vec![
+                    (Row::Resume, "Resume".into(), String::new()),
+                    (Row::SaveMenu, "Save game".into(), String::new()),
+                    (Row::LoadMenu, "Load game".into(), String::new()),
+                    (Row::OptionsMenu, "Options".into(), "Graphics, sound and text".into()),
+                ];
+                v.extend(achievements_row);
+                v.push((Row::SaveQuit, "Save and quit".into(), format!("Saves to \"{}\" and returns to the main menu", display_name(&self.save_quit_slot()))));
+                v.push((Row::Quit, "Quit".into(), "Back to the main menu without saving".into()));
+                v
+            }
+            Page::Achievements => {
+                let mut v: Vec<(Row, String, String)> = self
+                    .project
+                    .db
+                    .achievements
+                    .iter()
+                    .map(|d| {
+                        let when = self.ach.progress.unlocked.get(&d.id);
+                        let (name, text) = match when {
+                            None if d.hidden => ("???".to_string(), "A hidden achievement".to_string()),
+                            _ => (d.name.clone(), d.description.clone()),
+                        };
+                        let detail = match when {
+                            Some(t) => format!("{text} · unlocked {}", ago(*t)),
+                            None => text,
+                        };
+                        (Row::Achievement(d.id.clone()), name, detail)
+                    })
+                    .collect();
+                v.push((Row::ResetAchievements, "Reset achievements".into(), "Forget every unlocked achievement".into()));
+                v.push((Row::Back, "Back".into(), String::new()));
+                v
+            }
+            Page::ConfirmResetAchievements => vec![
+                (Row::Yes, "Reset".into(), "Every achievement is locked again".into()),
+                (Row::No, "Cancel".into(), String::new()),
             ],
             Page::Save => {
                 let mut v = vec![(Row::NewSave, "+ New save...".into(), String::new())];
@@ -289,12 +338,28 @@ impl Game {
             Page::Options => "Options".into(),
             Page::Controls => "Controls".into(),
             Page::Defeated => "You were defeated".into(),
+            Page::Achievements => {
+                let got = self.ach.progress.unlocked.keys().filter(|id| self.project.db.achievement(id).is_some()).count();
+                format!("Achievements {got}/{}", self.project.db.achievements.len())
+            }
+            Page::ConfirmResetAchievements => "Reset achievements?".into(),
         }
     }
 
     /// The Save and Load pages list saves with their thumbnails.
     fn save_page(&self) -> bool {
-        matches!(self.menu.page, Page::Save | Page::Load)
+        matches!(self.menu.page, Page::Save | Page::Load | Page::Achievements)
+    }
+
+    /// Selects `row` on the current page (back from a sub-page onto the row that opened it).
+    fn select(&mut self, row: &Row) {
+        if let Some(k) = self.rows().iter().position(|r| &r.0 == row) {
+            self.menu.sel = k;
+            let max = self.max_rows();
+            if k >= self.menu.scroll + max {
+                self.menu.scroll = k + 1 - max;
+            }
+        }
     }
 
     fn row_h(&self) -> f32 {
@@ -344,22 +409,30 @@ impl Game {
             Page::Main => self.menu.open = false,
             Page::Load if self.menu.title => {
                 self.go(Page::Title);
-                self.menu.sel = 2; // back on "Load game"
+                self.select(&Row::LoadMenu);
             }
             Page::Save | Page::Load => {
-                let row = if self.menu.page == Page::Save { 1 } else { 2 };
+                let row = if self.menu.page == Page::Save { Row::SaveMenu } else { Row::LoadMenu };
                 self.go(Page::Main);
-                self.menu.sel = row; // back on the row we came from
+                self.select(&row); // back on the row we came from
+            }
+            Page::Achievements => {
+                self.go(if self.menu.title { Page::Title } else { Page::Main });
+                self.select(&Row::AchievementsMenu);
+            }
+            Page::ConfirmResetAchievements => {
+                self.go(Page::Achievements);
+                self.select(&Row::ResetAchievements);
             }
             Page::Name | Page::ConfirmOverwrite(_) => self.go(Page::Save),
             Page::ConfirmDelete(_) => self.go(Page::Load),
             Page::ConfirmQuit => {
                 self.go(Page::Main);
-                self.menu.sel = 5; // back on "Quit"
+                self.select(&Row::Quit);
             }
             Page::Options => {
                 self.go(if self.menu.title { Page::Title } else { Page::Main });
-                self.menu.sel = 3; // back on "Options"
+                self.select(&Row::OptionsMenu);
             }
             Page::Controls => {
                 self.go(Page::Options);
@@ -431,6 +504,14 @@ impl Game {
             }
             (_, Row::LoadMenu) => self.go(Page::Load),
             (_, Row::OptionsMenu) => self.go(Page::Options),
+            (_, Row::AchievementsMenu) => self.go(Page::Achievements),
+            (_, Row::Achievement(_)) => {}
+            (_, Row::ResetAchievements) => self.go(Page::ConfirmResetAchievements),
+            (Page::ConfirmResetAchievements, Row::Yes) => {
+                self.reset_achievements();
+                self.back();
+            }
+            (_, Row::Back) => self.back(),
             (_, Row::Opt(Opt::Back)) => self.back(),
             (_, Row::Opt(Opt::Controls)) => self.go(Page::Controls),
             (_, Row::Bind(a)) => self.menu.capture = Some(a),
@@ -501,6 +582,7 @@ impl Game {
             Opt::Master => "Master volume",
             Opt::Music => "Music volume",
             Opt::Effects => "Effects volume",
+            Opt::Ambience => "Ambience volume",
             Opt::TextSpeed => "Text speed",
             Opt::ScreenEffects => "Shake & flash",
             Opt::Controls => "Controls...",
@@ -521,6 +603,7 @@ impl Game {
             Opt::Master => pct(s.master_volume),
             Opt::Music => pct(s.music_volume),
             Opt::Effects => pct(s.effects_volume),
+            Opt::Ambience => pct(s.ambience_volume),
             Opt::TextSpeed => TEXT_SPEEDS.iter().find(|t| t.0 == s.text_speed).map_or("Normal", |t| t.1).to_string(),
             Opt::Controls | Opt::Reset | Opt::Back => String::new(),
         }
@@ -544,6 +627,7 @@ impl Game {
             Opt::Master => s.master_volume = step(&VOLUMES, s.master_volume),
             Opt::Music => s.music_volume = step(&VOLUMES, s.music_volume),
             Opt::Effects => s.effects_volume = step(&VOLUMES, s.effects_volume),
+            Opt::Ambience => s.ambience_volume = step(&VOLUMES, s.ambience_volume),
             Opt::TextSpeed => {
                 let speeds: Vec<f32> = TEXT_SPEEDS.iter().map(|t| t.0).collect();
                 s.text_speed = step(&speeds, s.text_speed);
@@ -601,6 +685,7 @@ impl Game {
         input::set_bindings(&self.settings.keys);
         let s = self.settings.clone();
         self.audio.set_volumes(s.effects(), s.music());
+        self.audio.set_ambience_volume(s.ambience());
         if self.fullscreen != Some(s.fullscreen) {
             // At startup only switch if the player wants fullscreen (the window starts windowed).
             if self.fullscreen.is_some() || s.fullscreen {
@@ -920,6 +1005,26 @@ impl Game {
                 };
                 let tw = measure_text(&text, None, 20, 1.0).width;
                 draw_text(&text, r.x + r.w - 14.0 - tw, r.y + 25.0, 20.0, col);
+            } else if let Row::Achievement(id) = &rows[idx].0 {
+                // An achievement: its icon (dim while locked), name and description / date.
+                let unlocked = self.ach.progress.has(id);
+                let d = self.project.db.achievement(id);
+                let t = Rect::new(r.x + 6.0, r.y + 5.0, r.h - 10.0, r.h - 10.0);
+                draw_rectangle(t.x, t.y, t.w, t.h, Color::new(0.0, 0.0, 0.0, 0.45));
+                match d.filter(|d| !d.icon.sheet.is_empty() && (unlocked || !d.hidden)) {
+                    Some(d) => {
+                        self.assets.draw_frame_in(&d.icon.sheet, d.icon.frame, t, if unlocked { WHITE } else { Color::new(0.35, 0.35, 0.4, 0.8) });
+                    }
+                    None => {
+                        let q = measure_text("?", None, 26, 1.0);
+                        draw_text("?", t.x + (t.w - q.width) / 2.0, t.y + (t.h + q.height) / 2.0, 26.0, DARKGRAY);
+                    }
+                }
+                draw_rectangle_lines(t.x, t.y, t.w, t.h, 1.0, Color::new(0.85, 0.72, 0.38, if unlocked { 1.0 } else { 0.35 }));
+                let tx = t.right() + 12.0;
+                let room = r.right() - tx - 8.0;
+                draw_text(fit(label, 22, room), tx, r.y + 24.0, 22.0, if unlocked { c } else { GRAY });
+                draw_text(fit(detail, 16, room), tx, r.y + 44.0, 16.0, if unlocked { LIGHTGRAY } else { GRAY });
             } else if let (true, Row::Slot(slot)) = (self.save_page(), &rows[idx].0) {
                 // A save: its thumbnail (or a placeholder), then name and details.
                 let th = r.h - 10.0;
@@ -957,6 +1062,7 @@ impl Game {
             Page::Controls if self.menu.capture.is_some() => "Press the new key · Esc: keep the keys",
             Page::Controls => "Enter: add a key · Del: clear · saved right away · Esc: back",
             Page::Defeated => "Up/Down: choose · Enter / click: confirm",
+            Page::Achievements => "Up/Down or wheel: browse · Esc: back",
             _ => "Enter / click · Esc: back",
         };
         // Controls page: what the selected action's keys clash with.
@@ -969,6 +1075,18 @@ impl Game {
         }
         draw_text(hint, p.x + 16.0, p.y + p.h - 12.0, 16.0, GRAY);
     }
+}
+
+/// `text` cut to `width` pixels at font size `size` ("..." at the end when cut).
+fn fit(text: &str, size: u16, width: f32) -> String {
+    if measure_text(text, None, size, 1.0).width <= width {
+        return text.to_string();
+    }
+    let mut cut: String = text.to_string();
+    while !cut.is_empty() && measure_text(format!("{cut}...").as_str(), None, size, 1.0).width > width {
+        cut.pop();
+    }
+    format!("{}...", cut.trim_end())
 }
 
 /// Click areas of the "<" (previous value) and ">" (next value) arrows of an Options row.

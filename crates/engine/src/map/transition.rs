@@ -18,6 +18,10 @@ pub enum ZoneKind {
     /// One end of a two-way map transition: entering it moves the player next to the zone
     /// `target_zone` on `target_map` (its counterpart, which leads back here).
     Transition { target_map: String, target_zone: String },
+    /// The water of a fishing spot: facing it from the shore, Interact casts a line onto it
+    /// (the fishing minigame); fish shadows mark it. The zone's loot table is the catch
+    /// (chances are weights: one catch per fish landed). `rod`: item needed ("" = none).
+    FishingSpot { rod: String },
 }
 
 /// When defeated spawner characters come back.
@@ -49,6 +53,7 @@ impl ZoneKind {
             ZoneKind::Trigger => "Trigger",
             ZoneKind::Spawner { .. } => "Spawner",
             ZoneKind::Transition { .. } => "Map transition",
+            ZoneKind::FishingSpot { .. } => "Fishing spot",
         }
     }
 }

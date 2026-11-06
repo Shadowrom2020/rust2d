@@ -1,9 +1,9 @@
 //! The map viewport: camera, mouse tools and drawing.
 
 use macroquad::prelude::*;
-use rust2d_engine::entity::{EntityInstance, EntityKind};
-use rust2d_engine::map::{CollisionOverride, Edge, Tile, Zone, ZoneKind};
-use rust2d_engine::render::{self, OVERVIEW_THRESHOLD};
+use rustpg2d_engine::entity::{EntityInstance, EntityKind};
+use rustpg2d_engine::map::{CollisionOverride, Edge, Tile, Zone, ZoneKind};
+use rustpg2d_engine::render::{self, OVERVIEW_THRESHOLD};
 
 use crate::app::{Editor, Mode, Selection, Tool, ZoneTemplate};
 use crate::doc::Objects;
@@ -369,7 +369,7 @@ impl Editor {
         if is_key_pressed(KeyCode::Escape) && self.route_edit.is_some() {
             self.route_edit = None;
             self.route_drag = None;
-            self.set_status("Patrol route done");
+            self.set_status(if self.route_kind == crate::app::RouteKind::Patrol { "Patrol route done" } else { "Schedule done" });
             return;
         }
         if is_key_pressed(KeyCode::Escape) && self.pasting {
@@ -772,12 +772,13 @@ impl Editor {
 
     fn draw_map(&mut self, doc: &mut crate::doc::MapDoc, cam: &Camera2D, view: Rect, px: f32) {
         let ts = self.ts();
-        // Lighting preview: darkness and lights (drawn over the map, under the overlays).
-        let lighting = if self.view.lighting {
-            render::lighting::ambient(doc.map.lighting, self.view.hour).map(|a| (a, self.preview_lights(&doc.map)))
-        } else {
-            None
-        };
+        // Lighting / weather preview: darkness, lights and the weather's tint (drawn over the map,
+        // under the overlays), then the weather's particles.
+        let weather = if self.view.weather { doc.map.weather } else { rustpg2d_engine::map::Weather::default() };
+        let base = if self.view.lighting { render::lighting::ambient(doc.map.lighting, self.view.hour) } else { None };
+        // Lights only where it is dark (weather alone just tints the daylight), as in the game.
+        let lighting = render::weather::tint_ambient(base, weather).map(|a| (a, if base.is_some() { self.preview_lights(&doc.map) } else { Vec::new() }));
+        let brightness = lighting.as_ref().map_or(1.0, |(c, _)| (c.r + c.g + c.b) / 3.0);
         let map = &doc.map;
         let (mw, mh) = (map.width as f32 * ts, map.height as f32 * ts);
         let bg = map.background;
@@ -799,6 +800,11 @@ impl Editor {
         if !overview {
             for (i, l) in map.layers.iter().enumerate().filter(|(_, l)| l.visible && !l.above_entities) {
                 render::draw_layer(map, l, &sets, ts, view, tint(i));
+            }
+            // Fish shadows in fishing spots, as in the game.
+            for z in map.zones.iter().filter(|z| matches!(z.kind, ZoneKind::FishingSpot { .. })) {
+                let r = Rect::new(z.x as f32 * ts, z.y as f32 * ts, z.w as f32 * ts, z.h as f32 * ts);
+                render::fish::draw_shadows(r, z.uid, get_time() as f32, ts);
             }
         }
 
@@ -839,6 +845,10 @@ impl Editor {
         if let Some((ambient, lights)) = lighting {
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(cam, ambient, &lights, ts, get_time());
             set_camera(cam);
+        }
+        if weather.active() && !overview {
+            self.weather_fx.update(get_frame_time().min(0.05), weather, view, ts / 32.0);
+            self.weather_fx.draw(weather, view, ts / 32.0, brightness);
         }
 
         // Visible tile range.
@@ -898,7 +908,7 @@ impl Editor {
             let col = if editing { Color::new(0.3, 0.95, 1.0, 1.0) } else { Color::new(0.3, 0.95, 1.0, 0.6) };
             let c = |p: (i32, i32)| vec2((p.0 as f32 + 0.5) * ts, (p.1 as f32 + 0.5) * ts);
             let n = r.points.len();
-            let closes = r.mode == rust2d_engine::entity::PatrolMode::Loop && n > 2;
+            let closes = r.mode == rustpg2d_engine::entity::PatrolMode::Loop && n > 2;
             for k in 0..n.saturating_sub(1) + usize::from(closes) {
                 let (a, b) = (c(r.points[k]), c(r.points[(k + 1) % n]));
                 draw_line(a.x, a.y, b.x, b.y, 2.0 * px, col);
@@ -916,6 +926,36 @@ impl Editor {
                 let fs = (14.0 * px).max(8.0);
                 let w = measure_text(&t, None, fs as u16, 1.0).width;
                 draw_text(&t, q.x - w / 2.0, q.y + fs * 0.35, fs, WHITE);
+            }
+        }
+
+        // Daily schedule of the selected character: stops in time order joined in a loop (the
+        // day starts over); their times are drawn on screen below.
+        if let Some(stops) = match self.sel {
+            Selection::Entity(uid) => map.entity(uid).map(|e| &e.schedule).filter(|s| !s.is_empty()),
+            _ => None,
+        } {
+            let editing = self.route_edit.is_some() && self.route_kind == crate::app::RouteKind::Schedule;
+            let col = Color::new(1.0, 0.72, 0.25, if editing { 1.0 } else { 0.7 });
+            let c = |s: &rustpg2d_engine::entity::ScheduleStop| vec2((s.x as f32 + 0.5) * ts, (s.y as f32 + 0.5) * ts);
+            let mut order: Vec<&rustpg2d_engine::entity::ScheduleStop> = stops.iter().collect();
+            order.sort_by(|a, b| a.hour.total_cmp(&b.hour));
+            let n = order.len();
+            for k in 0..if n > 2 { n } else { n.saturating_sub(1) } {
+                let (a, b) = (c(order[k]), c(order[(k + 1) % n]));
+                // Dashed, to tell it from a patrol route.
+                let len = a.distance(b);
+                let dir = (b - a).normalize_or_zero();
+                let mut d = 0.0;
+                while d < len {
+                    let (p, q) = (a + dir * d, a + dir * (d + 7.0 * px).min(len));
+                    draw_line(p.x, p.y, q.x, q.y, 2.0 * px, col);
+                    d += 12.0 * px;
+                }
+                let mid = a.lerp(b, 0.5);
+                let h = dir * 6.0 * px;
+                let nrm = vec2(-h.y, h.x);
+                draw_triangle(mid + h, mid - h + nrm, mid - h - nrm, col);
             }
         }
 
@@ -995,7 +1035,7 @@ impl Editor {
                     if self.entity_at(self.hover_world).is_none() {
                         let ghost = Color::new(1.0, 1.0, 1.0, 0.5);
                         if self.place_kind == EntityKind::Character {
-                            self.draw_char_layers(&self.char_layers(&self.place_def, None, rust2d_engine::entity::Facing::Down, 0), p, ghost);
+                            self.draw_char_layers(&self.char_layers(&self.place_def, None, rustpg2d_engine::entity::Facing::Down, 0), p, ghost);
                         } else if let Some(s) = self.def_sprite(self.place_kind, &self.place_def) {
                             self.assets.draw_sprite(&s, 0, p, ghost);
                         }
@@ -1036,9 +1076,9 @@ impl Editor {
                     ZoneKind::Transition { target_map, target_zone } => format!("{} <-> {target_map}:{target_zone}", z.name),
                     ZoneKind::Spawner { character, count, respawn } => {
                         let r = match respawn {
-                            rust2d_engine::map::Respawn::Never => "no respawn".to_string(),
-                            rust2d_engine::map::Respawn::OnEnter => "respawn on enter".to_string(),
-                            rust2d_engine::map::Respawn::After { seconds } => format!("respawn {seconds}s"),
+                            rustpg2d_engine::map::Respawn::Never => "no respawn".to_string(),
+                            rustpg2d_engine::map::Respawn::OnEnter => "respawn on enter".to_string(),
+                            rustpg2d_engine::map::Respawn::After { seconds } => format!("respawn {seconds}s"),
                         };
                         format!("{} [{count}x {character}, {r}]", z.name)
                     }
@@ -1063,6 +1103,19 @@ impl Editor {
                     draw_rectangle(c.x - w / 2.0 - 4.0, c.y - 14.0, w + 8.0, 20.0, Color::new(0.0, 0.3, 0.1, 0.8));
                     draw_text(&s, c.x - w / 2.0, c.y + 1.0, 18.0, WHITE);
                 }
+            }
+        }
+        // Schedule stops of the selected character: their times (drawn on screen, readable
+        // at any zoom; "in" = goes inside there).
+        if let Selection::Entity(uid) = self.sel {
+            for s in map.entity(uid).map_or(&[][..], |e| &e.schedule[..]) {
+                let q = cam.world_to_screen(vec2((s.x as f32 + 0.5) * ts, (s.y as f32 + 0.5) * ts));
+                let t = if s.inside { format!("{} in", s.time_text()) } else { s.time_text() };
+                let w = measure_text(&t, None, 16, 1.0).width;
+                let (bw, bh) = (w + 10.0, 20.0);
+                draw_rectangle(q.x - bw / 2.0, q.y - bh / 2.0, bw, bh, Color::new(0.25, 0.15, 0.02, 0.9));
+                draw_rectangle_lines(q.x - bw / 2.0, q.y - bh / 2.0, bw, bh, 1.5, Color::new(1.0, 0.72, 0.25, 1.0));
+                draw_text(&t, q.x - w / 2.0, q.y + 5.0, 16.0, WHITE);
             }
         }
         if self.cam.zoom >= 1.5 {
@@ -1105,33 +1158,31 @@ fn zone_color(k: &ZoneKind) -> Color {
         ZoneKind::Transition { .. } => Color::new(1.0, 0.6, 0.1, 1.0),
         ZoneKind::Trigger => Color::new(1.0, 0.65, 0.2, 1.0),
         ZoneKind::Spawner { .. } => Color::new(1.0, 0.25, 0.3, 1.0),
+        ZoneKind::FishingSpot { .. } => Color::new(0.2, 0.55, 1.0, 1.0),
     }
 }
 
 impl Editor {
-    /// Mouse handling while a patrol route is edited. Returns true if the event was used.
+    /// Mouse handling while a patrol route / schedule is edited. Returns true if the event was
+    /// used.
     fn route_edit_mouse(&mut self, tile: (i32, i32), ms: &Mouse, over_ui: bool) -> bool {
         const L: usize = 0;
         const R: usize = 1;
         let Some(uid) = self.route_edit else { return false };
+        let kind = self.route_kind;
         let Some(doc) = &mut self.doc else { return false };
-        // Editing ends when another object is selected or the character is gone.
-        if self.sel != Selection::Entity(uid) || doc.map.entity(uid).is_none_or(|e| e.patrol.is_none()) {
+        // Editing ends when another object is selected or the character (or its route) is gone.
+        if self.sel != Selection::Entity(uid) || route_points(&doc.map, uid, kind).is_none() {
             self.route_edit = None;
             self.route_drag = None;
             return false;
         }
         let inside = doc.map.in_bounds(tile.0, tile.1);
-        fn points(doc: &mut crate::doc::MapDoc, uid: u32) -> Option<&mut Vec<(i32, i32)>> {
-            doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.patrol.as_mut()).map(|r| &mut r.points)
-        }
         // Dragging a waypoint.
         if let Some((k, before)) = self.route_drag.take() {
             if ms.down[L] {
                 if inside {
-                    if let Some(p) = points(doc, uid).and_then(|p| p.get_mut(k)) {
-                        *p = tile;
-                    }
+                    route_edit(&mut doc.map, uid, kind, RouteOp::Move(k, tile));
                 }
                 self.route_drag = Some((k, before));
             } else {
@@ -1144,12 +1195,12 @@ impl Editor {
         }
         if ms.pressed[L] {
             let before = crate::doc::Objects::of(&doc.map);
-            let Some(pts) = points(doc, uid) else { return false };
+            let Some(pts) = route_points(&doc.map, uid, kind) else { return false };
             match pts.iter().position(|p| *p == tile) {
                 // On a waypoint: drag it.
                 Some(k) => self.route_drag = Some((k, before)),
                 None => {
-                    pts.push(tile);
+                    route_edit(&mut doc.map, uid, kind, RouteOp::Add(tile));
                     doc.record_objects(before, "route");
                 }
             }
@@ -1157,11 +1208,10 @@ impl Editor {
         }
         if ms.pressed[R] {
             let before = crate::doc::Objects::of(&doc.map);
-            if let Some(pts) = points(doc, uid) {
+            if let Some(pts) = route_points(&doc.map, uid, kind) {
                 // The waypoint on this tile, else the last one.
-                let k = pts.iter().rposition(|p| *p == tile).or(pts.len().checked_sub(1));
-                if let Some(k) = k {
-                    pts.remove(k);
+                if let Some(k) = pts.iter().rposition(|p| *p == tile).or(pts.len().checked_sub(1)) {
+                    route_edit(&mut doc.map, uid, kind, RouteOp::Remove(k));
                 }
             }
             doc.record_objects(before, "route");
@@ -1171,10 +1221,66 @@ impl Editor {
     }
 }
 
+/// The tiles of a character's patrol route or schedule stops (None: it has none).
+fn route_points(map: &rustpg2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind) -> Option<Vec<(i32, i32)>> {
+    let e = map.entity(uid)?;
+    match kind {
+        crate::app::RouteKind::Patrol => e.patrol.as_ref().map(|r| r.points.clone()),
+        crate::app::RouteKind::Schedule => (!e.schedule.is_empty()).then(|| e.schedule.iter().map(|s| (s.x, s.y)).collect()),
+    }
+}
+
+enum RouteOp {
+    Add((i32, i32)),
+    Move(usize, (i32, i32)),
+    Remove(usize),
+}
+
+/// Adds / moves / removes a patrol waypoint or schedule stop. A new stop starts two hours
+/// after the latest one.
+fn route_edit(map: &mut rustpg2d_engine::map::Map, uid: u32, kind: crate::app::RouteKind, op: RouteOp) {
+    let Some(e) = map.entities.iter_mut().find(|e| e.uid == uid) else { return };
+    match kind {
+        crate::app::RouteKind::Patrol => {
+            let Some(pts) = e.patrol.as_mut().map(|r| &mut r.points) else { return };
+            match op {
+                RouteOp::Add(t) => pts.push(t),
+                RouteOp::Move(k, t) => {
+                    if let Some(p) = pts.get_mut(k) {
+                        *p = t;
+                    }
+                }
+                RouteOp::Remove(k) => {
+                    if k < pts.len() {
+                        pts.remove(k);
+                    }
+                }
+            }
+        }
+        crate::app::RouteKind::Schedule => match op {
+            RouteOp::Add(t) => {
+                let hour = e.schedule.iter().map(|s| s.hour).max_by(f32::total_cmp).map_or(8.0, |h| ((h + 2.0) % 24.0).floor());
+                e.schedule.push(rustpg2d_engine::entity::ScheduleStop::new(hour, t.0, t.1));
+            }
+            RouteOp::Move(k, t) => {
+                if let Some(s) = e.schedule.get_mut(k) {
+                    (s.x, s.y) = t;
+                }
+            }
+            // Removing the last stop keeps the schedule (an empty one is "no schedule").
+            RouteOp::Remove(k) => {
+                if k < e.schedule.len() && e.schedule.len() > 1 {
+                    e.schedule.remove(k);
+                }
+            }
+        },
+    }
+}
+
 impl Editor {
     /// Lights of the map for the lighting preview: tiles (cached, refreshed twice a second) and
     /// placed props, characters and items.
-    fn preview_lights(&mut self, map: &rust2d_engine::map::Map) -> Vec<render::lighting::Light> {
+    fn preview_lights(&mut self, map: &rustpg2d_engine::map::Map) -> Vec<render::lighting::Light> {
         use render::lighting::Light;
         let ts = self.ts();
         let now = get_time();

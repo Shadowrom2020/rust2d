@@ -1,4 +1,4 @@
-//! The shared asset library: the Asset Library window's Browse view (`rust2d-editor --library`,
+//! The shared asset library: the Asset Library window's Browse view (`rustpg2d-editor --library`,
 //! see `library_window.rs`: import / export packages, remove, jump to editing) and the main
 //! editor's "Add from library" dialog. Both use the same thumbnail grid.
 
@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle};
-use rust2d_engine::defs::{Database, SpriteRef};
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::library::{self, kind_label, AssetRef, Bundle, KINDS};
-use rust2d_engine::project::Project;
-use rust2d_engine::refactor::RefKind;
-use rust2d_engine::script_refs::ScriptFn;
+use rustpg2d_engine::defs::{Database, SpriteRef};
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::library::{self, kind_label, AssetRef, Bundle, KINDS};
+use rustpg2d_engine::project::Project;
+use rustpg2d_engine::refactor::RefKind;
+use rustpg2d_engine::script_refs::ScriptFn;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -71,7 +71,7 @@ pub struct LibState {
     tex: HashMap<String, Tex>,
     /// Sheet images (for recolored layered characters) and their recolored textures.
     raw: HashMap<String, Rgba>,
-    colored: std::cell::RefCell<HashMap<rust2d_engine::render::ColorKey, Tex>>,
+    colored: std::cell::RefCell<HashMap<rustpg2d_engine::render::ColorKey, Tex>>,
     pub tex_dirty: bool,
     pub filter: Option<RefKind>,
     pub search: String,
@@ -136,13 +136,13 @@ impl LibState {
     }
 
     /// Paints a library character facing `facing` into `rect` (idle frame).
-    pub(crate) fn paint_character(&self, ui: &egui::Ui, id: &str, facing: rust2d_engine::entity::Facing, rect: Rect) -> bool {
+    pub(crate) fn paint_character(&self, ui: &egui::Ui, id: &str, facing: rustpg2d_engine::entity::Facing, rect: Rect) -> bool {
         self.lib.as_ref().is_some_and(|lib| self.paint_character_in(ui, &lib.db, id, facing, rect))
     }
 
     /// Paints a character of `db` (its layers) into `rect`, idle frame facing `facing`.
-    fn paint_character_in(&self, ui: &egui::Ui, db: &Database, id: &str, facing: rust2d_engine::entity::Facing, rect: Rect) -> bool {
-        use rust2d_engine::render::character;
+    fn paint_character_in(&self, ui: &egui::Ui, db: &Database, id: &str, facing: rustpg2d_engine::entity::Facing, rect: Rect) -> bool {
+        use rustpg2d_engine::render::character;
         let Some(d) = db.character(id) else { return false };
         let layers = character::layers(db, &d.appearance, &d.equipment, facing, 0, false);
         let Some(base) = layers.iter().find_map(|l| db.sheet(&l.sheet)) else { return false };
@@ -160,7 +160,7 @@ impl LibState {
                 let Some(img) = self.raw.get(&key) else { continue };
                 cache.entry((l.sheet.clone(), l.skin, l.hair)).or_insert_with(|| {
                     let mut px = img.px.clone();
-                    rust2d_engine::render::recolor::recolor(&mut px, l.skin, l.hair);
+                    rustpg2d_engine::render::recolor::recolor(&mut px, l.skin, l.hair);
                     let ci = egui::ColorImage::from_rgba_unmultiplied([img.w as usize, img.h as usize], &px);
                     let handle = ui.ctx().load_texture(format!("libc:{key}:{:?}:{:?}", l.skin, l.hair), ci, egui::TextureOptions::NEAREST);
                     Tex { handle, w: img.w as f32, h: img.h as f32 }
@@ -210,6 +210,8 @@ impl LibState {
             RefKind::Sheet => Some(SpriteRef::new(&a.1, 0)),
             RefKind::Skill => db.skill(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
             RefKind::Spell => db.spell(&a.1).map(|d| d.icon.clone()).filter(|i| !i.sheet.is_empty()),
+            // A recipe shows what it makes.
+            RefKind::Recipe => db.recipe(&a.1).and_then(|r| db.item(&r.result)).map(|d| d.icon.clone()),
             _ => None,
         };
         let drawn = match (a.0, sprite) {
@@ -219,7 +221,7 @@ impl LibState {
                 ui.painter().image(t.handle.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 true
             }),
-            (RefKind::Character, _) => self.paint_character_in(ui, db, &a.1, rust2d_engine::entity::Facing::Down, rect),
+            (RefKind::Character, _) => self.paint_character_in(ui, db, &a.1, rustpg2d_engine::entity::Facing::Down, rect),
             (_, Some(s)) => self.paint_sprite_in(ui, db, &s, rect),
             _ => false,
         };
@@ -273,6 +275,7 @@ fn name_of(db: &Database, a: &AssetRef) -> String {
         RefKind::Character => db.character(&a.1).map(|d| d.name.clone()),
         RefKind::Skill => db.skill(&a.1).map(|d| d.name.clone()),
         RefKind::Spell => db.spell(&a.1).map(|d| d.name.clone()),
+        RefKind::Recipe => db.recipe(&a.1).and_then(|r| db.item(&r.result)).map(|d| format!("{} (recipe)", d.name)),
         _ => None,
     }
     .unwrap_or_else(|| a.1.clone())
@@ -305,6 +308,7 @@ pub fn parse_kind(s: &str) -> Option<RefKind> {
         "structure" => RefKind::Structure,
         "skill" => RefKind::Skill,
         "spell" => RefKind::Spell,
+        "recipe" => RefKind::Recipe,
         _ => return None,
     })
 }
@@ -339,8 +343,8 @@ impl Editor {
     pub fn library_to_project(&mut self, assets: &[AssetRef]) -> Result<String> {
         self.lib.ensure_loaded();
         let lib = self.lib.lib.as_ref().context("library not available")?;
-        let mut b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "library", assets)?;
-        b.rescale(rust2d_engine::project::TILE_SIZE)?;
+        let mut b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rustpg2d_engine::project::TILE_SIZE, "library", assets)?;
+        b.rescale(rustpg2d_engine::project::TILE_SIZE)?;
         let root = self.project.root.clone();
         let report = b.merge_into(&mut self.project.db, &root)?;
         self.defs_dirty = true;
@@ -364,7 +368,7 @@ impl Editor {
 
     /// The dialog's contents, or `None` if the assets (and what they bring) use no scripts.
     fn script_pick_for(&mut self, assets: &[AssetRef], to: &SendTo) -> Result<Option<ScriptPick>> {
-        let b = Bundle::collect(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, "", assets)?;
+        let b = Bundle::collect(&self.project.db, &self.project.root, rustpg2d_engine::project::TILE_SIZE, "", assets)?;
         let fns = library::read_scripts(&self.project.root);
         let names: BTreeSet<String> = fns.iter().map(|f| f.name.clone()).collect();
         let mut needed: BTreeMap<String, String> = BTreeMap::new();
@@ -384,7 +388,7 @@ impl Editor {
         // What those functions call or pass on (aim, fly, then_call), transitively.
         while let Some(n) = stack.pop() {
             let Some(f) = fns.iter().find(|f| f.name == n) else { continue };
-            for u in rust2d_engine::script_refs::used_functions(f, &names) {
+            for u in rustpg2d_engine::script_refs::used_functions(f, &names) {
                 if !needed.contains_key(&u) {
                     needed.insert(u.clone(), format!("{n}()"));
                     stack.push(u);
@@ -411,7 +415,7 @@ impl Editor {
 
     /// Copies the assets plus the picked script functions (and the assets those refer to).
     fn finish_send(&mut self, assets: &[AssetRef], to: &SendTo, fns: &[ScriptFn]) -> Result<String> {
-        let b = Bundle::collect_with_scripts(&self.project.db, &self.project.root, rust2d_engine::project::TILE_SIZE, &self.project.config.name, assets, fns)?;
+        let b = Bundle::collect_with_scripts(&self.project.db, &self.project.root, rustpg2d_engine::project::TILE_SIZE, &self.project.config.name, assets, fns)?;
         let n_fns = b.scripts.len();
         match to {
             SendTo::Library => {
@@ -442,7 +446,7 @@ impl Editor {
     /// Exports library assets (with the script functions they need) to a package.
     pub fn export_package(&mut self, assets: &[AssetRef], path: &Path) -> Result<String> {
         let lib = self.lib_store().context("library not available")?;
-        let b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rust2d_engine::project::TILE_SIZE, "rust2d assets", assets)?;
+        let b = Bundle::collect_with_needed_scripts(&lib.db, &lib.root, rustpg2d_engine::project::TILE_SIZE, "R(ust)PG2D assets", assets)?;
         let path = with_ext(path);
         std::fs::write(&path, b.to_pack()?).with_context(|| format!("writing {}", path.display()))?;
         Ok(format!("Exported {} asset(s) and {} script function(s) to {}", library::all_assets(&b.db).len(), b.scripts.len(), path.display()))
@@ -538,7 +542,7 @@ impl Editor {
             self.after_library_write();
             Ok(format!("Imported into the library: {}", report.summary()))
         } else {
-            b.rescale(rust2d_engine::project::TILE_SIZE)?;
+            b.rescale(rustpg2d_engine::project::TILE_SIZE)?;
             let root = self.project.root.clone();
             let report = b.merge_into(&mut self.project.db, &root)?;
             self.defs_dirty = true;

@@ -1,11 +1,11 @@
 [package]
-name = "rust2d-game"
+name = "rustpg2d-game"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-rust2d-engine.workspace = true
+rustpg2d-engine.workspace = true
 macroquad.workspace = true
 anyhow.workspace = true
 ron.workspace = true

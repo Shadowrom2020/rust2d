@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use egui_macroquad::egui::{self, text::LayoutJob, Color32, FontId, Key, Modifiers, Stroke, TextFormat};
-use rust2d_engine::defs::Database;
+use rustpg2d_engine::defs::Database;
 
 /// What a function argument expects (drives completion inside string arguments).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,8 +36,15 @@ pub enum Arg {
     Effect,
     /// A character definition id.
     Character,
+    /// "rain", "snow", "fog", "none", "default".
+    Weather,
     /// Event name for emit().
     Event,
+    /// A crafting recipe id.
+    Recipe,
+    Achievement,
+    /// A crafting station (named by recipes).
+    Station,
     Text,
     Num,
     Bool,
@@ -56,7 +63,7 @@ macro_rules! api {
     };
 }
 
-/// The engine's script API (see `rust2d_engine::script`). Overloads are listed separately.
+/// The engine's script API (see `rustpg2d_engine::script`). Overloads are listed separately.
 pub const API: &[ApiFn] = api! {
     "flag"(name: Flag) "Whether a flag is set";
     "set_flag"(name: Flag, value: Bool) "Sets or clears a flag (immediately)";
@@ -93,6 +100,11 @@ pub const API: &[ApiFn] = api! {
     "defeated_count"(character: Character) "How many characters of this definition the player has defeated (the bestiary's count), e.g. defeated_count(\"slime\")";
     "shake"(seconds: Num) "Shakes the screen like a hit for a while: earthquakes, explosions (queued)";
     "shake"(seconds: Num, strength: Num) "Shakes the screen; strength 1 = like a hit, 2 = twice as hard (queued)";
+    "set_weather"(kind: Weather) "Weather of the current map: \"rain\", \"snow\", \"fog\", \"none\" or \"default\" (the map's own); kept in the save game (queued)";
+    "set_weather"(kind: Weather, intensity: Num) "Weather of the current map with a strength from 0 to 1, e.g. set_weather(\"rain\", 0.8) (queued)";
+    "set_map_weather"(map: Map, kind: Weather, intensity: Num) "Weather of another map, e.g. set_map_weather(\"forest\", \"fog\", 0.5) (queued)";
+    "weather"() "The current map's weather: \"none\", \"rain\", \"snow\" or \"fog\"";
+    "weather_intensity"() "The current weather's strength (0 to 1)";
     "hp_of"(target: Target) "A character's HP right now: \"player\", \"self\" (also SELF), or a name on this map; -1 if there is no such character";
     "has_effect"(effect: Effect) "Whether the player has a status effect, e.g. has_effect(\"poison\")";
     "give_xp"(amount: Num) "Gives experience; enough of it raises the level (negative takes it away, the level never drops) (queued)";
@@ -103,7 +115,7 @@ pub const API: &[ApiFn] = api! {
     "light_at"(x: Num, y: Num, radius: Num, seconds: Num, options: Opts) "Like light_at(); options #{ color: [r, g, b], flicker: true } (queued)";
     "heal_area"(x: Num, y: Num, radius: Num, amount: Num) "Heals the player and friendly characters within radius tiles of tile x, y (queued)";
     "equip"(target: Target, item: Item) "Puts an item into its slot on a character (clothing, armor, weapon, left hand); what it wore there is carried instead. The player takes it from the inventory (queued)";
-    "unequip"(target: Target, slot: Text) "Takes off what a character wears in \"clothing\", \"head\", \"body\", \"weapon\" or \"offhand\" (into its carried items) (queued)";
+    "unequip"(target: Target, slot: Text) "Takes off what a character wears in \"clothing\", \"head\", \"body\", \"weapon\", \"offhand\" or \"tool\" (into its carried items) (queued)";
     "give_item_to"(target: Target, item: Item, count: Num) "Adds items to what a character carries (dropped when it is defeated) (queued)";
     "take_item_from"(target: Target, item: Item, count: Num) "Takes items from what a character carries (queued)";
     "hide_ui"() "Hides the HUD (status frame, clock, quick bar, buttons), e.g. for a cut-scene; dialogs still show. The player shows it again with H (queued)";
@@ -152,6 +164,21 @@ pub const API: &[ApiFn] = api! {
     "patrol"(target: Target) "Starts a character's own patrol route (queued)";
     "patrol"(target: Target, points: List) "Patrols [[x, y], ...] tile waypoints (queued)";
     "stop_patrol"(target: Target) "Stops a character's patrol (queued)";
+    "sleep"(hours: Num) "The player sleeps that many hours: the night passes, HP and mana are restored (queued, blocks)";
+    "is_sitting"() "Whether the player sits on a chair or bench";
+    "is_sleeping"() "Whether the player lies in a bed or the night is passing";
+    "lockpick"(difficulty: Num, var: Var) "Plays the lockpicking game; 1 (picked) or 0 goes into the variable (queued, blocks)";
+    "unlock_achievement"(id: Achievement) "Unlocks an achievement for the player (queued; kept across save games)";
+    "achievement_unlocked"(id: Achievement) "Whether the player has unlocked an achievement";
+    "open_crafting"(station: Station) "Opens the crafting window with the station's recipes (queued)";
+    "open_crafting"(station: Station, title: Text) "Opens the crafting window with a title, e.g. \"Alchemy table\" (queued)";
+    "can_craft"(recipe: Recipe) "Whether the player has the ingredients (and skill) for a recipe";
+    "follow"(target: Target) "The character joins the player as a companion (queued, saved)";
+    "stop_following"(target: Target) "The companion leaves: stays on its own map, else goes back home (queued)";
+    "is_companion"(name: Text) "Whether the character with that name follows the player";
+    "companion_count"() "How many companions follow the player";
+    "stop_schedule"(target: Target) "The character stops following its daily schedule and stays where it is (queued, saved)";
+    "follow_schedule"(target: Target) "The character follows its daily schedule again (queued)";
     "start_quest"(quest: Quest) "Starts a quest (queued)";
     "advance_quest"(quest: Quest) "Moves a quest to its next stage (queued)";
     "set_quest_stage"(quest: Quest, stage: Num) "Sets a quest's stage (queued)";
@@ -468,7 +495,20 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                 Some(Arg::Func) => known.functions.iter().map(|f| c(f, "script function")).collect(),
                 Some(Arg::Dir) => ["up", "down", "left", "right"].iter().map(|d| c(d, "direction")).collect(),
                 Some(Arg::Character) => db.characters.iter().map(|q| c(&q.id, &q.name)).collect(),
-                Some(Arg::Effect) => rust2d_engine::effects::EffectKind::ALL.iter().map(|k| c(k.id(), k.label())).collect(),
+                Some(Arg::Achievement) => db.achievements.iter().map(|q| c(&q.id, &q.name)).collect(),
+                Some(Arg::Recipe) => db.recipes.iter().map(|q| c(&q.id, db.item(&q.result).map_or(q.result.as_str(), |d| d.name.as_str()))).collect(),
+                Some(Arg::Station) => {
+                    let mut v: Vec<String> = db.recipes.iter().map(|r| r.station.clone()).filter(|s| !s.is_empty()).collect();
+                    v.sort();
+                    v.dedup();
+                    v.iter().map(|s| c(s, "crafting station")).collect()
+                }
+                Some(Arg::Effect) => rustpg2d_engine::effects::EffectKind::ALL.iter().map(|k| c(k.id(), k.label())).collect(),
+                Some(Arg::Weather) => {
+                    let mut v: Vec<Cand> = rustpg2d_engine::map::WeatherKind::ALL.iter().map(|k| c(k.id(), k.label())).collect();
+                    v.push(c("default", "the map's own weather"));
+                    v
+                }
                 _ => Vec::new(),
             };
             rank(list, partial)
@@ -870,7 +910,7 @@ mod tests {
     #[test]
     fn suggestions() {
         let mut db = Database::default();
-        db.quests.push(rust2d_engine::quest::QuestDef { id: "pest_control".into(), title: "Pest Control".into(), ..Default::default() });
+        db.quests.push(rustpg2d_engine::quest::QuestDef { id: "pest_control".into(), title: "Pest Control".into(), ..Default::default() });
         let maps = vec!["village".to_string(), "forest".to_string()];
         let spawns: HashMap<String, Vec<String>> = [("forest".to_string(), vec!["west".to_string(), "cave".to_string()])].into();
         let none: Vec<String> = Vec::new();

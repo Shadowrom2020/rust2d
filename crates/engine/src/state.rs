@@ -19,6 +19,9 @@ pub struct Equipment {
     pub weapon: Option<ItemStack>,
     /// Left hand: shield or light.
     pub offhand: Option<ItemStack>,
+    /// A tool (fishing rod, …), held while it is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ItemStack>,
 }
 
 impl Equipment {
@@ -29,6 +32,7 @@ impl Equipment {
             EquipSlot::Body => self.body.as_ref(),
             EquipSlot::Weapon => self.weapon.as_ref(),
             EquipSlot::Offhand => self.offhand.as_ref(),
+            EquipSlot::Tool => self.tool.as_ref(),
         }
     }
     pub fn slot_mut(&mut self, slot: EquipSlot) -> &mut Option<ItemStack> {
@@ -38,6 +42,7 @@ impl Equipment {
             EquipSlot::Body => &mut self.body,
             EquipSlot::Weapon => &mut self.weapon,
             EquipSlot::Offhand => &mut self.offhand,
+            EquipSlot::Tool => &mut self.tool,
         }
     }
     pub fn item(&self, slot: EquipSlot) -> Option<&str> {
@@ -78,6 +83,9 @@ pub struct EntityState {
     /// Where a patrolling character is on its route.
     #[serde(default)]
     pub patrol: Option<PatrolState>,
+    /// A character with a schedule stopped following it (Schedule action / script).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub schedule_off: bool,
 }
 
 /// Progress of a patrolling character (saved, so a loaded game continues the route).
@@ -192,6 +200,26 @@ pub struct WorldState {
     /// The last dialog lines (oldest first, at most [`DIALOG_LOG_MAX`]) for the journal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialog_log: Vec<LogLine>,
+    /// Weather set by actions / scripts, by map name (overrides the map's own weather).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub weather: BTreeMap<String, crate::map::Weather>,
+    /// Characters following the player, in the order they joined.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub companions: Vec<Companion>,
+}
+
+/// A placed character that follows the player from map to map. Its look, items and triggers
+/// come from where it is placed (`map`, `uid`); dismissed, it goes back there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Companion {
+    pub map: String,
+    pub uid: u32,
+    /// Its name (scripts address it by name on every map).
+    #[serde(default)]
+    pub name: String,
+    /// Its HP (None = full).
+    #[serde(default)]
+    pub hp: Option<i32>,
 }
 
 /// How many dialog lines the journal keeps.
@@ -257,6 +285,11 @@ impl Sex {
 }
 
 impl WorldState {
+    /// The placed character `uid` of `map` follows the player.
+    pub fn is_companion(&self, map: &str, uid: u32) -> bool {
+        self.companions.iter().any(|c| c.uid == uid && c.map == map)
+    }
+
     /// Adds a line to the dialog log (dropping the oldest beyond [`DIALOG_LOG_MAX`]).
     pub fn log_dialog(&mut self, speaker: &str, text: &str, answer: bool) {
         if text.trim().is_empty() {
@@ -482,6 +515,17 @@ mod tests {
     }
 
     #[test]
+    fn weather_overrides_are_saved() {
+        use crate::map::{Weather, WeatherKind};
+        let old: WorldState = ron::from_str(r#"(flags: [], vars: {}, inventory: {}, entities: {}, fired: [], current_map: "m", player_pos: (0.0, 0.0), player_facing: Down)"#).unwrap();
+        assert!(old.weather.is_empty(), "saves from before weather load");
+        let mut w = WorldState::default();
+        w.weather.insert("forest".into(), Weather::new(WeatherKind::Rain, 0.8));
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!(back.weather.get("forest"), Some(&Weather::new(WeatherKind::Rain, 0.8)));
+    }
+
+    #[test]
     fn dialog_log_keeps_the_newest_lines() {
         let mut w = WorldState::default();
         w.log_dialog("Bob", "  ", false);
@@ -513,11 +557,48 @@ mod tests {
         w.set_entity_state(
             "village",
             7,
-            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None },
+            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None, schedule_off: false },
         );
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert!(back.flag("a"));
         assert_eq!(back.var("x"), -4);
         assert_eq!(back.entity_state("village", 7).unwrap().frame, 1);
+    }
+
+    #[test]
+    fn entity_states_of_old_saves_follow_their_schedule() {
+        let old: EntityState = ron::from_str("(active: true, frame: 0, x: 1.0, y: 2.0, facing: Down)").unwrap();
+        assert!(!old.schedule_off);
+        let off = EntityState { schedule_off: true, ..old.clone() };
+        let text = ron::to_string(&off).unwrap();
+        assert_eq!(ron::from_str::<EntityState>(&text).unwrap(), off);
+        assert!(!ron::to_string(&old).unwrap().contains("schedule_off"), "only written when stopped");
+    }
+
+    #[test]
+    fn companions_in_saves() {
+        // A save without companions (all older ones) loads with none.
+        let old = WorldState::default().to_ron().unwrap();
+        assert!(!old.contains("companions"));
+        assert!(WorldState::from_ron(&old).unwrap().companions.is_empty());
+        let mut w = WorldState::default();
+        w.companions.push(Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: Some(5) });
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!(back.companions, w.companions);
+        assert!(back.is_companion("village", 22) && !back.is_companion("forest", 22));
+    }
+
+    #[test]
+    fn tool_slot_in_saves() {
+        // Saves from before the Tool slot have no "tool" field.
+        let old: Equipment = ron::from_str("(head: None, body: None, weapon: Some((item: \"sword\", count: 1)), offhand: None)").unwrap();
+        assert_eq!(old.get(EquipSlot::Tool), None);
+        let mut eq = old.clone();
+        *eq.slot_mut(EquipSlot::Tool) = Some(ItemStack::new("fishing_rod", 1));
+        let back: Equipment = ron::from_str(&ron::to_string(&eq).unwrap()).unwrap();
+        assert_eq!(back.item(EquipSlot::Tool), Some("fishing_rod"));
+        assert_eq!(back.count("fishing_rod"), 1, "tools count as owned");
+        assert!(!ron::to_string(&old).unwrap().contains("tool"), "no tool, nothing written");
+        assert_eq!(EquipSlot::parse("tool"), Some(EquipSlot::Tool));
     }
 }

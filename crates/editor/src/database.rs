@@ -3,12 +3,12 @@
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Sense, Stroke, StrokeKind};
 
 use crate::ui::{self, ph};
-use rust2d_engine::audio::Audio;
-use rust2d_engine::defs::*;
-use rust2d_engine::events::TriggerOn;
-use rust2d_engine::imageio::Rgba;
-use rust2d_engine::refactor::RefKind;
-use rust2d_engine::render::Assets;
+use rustpg2d_engine::audio::Audio;
+use rustpg2d_engine::defs::*;
+use rustpg2d_engine::events::TriggerOn;
+use rustpg2d_engine::imageio::Rgba;
+use rustpg2d_engine::refactor::RefKind;
+use rustpg2d_engine::render::Assets;
 
 use crate::app::Editor;
 use crate::files::Purpose;
@@ -29,6 +29,8 @@ pub enum Tab {
     Structures,
     Skills,
     Spells,
+    Recipes,
+    Achievements,
 }
 
 /// Inline "rename id" editor state; at most one rename is open at a time.
@@ -123,6 +125,8 @@ fn tab_icon(t: Tab) -> &'static str {
         Tab::Quests => ph::SCROLL,
         Tab::Skills => ph::STAR,
         Tab::Spells => ph::MAGIC_WAND,
+        Tab::Recipes => ph::HAMMER,
+        Tab::Achievements => ph::TROPHY,
         Tab::Project => ph::GEAR,
         Tab::Scripts => ph::CODE,
     }
@@ -175,7 +179,7 @@ fn list_ui<T: Clone>(
 pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let library = ed.library_mode;
     LIBRARY_MODE.with(|m| m.set(library));
-    if library && matches!(ed.db.tab, Tab::Quests | Tab::Project | Tab::Scripts) {
+    if library && matches!(ed.db.tab, Tab::Quests | Tab::Achievements | Tab::Project | Tab::Scripts) {
         ed.db.tab = Tab::Items;
     }
     // Wraps onto a second line in narrow windows (instead of widening the forms below).
@@ -190,12 +194,14 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             (Tab::Structures, "Structures"),
             (Tab::Skills, "Skills"),
             (Tab::Spells, "Spells"),
+            (Tab::Recipes, "Recipes"),
             (Tab::Quests, "Quests"),
+            (Tab::Achievements, "Achievements"),
             (Tab::Project, "Project"),
             (Tab::Scripts, "Scripts"),
         ];
         for (t, l) in tabs {
-            if library && matches!(t, Tab::Quests | Tab::Project | Tab::Scripts) {
+            if library && matches!(t, Tab::Quests | Tab::Achievements | Tab::Project | Tab::Scripts) {
                 continue; // the library only holds assets
             }
             if ui.selectable_label(ed.db.tab == t, ui::t(tab_icon(t), l)).clicked() && ed.db.tab != t {
@@ -217,7 +223,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         // The selected asset of this tab, for the library / package buttons.
         let i = ed.db.sel;
         let db = &ed.project.db;
-        let current: Option<rust2d_engine::library::AssetRef> = match ed.db.tab {
+        let current: Option<rustpg2d_engine::library::AssetRef> = match ed.db.tab {
             Tab::Items => db.items.get(i).map(|d| (RefKind::Item, d.id.clone())),
             Tab::Props => db.props.get(i).map(|d| (RefKind::Prop, d.id.clone())),
             Tab::Characters => db.characters.get(i).map(|d| (RefKind::Character, d.id.clone())),
@@ -227,6 +233,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
             Tab::Structures => db.structures.get(i).map(|d| (RefKind::Structure, d.id.clone())),
             Tab::Skills => db.skills.get(i).map(|d| (RefKind::Skill, d.id.clone())),
             Tab::Spells => db.spells.get(i).map(|d| (RefKind::Spell, d.id.clone())),
+            Tab::Recipes => db.recipes.get(i).map(|d| (RefKind::Recipe, d.id.clone())),
             _ => None,
         };
         if !library {
@@ -240,6 +247,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                 Tab::Structures => Some(RefKind::Structure),
                 Tab::Skills => Some(RefKind::Skill),
                 Tab::Spells => Some(RefKind::Spell),
+                Tab::Recipes => Some(RefKind::Recipe),
                 _ => None,
             };
             if kind.is_some() {
@@ -306,6 +314,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
                     },
                     |d| &mut d.id,
                 ),
@@ -325,7 +334,8 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         lock: None,
                         default_state: default_state_name(),
                         states: vec![],
-        light: None,
+                        light: None,
+                        use_spot: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -374,7 +384,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.skills,
                     sel,
                     |d| format!("{}  ({})", d.name, d.id),
-                    |ids| rust2d_engine::skills::SkillDef::new(&unique("skill", ids), "New skill", "", SpriteRef::default(), 5, rust2d_engine::skills::SkillEffect::None),
+                    |ids| rustpg2d_engine::skills::SkillDef::new(&unique("skill", ids), "New skill", "", SpriteRef::default(), 5, rustpg2d_engine::skills::SkillEffect::None),
                     |d| &mut d.id,
                 ),
                 Tab::Spells => list_ui(
@@ -382,7 +392,31 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.spells,
                     sel,
                     |d| format!("{}  ({})", d.name, d.id),
-                    |ids| rust2d_engine::skills::SpellDef::new(&unique("spell", ids), "New spell", "", SpriteRef::default(), 5, 1.0, rust2d_engine::skills::SpellEffect::Heal { amount: 4 }),
+                    |ids| rustpg2d_engine::skills::SpellDef::new(&unique("spell", ids), "New spell", "", SpriteRef::default(), 5, 1.0, rustpg2d_engine::skills::SpellEffect::Heal { amount: 4 }),
+                    |d| &mut d.id,
+                ),
+                Tab::Recipes => {
+                    // Listed by what they make.
+                    let names: std::collections::HashMap<String, String> = db.items.iter().map(|d| (d.id.clone(), d.name.clone())).collect();
+                    list_ui(
+                        ui,
+                        &mut db.recipes,
+                        sel,
+                        |d| {
+                            let made = names.get(&d.result).cloned().unwrap_or_else(|| d.result.clone());
+                            let at = if d.station.is_empty() { String::new() } else { format!(" @ {}", d.station) };
+                            format!("{made}{at}  ({})", d.id)
+                        },
+                        |ids| rustpg2d_engine::crafting::RecipeDef::new(&unique("recipe", ids), "", 1, Vec::new(), ""),
+                        |d| &mut d.id,
+                    )
+                }
+                Tab::Achievements => list_ui(
+                    ui,
+                    &mut db.achievements,
+                    sel,
+                    |d| format!("{}{}  ({})", d.name, if d.hidden { " (hidden)" } else { "" }, d.id),
+                    |ids| rustpg2d_engine::achievements::AchievementDef::new(&unique("achievement", ids), "New achievement", "", SpriteRef::default(), Vec::new()),
                     |d| &mut d.id,
                 ),
                 Tab::Quests => list_ui(
@@ -390,7 +424,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     &mut db.quests,
                     sel,
                     |d| format!("{}  ({})", d.title, d.id),
-                    |ids| rust2d_engine::quest::QuestDef { id: unique("quest", ids), title: "New quest".into(), description: String::new(), stages: vec!["First objective".into()], xp: 0 },
+                    |ids| rustpg2d_engine::quest::QuestDef { id: unique("quest", ids), title: "New quest".into(), description: String::new(), stages: vec!["First objective".into()], xp: 0 },
                     |d| &mut d.id,
                 ),
                 _ => false,
@@ -488,6 +522,16 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                     Tab::Spells => {
                         if let Some(d) = db.spells.get_mut(i) {
                             spell_form(ui, d, &mut cx);
+                        }
+                    }
+                    Tab::Recipes => {
+                        if let Some(d) = db.recipes.get_mut(i) {
+                            recipe_form(ui, d, &mut cx);
+                        }
+                    }
+                    Tab::Achievements => {
+                        if let Some(d) = db.achievements.get_mut(i) {
+                            achievement_form(ui, d, &mut cx);
                         }
                     }
                     Tab::Structures => {
@@ -704,6 +748,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     ui.heading("Equipment");
     ui.weak("Equipment goes into a character-sheet slot when used from the inventory (weapons also with Q) instead of running 'On use' triggers.");
     let mut kind = match (&d.weapon, &d.armor) {
+        _ if !d.tool.is_empty() => 6,
         (Some(_), _) => 1,
         (None, Some(a)) if a.slot == EquipSlot::Head => 2,
         (None, Some(a)) if a.slot == EquipSlot::Offhand => 4,
@@ -719,8 +764,10 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         ui.radio_value(&mut kind, 3, "Body armor");
         ui.radio_value(&mut kind, 4, "Left hand").on_hover_text("A shield (defense) or a light (lantern, torch: set its light below). Not usable together with a two-handed weapon.");
         ui.radio_value(&mut kind, 5, "Clothing").on_hover_text("An outfit: changes how layered characters look (its overlay sheet); armor is worn over it.");
+        ui.radio_value(&mut kind, 6, "Tool").on_hover_text("Goes into the Tool slot (a fishing rod, later pickaxes, hoes...): held in the right hand while it is used. Activities ask for it, e.g. a fishing spot's 'Needs item'.");
     });
     if kind != old {
+        d.tool = if kind == 6 { if d.tool.is_empty() { "tool".into() } else { d.tool.clone() } } else { String::new() };
         d.weapon = (kind == 1).then(|| Weapon::melee(1, 0.4));
         d.armor = match kind {
             2..=5 => {
@@ -782,10 +829,26 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
             });
         }
     }
-    if matches!(d.equip_slot(), Some(EquipSlot::Weapon | EquipSlot::Offhand)) {
+    if !d.tool.is_empty() {
+        ui.horizontal(|ui| {
+            ui.label("Tool kind");
+            let kinds: Vec<String> = {
+                let mut v: Vec<String> = cx.db.items.iter().map(|i| i.tool.clone()).filter(|t| !t.is_empty()).collect();
+                v.sort();
+                v.dedup();
+                v
+            };
+            widgets::suggest(ui, "item_tool", &mut d.tool, &kinds, 140.0);
+            ui.weak("(what it is: \"fishing rod\", \"pickaxe\"...)");
+        });
+        if d.tool.trim().is_empty() {
+            d.tool = "tool".into();
+        }
+    }
+    if matches!(d.equip_slot(), Some(EquipSlot::Weapon | EquipSlot::Offhand | EquipSlot::Tool)) {
         ui.horizontal(|ui| {
             ui.label("Held sprite");
-            let held: Vec<String> = cx.db.sheets.iter().filter(|s| s.kind == rust2d_engine::defs::SheetKind::Held).map(|s| s.id.clone()).collect();
+            let held: Vec<String> = cx.db.sheets.iter().filter(|s| s.kind == rustpg2d_engine::defs::SheetKind::Held).map(|s| s.id.clone()).collect();
             widgets::suggest(ui, "item_held", &mut d.held, &held, 140.0);
             ui.weak("(sheet in the character layout: how it looks in a character's hand; empty = not visible)");
         });
@@ -815,7 +878,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     ui.separator();
     ui.heading("On use");
     ui.weak("Runs when the item is used from the inventory and the entity in front of the player didn't react to it.");
-    widgets::triggers_ui(ui, &format!("item/{}", d.id), &mut d.on_use, cx.refs, rust2d_engine::events::TriggerOwner::ItemUse);
+    widgets::triggers_ui(ui, &format!("item/{}", d.id), &mut d.on_use, cx.refs, rustpg2d_engine::events::TriggerOwner::ItemUse);
     for t in &mut d.on_use {
         if !matches!(t.on, TriggerOn::UseItem { .. }) {
             t.on = TriggerOn::UseItem { item: String::new() };
@@ -863,9 +926,96 @@ fn prop_form(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
         widgets::lock_ui(ui, "prop_lock", lock, cx.refs, cx.tex, cx.assets, cx.db, Some(&prop));
     }
     ui.separator();
+    use_spot_ui(ui, d, cx);
+    ui.separator();
     ui.heading("Default triggers");
     ui.weak("Run for every placed instance, in addition to the instance's own triggers.");
-    widgets::triggers_ui(ui, &format!("prop/{}", d.id), &mut d.triggers, cx.refs, rust2d_engine::events::TriggerOwner::Prop);
+    widgets::triggers_ui(ui, &format!("prop/{}", d.id), &mut d.triggers, cx.refs, rustpg2d_engine::events::TriggerOwner::Prop);
+}
+
+/// Furniture: where and how the player uses the prop (sits, lies, stands at it).
+fn use_spot_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
+    use rustpg2d_engine::defs::{Pose, UseSpot};
+    ui.heading("Furniture");
+    let mut on = d.use_spot.is_some();
+    if ui.checkbox(&mut on, "The player can use it (sit, sleep, stand at it)").changed() {
+        d.use_spot = on.then(UseSpot::default);
+    }
+    let sprite = d.sprite.clone();
+    let Some(s) = &mut d.use_spot else { return };
+    let before = s.pose;
+    ui.horizontal(|ui| {
+        ui.label("Pose");
+        for p in Pose::ALL {
+            ui.selectable_value(&mut s.pose, p, p.label());
+        }
+    });
+    if s.pose != before && s.pose == Pose::Lie {
+        s.facing = rustpg2d_engine::entity::Facing::Up; // a new bed: the head at the top
+    }
+    egui::Grid::new("use_spot").num_columns(2).show(ui, |ui| {
+        ui.label("Spot (px)");
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut s.offset[0]).range(-128.0..=128.0).prefix("x "));
+            ui.add(egui::DragValue::new(&mut s.offset[1]).range(-128.0..=128.0).prefix("y "));
+        })
+        .response
+        .on_hover_text("Where the user's feet go, from the prop's feet (bottom center); in a bed, so that the head lies on the pillow");
+        ui.end_row();
+        // In a bed the facing is the side the head lies on.
+        let lie = s.pose == Pose::Lie;
+        let name = |f: rustpg2d_engine::entity::Facing| match (lie, f) {
+            (true, rustpg2d_engine::entity::Facing::Up) => "Top (upright bed)",
+            (true, rustpg2d_engine::entity::Facing::Left) => "Left (sideways bed)",
+            (true, rustpg2d_engine::entity::Facing::Right) => "Right (sideways bed)",
+            (true, rustpg2d_engine::entity::Facing::Down) => "Bottom",
+            (false, f) => f.label(),
+        };
+        ui.label(if lie { "Head at" } else { "Facing" });
+        egui::ComboBox::from_id_salt("use_spot_facing").selected_text(name(s.facing)).width(150.0).show_ui(ui, |ui| {
+            for f in rustpg2d_engine::entity::Facing::ALL {
+                ui.selectable_value(&mut s.facing, f, name(f));
+            }
+        });
+        ui.end_row();
+        if s.pose == Pose::Lie {
+            ui.label("Sleep until");
+            ui.add(egui::DragValue::new(&mut s.sleep_until).range(0.0..=23.75).speed(0.25).custom_formatter(|h, _| rustpg2d_engine::entity::hour_text(h as f32)));
+            ui.end_row();
+        }
+    });
+    // Preview: the prop with the spot (a dot at the feet, a line the way the user looks).
+    let size = cx.assets.sprite_size(&sprite, 32.0);
+    let k = 2.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size.x * k + 40.0, size.y * k + 40.0), egui::Sense::hover());
+    let r = egui::Rect::from_min_size(rect.min + egui::vec2(20.0, 20.0), egui::vec2(size.x * k, size.y * k));
+    ui.painter().rect_filled(rect, 2.0, egui::Color32::from_gray(30));
+    widgets::paint_sprite(ui, cx.tex, cx.assets, &sprite, r);
+    let feet = egui::pos2(r.center().x, r.bottom());
+    let spot = feet + egui::vec2(s.offset[0], s.offset[1]) * k;
+    let (dx, dy) = s.facing.dir();
+    ui.painter().circle_filled(spot, 4.0, egui::Color32::from_rgb(255, 200, 60));
+    ui.painter().line_segment([spot, spot + egui::vec2(dx, dy) * 14.0], egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 200, 60)));
+    if s.pose == Pose::Lie {
+        ui.label("Cover (drawn over the sleeper, e.g. the blanket; same size as the bed)");
+        widgets::sprite_field(ui, "use_spot_cover", &mut s.cover, cx.tex, cx.assets, cx.db, true);
+    } else if s.pose == Pose::Sit {
+        ui.label("Cover (drawn over the sitter, e.g. the backrest of a chair facing away; same size as the chair; optional)");
+        widgets::sprite_field(ui, "use_spot_cover", &mut s.cover, cx.tex, cx.assets, cx.db, true);
+    }
+    ui.label("Only usable when");
+    widgets::conditions_ui(ui, &format!("use_spot/{}", d.id), &mut s.conditions, cx.refs);
+    if !s.conditions.is_empty() {
+        ui.horizontal(|ui| {
+            ui.label("Otherwise");
+            ui.add(egui::TextEdit::singleline(&mut s.refuse_text).hint_text("You can't use that now.").desired_width(260.0));
+        });
+    }
+    ui.weak(match s.pose {
+        Pose::Sit => "Interacting sits down (when the prop's own triggers did nothing), facing the chosen way (one prop per direction, e.g. chairs around a table); HP and mana come back faster while sitting. Moving, attacking or E stands up.",
+        Pose::Lie => "Interacting asks \"Sleep until …?\": the night passes (HP and mana restored, effects worn off, enemies respawned, scheduled characters moved on), the bed's and the map's 'Woke up' triggers run, the game autosaves. Not with enemies nearby.",
+        Pose::Stand => "Interacting steps up to it and faces it (counters, anvils, desks).",
+    });
 }
 
 /// The prop's states in one place: name, sprite, whether it blocks movement.
@@ -1026,8 +1176,8 @@ fn all_names_except(d: &PropDef, i: usize) -> Vec<String> {
 }
 
 /// Renames a prop state in "Set prop state" actions and "Prop state" conditions aimed at "self".
-pub fn rename_state_in_triggers(ts: &mut [rust2d_engine::events::Trigger], old: &str, new: &str) {
-    use rust2d_engine::events::{Action, Cond};
+pub fn rename_state_in_triggers(ts: &mut [rustpg2d_engine::events::Trigger], old: &str, new: &str) {
+    use rustpg2d_engine::events::{Action, Cond};
     fn actions(acts: &mut [Action], old: &str, new: &str) {
         for a in acts {
             match a {
@@ -1041,7 +1191,7 @@ pub fn rename_state_in_triggers(ts: &mut [rust2d_engine::events::Trigger], old: 
             }
         }
     }
-    fn conds(cs: &mut [rust2d_engine::events::Condition], old: &str, new: &str) {
+    fn conds(cs: &mut [rustpg2d_engine::events::Condition], old: &str, new: &str) {
         for c in cs {
             if let Cond::PropState { target, state } = &mut c.cond {
                 if (target == "self" || target.is_empty()) && state == old {
@@ -1198,10 +1348,10 @@ fn character_form(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     }
     ui.separator();
     ui.heading("Default triggers");
-    widgets::triggers_ui(ui, &format!("chr/{}", d.id), &mut d.triggers, cx.refs, rust2d_engine::events::TriggerOwner::Character);
+    widgets::triggers_ui(ui, &format!("chr/{}", d.id), &mut d.triggers, cx.refs, rustpg2d_engine::events::TriggerOwner::Character);
 }
 
-fn quest_form(ui: &mut egui::Ui, d: &mut rust2d_engine::quest::QuestDef, _cx: &mut Cx) {
+fn quest_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::quest::QuestDef, _cx: &mut Cx) {
     ui.heading("Quest");
     egui::Grid::new("quest").num_columns(2).show(ui, |ui| {
         ui.label("Id");
@@ -1423,7 +1573,7 @@ fn tileset_form(ui: &mut egui::Ui, d: &mut TilesetDef, cx: &mut Cx) {
                             Some(k) => {
                                 d.lights.remove(k);
                             }
-                            None => d.lights.push(rust2d_engine::defs::TileLight { tile: i, light: rust2d_engine::defs::LightSpec::torch(4.0) }),
+                            None => d.lights.push(rustpg2d_engine::defs::TileLight { tile: i, light: rustpg2d_engine::defs::LightSpec::torch(4.0) }),
                         },
                         None => {
                             if let Some(k) = d.solid.iter().position(|&s| s == i) {
@@ -1455,7 +1605,7 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
         egui::ComboBox::from_id_salt("sheet_kind")
             .selected_text(d.kind.label())
             .show_ui(ui, |ui| {
-                for k in rust2d_engine::defs::SheetKind::ALL {
+                for k in rustpg2d_engine::defs::SheetKind::ALL {
                     ui.selectable_value(&mut d.kind, k, k.label());
                 }
             })
@@ -1510,7 +1660,7 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
             d.tags.remove(k);
         }
         if ui.button(ui::t(ui::ph::PLUS, "Animation")).on_hover_text("A named frame range, offered by the Effect / Fly actions and effect(…, #{ tag: \"name\" })").clicked() {
-            d.tags.push(rust2d_engine::defs::SheetTag { name: format!("anim_{}", d.tags.len() + 1), first: 0, last: 0, fps: 10.0 });
+            d.tags.push(rustpg2d_engine::defs::SheetTag { name: format!("anim_{}", d.tags.len() + 1), first: 0, last: 0, fps: 10.0 });
         }
     });
     // Who uses this sheet.
@@ -1630,7 +1780,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         ui.text_edit_singleline(&mut c.name);
         ui.end_row();
         ui.label("Tile size");
-        ui.weak(format!("{} px (fixed)", rust2d_engine::project::TILE_SIZE));
+        ui.weak(format!("{} px (fixed)", rustpg2d_engine::project::TILE_SIZE));
         ui.end_row();
         ui.label("Start map");
         widgets::suggest(ui, "start_map", &mut c.start_map, &ed.refs.maps, 140.0);
@@ -1655,6 +1805,10 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
         ui.label("Player character");
         let ids: Vec<String> = ed.project.db.characters.iter().map(|d| d.id.clone()).collect();
         widgets::suggest(ui, "player", &mut c.player, &ids, 140.0);
+        ui.end_row();
+        ui.label("Dialog portraits");
+        ui.checkbox(&mut c.dialog_portraits, "show the speaker's portrait in dialogs")
+            .on_hover_text("Found from the speaker's name: the player (\"{player}\" or the player's name), the trigger's owner ({self}), a character on the map or a character definition with that name. Narration and signs (no matching character) have none.");
         ui.end_row();
     });
     ui.weak("Tile size changes need a restart of the editor.");
@@ -1733,12 +1887,12 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("Player character's sex");
         egui::ComboBox::from_id_salt("creation_sex").selected_text(cc.sex.label()).show_ui(ui, |ui| {
-            for v in rust2d_engine::project::SexChoice::ALL {
+            for v in rustpg2d_engine::project::SexChoice::ALL {
                 ui.selectable_value(&mut cc.sex, v, v.label());
             }
         });
         ui.weak(match cc.sex {
-            rust2d_engine::project::SexChoice::Both => "chosen in the character creator (male when it is off)",
+            rustpg2d_engine::project::SexChoice::Both => "chosen in the character creator (male when it is off)",
             _ => "fixed by the game; the creator uses this sex's body",
         });
     });
@@ -1801,7 +1955,7 @@ fn project_form(ed: &mut Editor, ui: &mut egui::Ui) {
             let picked = crate::builder::cards(ui, egui::vec2(52.0, 72.0), &entries, None, &|ui, id, r| {
                 let mut a = shown.clone();
                 apply(&mut a, id);
-                widgets::paint_character(ui, &ed.tex, &ed.assets, &rust2d_engine::render::character::layers(&ed.project.db, &a, &player.1, rust2d_engine::entity::Facing::Down, 0, false), r)
+                widgets::paint_character(ui, &ed.tex, &ed.assets, &rustpg2d_engine::render::character::layers(&ed.project.db, &a, &player.1, rustpg2d_engine::entity::Facing::Down, 0, false), r)
             });
             if let Some(p) = picked {
                 match list.iter().position(|x| *x == p) {
@@ -1919,7 +2073,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     let issues: Vec<(std::path::PathBuf, usize, String, String)> = texts
         .iter()
         .flat_map(|(f, text)| {
-            rust2d_engine::script_refs::check_script(text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
+            rustpg2d_engine::script_refs::check_script(text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
                 .into_iter()
                 .map(move |i| (f.clone(), i.line, i.message, text.clone()))
         })
@@ -2003,7 +2157,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     for (_, text) in &texts {
         functions.extend(crate::script_editor::defined_functions(text));
         signatures.extend(crate::script_editor::defined_signatures(text));
-        for a in rust2d_engine::script_refs::string_args(text) {
+        for a in rustpg2d_engine::script_refs::string_args(text) {
             match (a.func.as_str(), a.arg) {
                 ("flag" | "set_flag", 0) => flags.push(a.value),
                 ("get_var" | "set_var" | "add_var" | "queue_set_var", 0) | ("choice", 2) => vars.push(a.value),
@@ -2017,7 +2171,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
     }
     let mut targets = vec!["self".to_string(), "player".to_string()];
     targets.extend(ed.refs.entity_names.iter().cloned());
-    let problem_spans: Vec<(usize, usize)> = rust2d_engine::script_refs::check_script(&ed.db.script_text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
+    let problem_spans: Vec<(usize, usize)> = rustpg2d_engine::script_refs::check_script(&ed.db.script_text, &ed.project.db, &ed.refs.maps, &ed.refs.spawns)
         .into_iter()
         .map(|i| i.span)
         .collect();
@@ -2099,7 +2253,7 @@ fn scripts_ui(ed: &mut Editor, ui: &mut egui::Ui) {
         ed.db.script_dirty = true;
         ed.save_script_if_dirty();
         if !ed.db.script_dirty {
-            let mut host = rust2d_engine::script::ScriptHost::new();
+            let mut host = rustpg2d_engine::script::ScriptHost::new();
             host.load_dir(&dir);
             ed.refresh_refs();
             let unknown = if issues.is_empty() { String::new() } else { format!("; {} unknown id(s), see Problems", issues.len()) };
@@ -2186,7 +2340,7 @@ impl Editor {
         }
         let id = if tab == Tab::Items { "icons" } else { "prop_art" };
         if self.project.db.sheet(id).is_none() {
-            let ts = rust2d_engine::project::TILE_SIZE;
+            let ts = rustpg2d_engine::project::TILE_SIZE;
             let rel = format!("sprites/{id}.png");
             let path = self.project.root.join(&rel);
             std::fs::create_dir_all(path.parent().unwrap())?;
@@ -2237,8 +2391,8 @@ impl Editor {
     }
 }
 
-fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &mut Cx) {
-    use rust2d_engine::skills::SkillEffect;
+fn skill_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::skills::SkillDef, cx: &mut Cx) {
+    use rustpg2d_engine::skills::SkillEffect;
     ui.heading("Skill");
     rename_row(ui, RefKind::Skill, &d.id, cx.rename);
     name_row(ui, &mut d.name);
@@ -2296,8 +2450,81 @@ fn skill_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SkillDef, cx: &m
     widgets::sprite_field(ui, "skill_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
 }
 
-fn spell_form(ui: &mut egui::Ui, d: &mut rust2d_engine::skills::SpellDef, cx: &mut Cx) {
-    use rust2d_engine::skills::SpellEffect;
+fn achievement_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::achievements::AchievementDef, cx: &mut Cx) {
+    ui.heading("Achievement");
+    egui::Grid::new("achievement").num_columns(2).show(ui, |ui| {
+        ui.label("Id");
+        ui.add(egui::TextEdit::singleline(&mut d.id).desired_width(200.0))
+            .on_hover_text("Used by the 'Unlock achievement' action and scripts (unlock_achievement(\"id\")). Changing it does not update them, and players' unlocks are kept by id.");
+        ui.end_row();
+        ui.label("Name");
+        ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(320.0));
+        ui.end_row();
+        ui.label("Hidden");
+        ui.checkbox(&mut d.hidden, "a secret: shown as \"???\" until unlocked");
+        ui.end_row();
+    });
+    ui.label("Description (shown in the Achievements page of the menus)");
+    text_box(ui, &mut d.description, 2, "");
+    ui.separator();
+    ui.heading("Unlocked when");
+    ui.weak("All of these hold (checked twice a second while playing): quests, flags, variables, defeated characters (the bestiary counts), level, items, a script condition... Without conditions only the 'Unlock achievement' action or unlock_achievement(id) unlocks it.");
+    widgets::conditions_ui(ui, &format!("ach_{}", d.id), &mut d.conditions, cx.refs);
+    ui.separator();
+    ui.heading("Icon");
+    widgets::sprite_field(ui, "ach_icon", &mut d.icon, cx.tex, cx.assets, cx.db, false);
+    ui.weak("Unlocks belong to the player, not to a save game: they are kept in achievements.ron next to the game's settings (play-tests use the same file; Reset achievements in the game's menu clears it).");
+}
+
+fn recipe_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::crafting::RecipeDef, cx: &mut Cx) {
+    ui.heading("Recipe");
+    rename_row(ui, RefKind::Recipe, &d.id, cx.rename);
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::hover());
+        if let Some(it) = cx.db.item(&d.result) {
+            widgets::paint_sprite(ui, cx.tex, cx.assets, &it.icon, rect);
+        }
+        ui.label("Makes");
+        ui.add(egui::DragValue::new(&mut d.count).range(1..=999));
+        ui.label("x");
+        widgets::suggest(ui, "recipe_result", &mut d.result, &cx.refs.items, 140.0);
+    });
+    if !d.result.is_empty() && cx.db.item(&d.result).is_none() {
+        ui.colored_label(egui::Color32::YELLOW, format!("There is no item '{}'.", d.result));
+    }
+    ui.separator();
+    ui.heading("Ingredients");
+    ui.weak("Used up when the recipe is made (from the inventory, then what the player wears).");
+    widgets::carried_ui(ui, "recipe_ing", &mut d.ingredients, &cx.refs.items);
+    ui.separator();
+    egui::Grid::new("recipe_where").num_columns(2).show(ui, |ui| {
+        ui.label("Station");
+        ui.horizontal(|ui| {
+            widgets::suggest(ui, "recipe_station", &mut d.station, &cx.refs.stations, 120.0);
+            if d.station.is_empty() {
+                ui.weak("(none)");
+            }
+        })
+        .response
+        .on_hover_text("Where it is made: the 'Open crafting' action / open_crafting(station) shows the recipes of a station, e.g. on a workbench prop's Interact trigger");
+        ui.end_row();
+        ui.label("Requires skill");
+        ui.horizontal(|ui| {
+            widgets::suggest(ui, "recipe_skill", &mut d.skill, &cx.refs.skills, 120.0);
+            if !d.skill.is_empty() {
+                ui.label("at level");
+                ui.add(egui::DragValue::new(&mut d.level).range(0..=99));
+            } else {
+                ui.weak("(none)");
+            }
+        });
+        ui.end_row();
+    });
+    ui.weak("Players make it in the crafting window: give a prop (a workbench, an anvil, an alchemy table) an Interact trigger with the 'Open crafting' action for this station. Scripts: open_crafting(station[, title]), can_craft(recipe).");
+}
+
+fn spell_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::skills::SpellDef, cx: &mut Cx) {
+    use rustpg2d_engine::skills::SpellEffect;
     ui.heading("Spell");
     rename_row(ui, RefKind::Spell, &d.id, cx.rename);
     name_row(ui, &mut d.name);

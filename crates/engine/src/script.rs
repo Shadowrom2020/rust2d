@@ -22,6 +22,10 @@ struct Ctx {
     owner: Option<u32>,
     /// Characters on the current map that can be hurt: (uid, name, HP).
     characters: Vec<(u32, String, i32)>,
+    /// The project's crafting recipes (`can_craft`).
+    recipes: Vec<crate::crafting::RecipeDef>,
+    /// Ids of the player's unlocked achievements (`achievement_unlocked`).
+    achievements: std::collections::BTreeSet<String>,
 }
 
 /// What scripts can read about the player besides the world state (the game updates it every
@@ -33,6 +37,12 @@ pub struct PlayerInfo {
     pub y: f32,
     pub max_hp: i32,
     pub facing: Facing,
+    /// The current map's weather (`weather()`).
+    pub weather: crate::map::Weather,
+    /// Using furniture: "sit", "lie", "stand"; "" on their feet.
+    pub pose: String,
+    /// The night is passing (the Sleep action).
+    pub sleeping: bool,
 }
 
 pub struct ScriptHost {
@@ -63,6 +73,16 @@ impl ScriptHost {
         });
         register_api(&mut engine, &ctx);
         ScriptHost { engine, ast: AST::empty(), ctx, errors: Vec::new(), printed }
+    }
+
+    /// The player's unlocked achievements, for `achievement_unlocked(id)`.
+    pub fn set_achievements(&mut self, ids: std::collections::BTreeSet<String>) {
+        self.ctx.borrow_mut().achievements = ids;
+    }
+
+    /// The project's crafting recipes, for `can_craft(id)`.
+    pub fn set_recipes(&mut self, recipes: Vec<crate::crafting::RecipeDef>) {
+        self.ctx.borrow_mut().recipes = recipes;
     }
 
     pub fn set_player(&mut self, info: PlayerInfo) {
@@ -297,6 +317,13 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
     // Screen shake (scenes: earthquakes, a boss landing).
     engine.register_fn("shake", with!(ctx, |c, s: Dynamic| c.actions.push(Action::Shake { seconds: num(&s), strength: 1.0 })));
     engine.register_fn("shake", with!(ctx, |c, s: Dynamic, st: Dynamic| c.actions.push(Action::Shake { seconds: num(&s), strength: num(&st) })));
+    // Weather: set_weather("rain" | "snow" | "fog" | "none" | "default", [intensity]) on the
+    // current map, set_map_weather(map, kind, intensity) on another one; weather() reads it.
+    engine.register_fn("set_weather", with!(ctx, |c, kind: &str| c.actions.push(weather_action("", kind, 0.6))));
+    engine.register_fn("set_weather", with!(ctx, |c, kind: &str, i: Dynamic| c.actions.push(weather_action("", kind, num(&i)))));
+    engine.register_fn("set_map_weather", with!(ctx, |c, map: &str, kind: &str, i: Dynamic| c.actions.push(weather_action(map, kind, num(&i)))));
+    engine.register_fn("weather", with!(ctx, |c| c.player.weather.kind.id().to_string()));
+    engine.register_fn("weather_intensity", with!(ctx, |c| c.player.weather.intensity as f64));
     // Status effects.
     engine.register_fn("apply_effect", with!(ctx, |c, t: &str, kind: &str, s: Dynamic, secs: Dynamic| {
         if let Some(k) = effect_kind(kind) {
@@ -412,6 +439,23 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         c.actions.push(Action::Patrol { target: t.into(), active: true, points })
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
+    // (Typed, so they win over Rhai's own `sleep(seconds)`, which would pause the script.)
+    engine.register_fn("sleep", with!(ctx, |c, hours: i64| c.actions.push(Action::Sleep { hours: hours as f32 })));
+    engine.register_fn("sleep", with!(ctx, |c, hours: f64| c.actions.push(Action::Sleep { hours: hours as f32 })));
+    engine.register_fn("is_sitting", with!(ctx, |c| c.player.pose == "sit"));
+    engine.register_fn("is_sleeping", with!(ctx, |c| c.player.sleeping || c.player.pose == "lie"));
+    engine.register_fn("lockpick", with!(ctx, |c, difficulty: i64, var: &str| c.actions.push(Action::Lockpick { difficulty: difficulty.max(0) as u32, var: var.into() })));
+    engine.register_fn("unlock_achievement", with!(ctx, |c, id: &str| c.actions.push(Action::UnlockAchievement { id: id.into() })));
+    engine.register_fn("achievement_unlocked", with!(ctx, |c, id: &str| c.achievements.contains(id)));
+    engine.register_fn("can_craft", with!(ctx, |c, id: &str| c.recipes.iter().find(|r| r.id == id).is_some_and(|r| r.missing(&c.world).is_none())));
+    engine.register_fn("open_crafting", with!(ctx, |c, station: &str| c.actions.push(Action::OpenCrafting { station: station.into(), title: String::new() })));
+    engine.register_fn("open_crafting", with!(ctx, |c, station: &str, title: &str| c.actions.push(Action::OpenCrafting { station: station.into(), title: title.into() })));
+    engine.register_fn("follow", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: true })));
+    engine.register_fn("stop_following", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: false })));
+    engine.register_fn("is_companion", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name)));
+    engine.register_fn("companion_count", with!(ctx, |c| c.world.companions.len() as i64));
+    engine.register_fn("follow_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: true })));
+    engine.register_fn("stop_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: false })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
     // The HUD (status frame, clock, quick bar, buttons), e.g. for cut-scenes.
     engine.register_fn("hide_ui", with!(ctx, |c| c.actions.push(Action::SetUiVisible { visible: false })));
@@ -516,6 +560,24 @@ fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
     s
 }
 
+/// *Set weather* from a script: "default" goes back to the map's own weather; an unknown kind
+/// is logged and changes nothing (a `SetWeather` without weather = default would be wrong).
+fn weather_action(map: &str, kind: &str, intensity: f32) -> Action {
+    use crate::map::{Weather, WeatherKind};
+    let weather = if kind.trim().eq_ignore_ascii_case("default") {
+        None
+    } else {
+        match WeatherKind::from_id(kind) {
+            Some(k) => Some(Weather::new(k, intensity)),
+            None => {
+                eprintln!("[script] set_weather: unknown weather '{kind}' (none, rain, snow, fog or default)");
+                return Action::Wait { seconds: 0.0 };
+            }
+        }
+    };
+    Action::SetWeather { map: map.into(), weather }
+}
+
 /// Light options: `color: [r, g, b]` (0..255), `flicker: true`.
 fn light_opts(o: &Map, default: [u8; 3]) -> ([u8; 3], bool) {
     let color = o
@@ -547,6 +609,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn weather_functions() {
+        use crate::map::{Weather, WeatherKind};
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn w() { set_weather("rain", 0.8); set_weather("default"); set_map_weather("forest", "fog", 2); set_weather("hail"); weather() }"#).unwrap();
+        host.set_player(PlayerInfo { weather: Weather::new(WeatherKind::Snow, 0.4), ..Default::default() });
+        let mut world = WorldState::default();
+        let v = host.call_inner(&mut world, "w", vec![], None).unwrap();
+        assert_eq!(v.into_string().unwrap(), "snow");
+        let a = std::mem::take(&mut host.ctx.borrow_mut().actions);
+        assert_eq!(
+            a,
+            vec![
+                Action::SetWeather { map: String::new(), weather: Some(Weather::new(WeatherKind::Rain, 0.8)) },
+                Action::SetWeather { map: String::new(), weather: None },
+                Action::SetWeather { map: "forest".into(), weather: Some(Weather::new(WeatherKind::Fog, 1.0)) },
+                Action::Wait { seconds: 0.0 },
+            ]
+        );
+    }
+
+    #[test]
     fn effect_tag_option() {
         let mut host = ScriptHost::new();
         host.load_source(r#"fn boom() { effect("boom", 2, 3, #{ tag: "explode", scale: 2 }); }"#).unwrap();
@@ -558,7 +641,7 @@ mod tests {
 
     #[test]
     fn hot_reload_keeps_working_scripts_on_errors() {
-        let dir = std::env::temp_dir().join(format!("rust2d_reload_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rustpg2d_reload_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.rhai"), "fn greet() { set_var(\"n\", 1); }").unwrap();
@@ -698,7 +781,7 @@ mod tests {
             ]
         );
         assert_eq!(host.call(&mut w, "pause", None), vec![Action::Wait { seconds: 1.0 }, Action::Wait { seconds: 0.5 }]);
-        host.set_player(PlayerInfo { x: 4.5, y: 6.0, max_hp: 12, facing: Facing::Up });
+        host.set_player(PlayerInfo { x: 4.5, y: 6.0, max_hp: 12, facing: Facing::Up, ..Default::default() });
         assert_eq!(
             host.call(&mut w, "glow", None),
             vec![
@@ -755,6 +838,57 @@ mod tests {
                 Action::Patrol { target: "self".into(), active: true, points: vec![] },
             ]
         );
+        host.load_source(r#"fn day() { stop_schedule("mira"); follow_schedule("mira"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "day", None);
+        assert_eq!(actions, vec![Action::Schedule { target: "mira".into(), active: false }, Action::Schedule { target: "mira".into(), active: true }]);
+    }
+
+    #[test]
+    fn companion_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn party() { if !is_companion("guard") && companion_count() == 0 { follow("guard"); } stop_following("self"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "party", None);
+        assert_eq!(actions, vec![Action::Companion { target: "guard".into(), join: true }, Action::Companion { target: "self".into(), join: false }]);
+        let mut w = WorldState::default();
+        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
+        assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
+    }
+
+    #[test]
+    fn sleep_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn rest() { if !is_sitting() && !is_sleeping() { sleep(8); } sleep(2.5); }"#).unwrap();
+        assert_eq!(host.call(&mut WorldState::default(), "rest", None), vec![Action::Sleep { hours: 8.0 }, Action::Sleep { hours: 2.5 }]);
+        host.set_player(PlayerInfo { pose: "sit".into(), ..Default::default() });
+        assert_eq!(host.call(&mut WorldState::default(), "rest", None), vec![Action::Sleep { hours: 2.5 }]);
+    }
+
+    #[test]
+    fn lockpick_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn puzzle() { lockpick(2, "vault"); then_call("after"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "puzzle", None);
+        assert_eq!(actions[0], Action::Lockpick { difficulty: 2, var: "vault".into() });
+    }
+
+    #[test]
+    fn achievement_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn hoard() { if !achievement_unlocked("hoard") { unlock_achievement("hoard"); } }"#).unwrap();
+        assert_eq!(host.call(&mut WorldState::default(), "hoard", None), vec![Action::UnlockAchievement { id: "hoard".into() }]);
+        host.set_achievements(["hoard".to_string()].into());
+        assert!(host.call(&mut WorldState::default(), "hoard", None).is_empty());
+    }
+
+    #[test]
+    fn crafting_api() {
+        let mut host = ScriptHost::new();
+        host.set_recipes(vec![crate::crafting::RecipeDef::new("brew", "potion", 1, vec![crate::inventory::ItemStack::new("herb", 2)], "alchemy")]);
+        host.load_source(r#"fn table() { if can_craft("brew") { open_crafting("alchemy", "Alchemy table"); } else { open_crafting("alchemy"); } }"#).unwrap();
+        let mut w = WorldState::default();
+        assert_eq!(host.call(&mut w, "table", None), vec![Action::OpenCrafting { station: "alchemy".into(), title: String::new() }]);
+        w.give_item("herb", 2);
+        assert_eq!(host.call(&mut w, "table", None), vec![Action::OpenCrafting { station: "alchemy".into(), title: "Alchemy table".into() }]);
     }
 
     #[test]

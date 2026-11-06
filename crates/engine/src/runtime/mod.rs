@@ -1,12 +1,15 @@
 //! The game runtime: loads a project and plays it.
 
+mod achievements;
 mod ai;
 mod charwin;
 mod combat;
+mod companions;
 mod cutscene;
 mod dev;
 mod effects;
 mod equipment;
+mod furniture;
 mod fx;
 mod inventory_ui;
 mod journal;
@@ -15,16 +18,21 @@ mod skills;
 mod lights;
 mod creator;
 mod patrol;
+mod portraits;
+mod schedule;
 mod progression;
 mod paperdoll;
 mod npc_items;
 mod shop_ui;
+mod crafting_ui;
 mod locks;
 mod menu;
+mod minigame;
 pub mod input;
 mod mouse;
 mod spawner;
 mod thumbs;
+mod weather;
 mod ui;
 mod worldmap;
 
@@ -143,6 +151,12 @@ struct RtEntity {
     unlocked: bool,
     /// Patrol route and progress (characters with a route).
     patrol: Option<patrol::Patrol>,
+    /// Daily routine (placed characters with a schedule).
+    schedule: Option<schedule::Schedule>,
+    /// Gone indoors at a schedule stop: inactive until the next stop (saved as active).
+    away: bool,
+    /// It follows the player (where it is placed, its triggers, its way).
+    companion: Option<Box<companions::Link>>,
     /// What the character drops when defeated.
     loot: Vec<crate::defs::LootEntry>,
     /// Light of this placed entity instead of its definition's.
@@ -213,6 +227,17 @@ pub struct Game {
     mouse: mouse::MouseState,
     inv: inventory_ui::InvUi,
     shop: shop_ui::ShopUi,
+    crafting: crafting_ui::CraftingUi,
+    /// The player's achievements, their checks and toasts.
+    ach: achievements::Achievements,
+    /// Lockpicking / fishing in progress (pauses the world).
+    minigame: Option<minigame::Minigame>,
+    /// Whose portrait the open dialog shows.
+    portrait: Option<portraits::Speaker>,
+    /// The furniture the player uses, the sleep sequence, and the bed a Sleep action lies in.
+    seat: Option<furniture::Seat>,
+    sleeping: Option<furniture::Sleeping>,
+    bed: Option<u32>,
     journal: journal::Journal,
     worldmap: worldmap::WorldMap,
     creator: Option<creator::Creator>,
@@ -222,6 +247,8 @@ pub struct Game {
     runner: ActionRunner,
     /// Darkness and light renderer (created on first use).
     light_pass: Option<render::lighting::LightPass>,
+    /// Rain / snow / fog particles.
+    weather_fx: render::weather::WeatherFx,
     skills: skills::Skills,
     /// Set while a saved game is being loaded (see `enter_map`).
     resuming: bool,
@@ -250,7 +277,7 @@ impl Game {
     pub fn new(project: Project, start: StartOptions) -> Result<Game> {
         if project.config.tile_size != crate::project::TILE_SIZE {
             anyhow::bail!(
-                "this project uses {}px tiles; open it once in the rust2d editor to convert it to {}px tiles",
+                "this project uses {}px tiles; open it once in the R(ust)PG2D editor to convert it to {}px tiles",
                 project.config.tile_size,
                 crate::project::TILE_SIZE
             );
@@ -278,6 +305,7 @@ impl Game {
         };
         let mut game = Game {
             light_pass: None,
+            weather_fx: Default::default(),
             skills: Default::default(),
             resuming: false,
             autosave_pending: false,
@@ -304,6 +332,13 @@ impl Game {
             mouse: Default::default(),
             inv: Default::default(),
             shop: Default::default(),
+            crafting: Default::default(),
+            ach: Default::default(),
+            minigame: None,
+            portrait: None,
+            seat: None,
+            sleeping: None,
+            bed: None,
             journal: Default::default(),
             worldmap: Default::default(),
             creator: None,
@@ -328,6 +363,8 @@ impl Game {
             (None, None) if start.map.is_some() => Arrival::Spawn(String::new()),
             _ => Arrival::Spawn(game.project.config.start_spawn.clone()),
         };
+        game.scripts.set_recipes(game.project.db.recipes.clone());
+        game.load_achievements();
         game.settings = crate::settings::Settings::load(&game.project.config.name);
         game.apply_settings();
         game.world.player_hp = Some(game.combat.max_hp);
@@ -422,6 +459,9 @@ impl Game {
             unlocked: false,
             state: 0,
             patrol: None,
+            schedule: None,
+            away: false,
+            companion: None,
             loot: match (kind, self.project.db.character(def)) {
                 (EntityKind::Character, Some(d)) => d.loot.clone(),
                 _ => Vec::new(),
@@ -456,6 +496,7 @@ impl Game {
 
     fn build_entities(&self, map: &Map) -> Vec<RtEntity> {
         let mut out = self.build_map_entities(map);
+        out.extend(self.build_companions());
         // Items the player dropped here earlier.
         for p in self.world.dropped.get(&map.name).into_iter().flatten() {
             let mut rt = self.new_rt_entity(EntityKind::Item, &p.item, p.uid, "", vec2(p.x, p.y), Facing::Down, true, 0);
@@ -466,73 +507,81 @@ impl Game {
     }
 
     fn build_map_entities(&self, map: &Map) -> Vec<RtEntity> {
-        map.entities
-            .iter()
-            .map(|e| {
-                let st = self.world.entity_state(&map.name, e.uid);
-                let pos = st.map_or(vec2(e.x, e.y), |s| vec2(s.x, s.y));
-                let count = st.and_then(|s| s.count).unwrap_or(e.count);
-                let mut rt = self.new_rt_entity(
-                    e.kind,
-                    &e.def,
-                    e.uid,
-                    &e.name,
-                    pos,
-                    st.map_or(e.facing, |s| s.facing),
-                    st.map_or(e.active, |s| s.active),
-                    st.map_or(e.frame, |s| s.frame),
-                );
-                rt.count = count;
-                rt.light = e.light.clone();
-                if e.kind == EntityKind::Character {
-                    if let Some(loot) = &e.loot {
-                        rt.loot = loot.clone();
-                    }
-                    rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
-                    // Look and items: the placed NPC's own, then what changed in this game.
-                    if let Some(a) = &e.appearance {
-                        rt.appearance = a.clone();
-                    }
-                    if let Some(eq) = &e.equipment {
-                        rt.equipment = eq.clone();
-                    }
-                    if let Some(inv) = &e.inventory {
-                        rt.inventory = inv.clone();
-                    }
-                    if let Some(saved) = self.world.npc_items.get(&map.name).and_then(|m| m.get(&e.uid)) {
-                        rt.equipment = saved.equipment.clone();
-                        rt.inventory = saved.inventory.clone();
-                    }
-                    npc_items::apply_gear(&self.project.db, &mut rt);
-                    if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
-                        let p = rt.patrol.get_or_insert_with(Default::default);
-                        p.restore(ps);
-                    }
+        // Recruited companions are built apart (they follow the player).
+        map.entities.iter().filter(|e| !self.world.is_companion(&map.name, e.uid)).map(|e| self.build_placed(&map.name, e)).collect()
+    }
+
+    /// The runtime entity of placed entity `e` of map `map`, with what changed in this game.
+    fn build_placed(&self, map: &str, e: &crate::entity::EntityInstance) -> RtEntity {
+        let st = self.world.entity_state(map, e.uid);
+        let pos = st.map_or(vec2(e.x, e.y), |s| vec2(s.x, s.y));
+        let count = st.and_then(|s| s.count).unwrap_or(e.count);
+        let mut rt = self.new_rt_entity(
+            e.kind,
+            &e.def,
+            e.uid,
+            &e.name,
+            pos,
+            st.map_or(e.facing, |s| s.facing),
+            st.map_or(e.active, |s| s.active),
+            st.map_or(e.frame, |s| s.frame),
+        );
+        rt.count = count;
+        rt.light = e.light.clone();
+        if e.kind == EntityKind::Character {
+            if let Some(loot) = &e.loot {
+                rt.loot = loot.clone();
+            }
+            rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
+            // Look and items: the placed NPC's own, then what changed in this game.
+            if let Some(a) = &e.appearance {
+                rt.appearance = a.clone();
+            }
+            if let Some(eq) = &e.equipment {
+                rt.equipment = eq.clone();
+            }
+            if let Some(inv) = &e.inventory {
+                rt.inventory = inv.clone();
+            }
+            if let Some(saved) = self.world.npc_items.get(map).and_then(|m| m.get(&e.uid)) {
+                rt.equipment = saved.equipment.clone();
+                rt.inventory = saved.inventory.clone();
+            }
+            npc_items::apply_gear(&self.project.db, &mut rt);
+            if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
+                let p = rt.patrol.get_or_insert_with(Default::default);
+                p.restore(ps);
+            }
+            if !e.schedule.is_empty() {
+                let mut s = schedule::Schedule::new(e.schedule.clone());
+                s.on = !st.is_some_and(|s| s.schedule_off);
+                rt.schedule = Some(s);
+            }
+        }
+        rt.unlocked = st.is_some_and(|s| s.unlocked);
+        if let Some(d) = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten() {
+            // Saved state; saves from before named states store a frame offset.
+            let name = match st {
+                Some(s) => match &s.state {
+                    Some(n) => Some(n.clone()),
+                    None => d.state_of_offset(s.frame),
+                },
+                None => Some(e.state.clone()),
+            };
+            if let Some(idx) = name.and_then(|n| d.state_index(&n)) {
+                rt.state = idx;
+                if st.is_none_or(|s| s.state.is_some() || d.state_of_offset(s.frame).is_some()) {
+                    rt.frame = 0;
                 }
-                rt.unlocked = st.is_some_and(|s| s.unlocked);
-                if let Some(d) = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten() {
-                    // Saved state; saves from before named states store a frame offset.
-                    let name = match st {
-                        Some(s) => match &s.state {
-                            Some(n) => Some(n.clone()),
-                            None => d.state_of_offset(s.frame),
-                        },
-                        None => Some(e.state.clone()),
-                    };
-                    if let Some(idx) = name.and_then(|n| d.state_index(&n)) {
-                        rt.state = idx;
-                        if st.is_none_or(|s| s.state.is_some() || d.state_of_offset(s.frame).is_some()) {
-                            rt.frame = 0;
-                        }
-                        rt.solid = d.state_look(idx).1;
-                    }
-                }
-                rt
-            })
-            .collect()
+                rt.solid = d.state_look(idx).1;
+            }
+        }
+        rt
     }
 
     fn enter_map(&mut self, map: Map, arrival: Arrival) {
+        // Off any furniture (it belongs to the old map).
+        self.seat = None;
         // Patrolling characters continue where they were when the player comes back.
         self.persist_patrols();
         let ts = self.ts();
@@ -541,6 +590,10 @@ impl Game {
         let tile_lights = render::lighting::tile_lights(&map, &self.project.db, ts);
         let old = std::mem::replace(&mut self.loaded, Loaded { map, solid, entities, tile_lights });
         self.restore_unlocked();
+        // Scheduled characters are where their day has taken them.
+        for i in 0..self.loaded.entities.len() {
+            self.place_on_schedule(i);
+        }
         if !old.map.name.is_empty() && old.map.name != self.loaded.map.name {
             self.cache.push_front(old.map);
             self.cache.truncate(MAP_CACHE);
@@ -571,6 +624,7 @@ impl Game {
         };
         // Never inside something solid (a gate post at a map edge, a prop placed on a spawn).
         self.player.pos = self.free_spot(pos);
+        self.place_companions();
         self.player.move_target = None;
         self.world.current_map = self.loaded.map.name.clone();
         // Zones we arrive in don't fire Enter (avoids bouncing back through portals).
@@ -637,6 +691,25 @@ impl Game {
             return true;
         }
         self.loaded.solid[(ty as u32 * m.width + tx as u32) as usize]
+    }
+
+    /// Tiles taken by active solid entities that pass `keep` (any real overlap of the hitbox
+    /// blocks a tile: small hitboxes sit at the bottom of their tile). For path finding.
+    fn solid_entity_tiles(&self, keep: impl Fn(&RtEntity) -> bool) -> std::collections::HashSet<crate::path::TilePos> {
+        let ts = self.ts();
+        let mut occupied = std::collections::HashSet::new();
+        for e in self.loaded.entities.iter().filter(|e| e.active && e.solid && keep(e)) {
+            let r = e.body.rect();
+            for ty in (r.y / ts).floor() as i32..=((r.y + r.h) / ts).floor() as i32 {
+                for tx in (r.x / ts).floor() as i32..=((r.x + r.w) / ts).floor() as i32 {
+                    let inner = Rect::new(tx as f32 * ts + 2.0, ty as f32 * ts + 2.0, ts - 4.0, ts - 4.0);
+                    if r.overlaps(&inner) {
+                        occupied.insert((tx, ty));
+                    }
+                }
+            }
+        }
+        occupied
     }
 
     fn rect_blocked(&self, r: Rect, ignore: Option<u32>, check_player: bool) -> bool {
@@ -715,7 +788,8 @@ impl Game {
     fn entity_index(&self, target: &str, owner: Option<u32>) -> Option<usize> {
         let uid = match target {
             "" | "self" => owner?,
-            name => return self.loaded.entities.iter().position(|e| e.name == name),
+            // Active ones first (a companion that left this map stays behind, inactive).
+            name => return self.loaded.entities.iter().position(|e| e.name == name && e.active).or_else(|| self.loaded.entities.iter().position(|e| e.name == name)),
         };
         self.loaded.entities.iter().position(|e| e.uid == uid)
     }
@@ -739,6 +813,10 @@ impl Game {
             }
             if let Some(e) = map.entities.iter().find(|e| e.uid == uid) {
                 add(format!("{}/e:{}", map.name, e.uid), &e.triggers, Some(uid));
+            }
+            // A companion's own triggers come along from where it is placed.
+            if let Some(l) = rt.iter().find(|e| e.uid == uid).and_then(|e| e.companion.as_ref()) {
+                add(format!("{}/e:{}", l.map, l.uid), &l.triggers, Some(uid));
             }
         };
         match source {
@@ -822,8 +900,8 @@ impl Game {
 
     fn persist(&mut self, idx: usize) {
         let e = &self.loaded.entities[idx];
-        if e.spawned_by.is_some() {
-            return; // spawner characters are not saved individually
+        if e.spawned_by.is_some() || e.companion.is_some() {
+            return; // spawner characters are not saved individually, companions in `companions`
         }
         if e.uid >= crate::state::DROPPED_UID_BASE {
             // Dropped items live in the world state's list of piles.
@@ -833,7 +911,8 @@ impl Game {
         }
         let state = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten().map(|d| d.state_name(e.state).to_string());
         let st = EntityState {
-            active: e.active,
+            // Indoors at a schedule stop is not inactive (the schedule brings it out again).
+            active: e.active || e.away,
             frame: e.frame,
             x: e.body.pos.x,
             y: e.body.pos.y,
@@ -842,6 +921,7 @@ impl Game {
             unlocked: e.unlocked,
             state,
             patrol: e.patrol.as_ref().map(|p| p.state()),
+            schedule_off: e.schedule.as_ref().is_some_and(|s| !s.on),
         };
         let map = self.loaded.map.name.clone();
         let uid = e.uid;
@@ -881,6 +961,14 @@ impl Game {
         if self.update_creator(dt) {
             return;
         }
+        // Lockpicking and fishing pause the world (Esc gives up instead of opening the menu).
+        if self.update_minigame(dt) {
+            return;
+        }
+        // Sleeping: the night passes behind a dark screen.
+        if self.update_sleep(dt) {
+            return;
+        }
         if self.update_menu(can_open) {
             return;
         }
@@ -889,6 +977,7 @@ impl Game {
             return;
         }
         self.world.play_time += dt as f64;
+        self.update_achievements(dt);
         if !self.on_title() && self.project.config.day_minutes > 0.0 {
             self.world.hour = (self.world.hour + dt * 24.0 / (self.project.config.day_minutes * 60.0)).rem_euclid(24.0);
         }
@@ -941,6 +1030,9 @@ impl Game {
         let input = self.ui.update(dt, &mut self.world);
         let allow_windows = allow_inventory && !self.ui.dialog_open() && self.game_over.is_none();
         let (shop_key, shop_mouse) = self.update_shop_ui(allow_windows);
+        // The crafting window works like the trade window (they never are open together).
+        let (craft_key, craft_mouse) = self.update_crafting_ui(allow_windows && !self.shop.is_open());
+        let (shop_key, shop_mouse) = (shop_key || craft_key, shop_mouse || craft_mouse);
         // The character window's tabs (C / I, K, L, Tab, tab clicks) before the tabs' contents.
         let (win_key, win_mouse) = self.update_window_tabs(allow_windows && !input.consumed, input.consumed || shop_key);
         let (shop_key, shop_mouse) = (shop_key || win_key, shop_mouse || win_mouse);
@@ -990,6 +1082,7 @@ impl Game {
         // Effects and timed lights also play on during cut-scenes (they are part of the show).
         if !frozen || self.cutscene_active() {
             self.update_fx(dt);
+            self.update_weather(dt);
         }
         if let Some(m) = &mut self.click_marker {
             m.1 += dt;
@@ -1001,6 +1094,16 @@ impl Game {
 
     fn update_player(&mut self, dt: f32, frozen: bool, key_consumed: bool) {
         let ts = self.ts();
+        // On furniture: stays there (frozen: dialogs) until a key stands the player up.
+        if let Some(s) = &self.seat {
+            if frozen {
+                (self.player.pos, self.player.moving) = (s.pos, false);
+                return;
+            }
+            if self.update_seat(dt, key_consumed) {
+                return;
+            }
+        }
         if let Some(target) = self.player.move_target {
             let (pos, done) = step_towards(self.player.pos, target, self.player.speed * dt);
             self.player.facing = Facing::from_vec(target.x - pos.x, target.y - pos.y).unwrap_or(self.player.facing);
@@ -1157,6 +1260,7 @@ impl Game {
         for uid in self.zones_inside.clone() {
             self.fire(GameEvent::Interact, Source::Zone(uid));
         }
+        self.try_fish();
     }
 
     fn interact_entity(&mut self, i: usize) {
@@ -1206,7 +1310,10 @@ impl Game {
             }
             self.fire(GameEvent::Interact, Source::Entity(uid));
             match self.loaded.entities[i].kind {
-                EntityKind::Prop => self.try_open_container(i),
+                EntityKind::Prop => {
+                    self.try_open_container(i);
+                    self.try_use_furniture(i);
+                }
                 EntityKind::Character => {
                     self.try_open_shop(i, true);
                 }
@@ -1309,6 +1416,11 @@ impl Game {
         let ts = self.ts();
         for i in 0..self.loaded.entities.len() {
             let e = &self.loaded.entities[i];
+            if e.away && !frozen {
+                // Indoors: only the clock brings it out.
+                self.schedule_step(i, dt);
+                continue;
+            }
             if !e.active || e.kind != EntityKind::Character {
                 continue;
             }
@@ -1341,8 +1453,15 @@ impl Game {
                 continue;
             }
             let dt = dt * f;
-            if self.chase(i, dt) || self.patrol_step(i, dt) {
+            if self.companion_step(i, dt) || self.chase(i, dt) {
                 continue;
+            }
+            match self.schedule_step(i, dt) {
+                Some(true) => continue,
+                // At its stop: wander around it (or stand), patrol routes wait.
+                Some(false) => {}
+                None if self.patrol_step(i, dt) => continue,
+                None => {}
             }
             let e = &self.loaded.entities[i];
             let radius = match e.behavior {
@@ -1391,8 +1510,9 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
+            self.weather_status(),
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1414,6 +1534,8 @@ impl Game {
             self.loaded.map.lighting.mode,
             self.lights().len(),
             self.patrol_status(),
+            self.schedule_status(),
+            self.companions_status(),
             {
                 let ts = self.ts();
                 let here = self.loaded.entities.iter().filter(|e| e.active && e.uid >= crate::state::DROPPED_UID_BASE);
@@ -1422,7 +1544,11 @@ impl Game {
             format!("{}|{:?}|{}", self.world.player_name, self.world.player_sex, self.player_appearance().map_or("-".to_string(), |a| a.body)),
             self.creator_status(),
             self.world.quests.iter().map(|(k, q)| format!("{k}:{}:{:?}", q.stage, q.status)).collect::<Vec<_>>(),
+            self.achievements_status(),
+            self.minigame_status(),
+            self.pose_status(),
             self.shop_status(),
+            self.crafting_status(),
             self.loaded.map.name,
             p.x.floor(),
             p.y.floor(),
@@ -1444,7 +1570,9 @@ impl Game {
     fn sync_world(&mut self) {
         self.persist_patrols();
         self.world.current_map = self.loaded.map.name.clone();
-        self.world.player_pos = (self.player.pos.x, self.player.pos.y);
+        // On furniture, the spot it was used from (the furniture itself is solid).
+        let pos = self.seat.as_ref().map_or(self.player.pos, |s| s.back);
+        self.world.player_pos = (pos.x, pos.y);
         self.world.player_facing = self.player.facing;
     }
 
@@ -1566,6 +1694,14 @@ impl Game {
         for layer in m.layers.iter().filter(|l| l.visible && !l.above_entities) {
             render::draw_layer(m, layer, &sets, ts, view, WHITE);
         }
+        // Fish shadows mark the fishing spots' water.
+        let now = get_time() as f32;
+        for z in m.zones.iter().filter(|z| matches!(z.kind, ZoneKind::FishingSpot { .. })) {
+            let r = Rect::new(z.x as f32 * ts, z.y as f32 * ts, z.w as f32 * ts, z.h as f32 * ts);
+            if r.overlaps(&view) {
+                render::fish::draw_shadows(r, z.uid, now, ts);
+            }
+        }
 
         // Y-sorted entities + player.
         let mut order: Vec<(f32, Option<usize>)> = self
@@ -1576,7 +1712,7 @@ impl Game {
             .filter(|(_, e)| e.active)
             .map(|(i, e)| (e.body.pos.y, Some(i)))
             .collect();
-        order.push((self.player.pos.y, None));
+        order.push((self.player_sort_y(), None));
         order.sort_by(|a, b| a.0.total_cmp(&b.0));
         let t = get_time() as f32;
         for (_, idx) in order {
@@ -1590,7 +1726,9 @@ impl Game {
                     let col = if self.player.moving { (self.player.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
                     // During a melee swing the weapon is drawn along the swing instead.
                     let swinging = self.combat.swing > 0.0;
-                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, Self::effect_tint(&self.world.effects).unwrap_or(WHITE), swinging));
+                    let eq = self.player_equipment_drawn();
+                    let tint = Self::effect_tint(&self.world.effects).unwrap_or(WHITE);
+                    let drawn = self.draw_seated_player(&eq, tint) || self.player_appearance().is_some_and(|a| self.draw_character(&a, &eq, (self.player.facing, col), self.player.pos, tint, swinging));
                     if !drawn {
                         let r = self.player.rect();
                         draw_rectangle(r.x, r.y - ts * 0.5, r.w, r.h + ts * 0.5, YELLOW);
@@ -1611,11 +1749,17 @@ impl Game {
             render::draw_layer(m, layer, &sets, ts, view, WHITE);
         }
 
-        if let Some(ambient) = self.scene_ambient(render::lighting::ambient(self.loaded.map.lighting, self.world.hour)) {
-            let lights = self.lights();
+        // Darkness (map, time of day, cut-scene dimming), then the weather's tint on top.
+        let dark = self.scene_ambient(render::lighting::ambient(self.loaded.map.lighting, self.world.hour));
+        let scene_light = self.weather_ambient(dark);
+        if let Some(ambient) = scene_light {
+            // Lights show only where it is dark: weather alone (by day) just tints the scene.
+            let lights = if dark.is_some() { self.lights() } else { Vec::new() };
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(&cam, ambient, &lights, ts, get_time());
             set_camera(&cam);
         }
+        // Rain, snow, fog over the lit scene (and in save thumbnails).
+        self.draw_weather(view, scene_light);
         // A save's thumbnail: the world as it is now, before overlays, HUD and menus.
         self.capture_thumbnail();
 
@@ -1638,7 +1782,11 @@ impl Game {
                 self.draw_hud();
                 self.draw_clock();
             }
-            if self.shop_open() {
+            self.draw_minigame();
+            self.draw_sleep();
+            if self.crafting_open() {
+                self.draw_crafting_ui();
+            } else if self.shop_open() {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
@@ -1659,12 +1807,14 @@ impl Game {
         self.draw_fps();
         self.ui.draw_toasts();
         self.ui.draw_dialog();
+        self.draw_dialog_portrait();
         self.draw_game_over();
         if self.creator.is_some() {
             self.draw_creator();
         } else {
             self.draw_menu();
         }
+        self.draw_achievement_toasts();
         self.draw_console();
         if self.debug {
             let p = self.player.pos / ts;
@@ -1749,21 +1899,23 @@ impl ActionHost for Game {
     fn execute(&mut self, action: &Action, ctx: &ActionCtx) -> Step {
         let ts = self.ts();
         match action {
-            Action::Dialog { speaker, text } => {
+            Action::Dialog { speaker: raw, text } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                let speaker = self.entity_names_in(speaker, ctx.owner);
+                let speaker = self.entity_names_in(raw, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
                 self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_dialog(&speaker, &text);
+                self.set_dialog_portrait(raw, &speaker, ctx.owner);
                 Step::Block
             }
-            Action::Choice { speaker, text, options, var } => {
+            Action::Choice { speaker: raw, text, options, var } => {
                 self.audio.play(&self.project.config.sfx.dialog);
-                let speaker = self.entity_names_in(speaker, ctx.owner);
+                let speaker = self.entity_names_in(raw, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
                 let options: Vec<String> = options.iter().map(|o| self.world.expand_text(o)).collect();
                 self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_choice(&speaker, &text, &options, var);
+                self.set_dialog_portrait(raw, &speaker, ctx.owner);
                 Step::Block
             }
             Action::Teleport { map, spawn } => {
@@ -1802,6 +1954,7 @@ impl ActionHost for Game {
             Action::SetActive { target, active } => {
                 if let Some(i) = self.entity_index(target, ctx.owner) {
                     self.loaded.entities[i].active = *active;
+                    self.loaded.entities[i].away = false;
                     self.persist(i);
                 }
                 Step::Continue
@@ -1821,6 +1974,21 @@ impl ActionHost for Game {
             }
             Action::Quest { quest, op, stage } => {
                 self.quest_changed(quest, *op, *stage);
+                Step::Continue
+            }
+            Action::Companion { target, join } => {
+                match self.entity_index(target, ctx.owner) {
+                    Some(i) if *join => self.recruit(i),
+                    Some(i) => self.dismiss(i, false),
+                    None => eprintln!("Companion: '{target}' is not a character on this map"),
+                }
+                Step::Continue
+            }
+            Action::Schedule { target, active } => {
+                match self.entity_index(target, ctx.owner) {
+                    Some(i) if self.loaded.entities[i].schedule.is_some() => self.set_schedule(i, *active),
+                    _ => eprintln!("Schedule: '{target}' is not a character with a schedule on this map"),
+                }
                 Step::Continue
             }
             Action::SetTime { hour } => {
@@ -1977,6 +2145,35 @@ impl ActionHost for Game {
                 self.shake_screen(*seconds, *strength);
                 Step::Continue
             }
+            Action::SetWeather { map, weather } => {
+                let map = if map.is_empty() { self.loaded.map.name.clone() } else { map.clone() };
+                match weather {
+                    Some(w) => self.world.weather.insert(map, crate::map::Weather::new(w.kind, w.intensity)),
+                    None => self.world.weather.remove(&map),
+                };
+                Step::Continue
+            }
+            Action::Sleep { hours } => {
+                if self.start_sleep(*hours) {
+                    Step::Block
+                } else {
+                    Step::Continue
+                }
+            }
+            Action::Lockpick { difficulty, var } => {
+                // Skill below the difficulty makes it harder (the skill system may be off: 0).
+                let gap = *difficulty as i32 - self.lockpick_level() as i32;
+                self.start_lockpick(minigame::PickTarget::Var(var.clone()), gap);
+                Step::Block
+            }
+            Action::UnlockAchievement { id } => {
+                self.unlock_achievement(id);
+                Step::Continue
+            }
+            Action::OpenCrafting { station, title } => {
+                self.open_crafting(station, title);
+                Step::Continue
+            }
             Action::OpenShop { target } => {
                 match self.entity_index(target, ctx.owner) {
                     Some(i) if self.try_open_shop(i, false) => {}
@@ -2032,7 +2229,7 @@ impl ActionHost for Game {
             // Characters that walked up to someone turn to face them.
             self.apply_face_after();
         }
-        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking
+        self.ui.dialog_open() || !matches!(self.fade, Fade::None) || walking || self.minigame_open() || self.sleeping()
     }
 
     fn script_condition(&mut self, function: &str, ctx: &ActionCtx) -> bool {

@@ -1,7 +1,9 @@
-//! rust2d engine: tile maps, entities, events, scripting, rendering and the game runtime.
+//! R(ust)PG2D engine: tile maps, entities, events, scripting, rendering and the game runtime.
 
+pub mod achievements;
 pub mod audio;
 pub mod autotile;
+pub mod crafting;
 pub mod defs;
 pub mod effects;
 pub mod entity;
@@ -11,6 +13,7 @@ pub mod fog;
 pub mod glibc_compat;
 pub mod imageio;
 pub mod inventory;
+pub mod legacy;
 pub mod library;
 pub mod map;
 pub mod migrate;
@@ -32,5 +35,5 @@ pub mod structure;
 pub use macroquad;
 
 /// Fingerprint of the engine sources this binary was built from. The editor compares it
-/// with `rust2d-game --engine-build` before a play-test to catch a stale game binary.
-pub const ENGINE_BUILD: &str = env!("RUST2D_ENGINE_BUILD");
+/// with `rustpg2d-game --engine-build` before a play-test to catch a stale game binary.
+pub const ENGINE_BUILD: &str = env!("RUSTPG2D_ENGINE_BUILD");

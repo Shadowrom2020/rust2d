@@ -61,6 +61,11 @@ pub struct Audio {
     /// Player options (0..1): effects and music volume, master already applied.
     effects: f32,
     music_vol: f32,
+    /// The built-in rain loop (made on first use) and its volume (0 = stopped).
+    rain: Option<Sound>,
+    rain_vol: f32,
+    /// Player option (0..1): environmental sounds (rain), master applied.
+    ambience: f32,
 }
 
 impl Audio {
@@ -88,7 +93,7 @@ impl Audio {
         for e in &errors {
             eprintln!("[audio] {e}");
         }
-        Audio { sounds, music: None, preview: None, errors, enabled: std::env::var_os("RUST2D_MUTE").is_none(), effects: 1.0, music_vol: 1.0 }
+        Audio { sounds, music: None, preview: None, errors, enabled: std::env::var_os("RUSTPG2D_MUTE").is_none(), effects: 1.0, music_vol: 1.0, rain: None, rain_vol: 0.0, ambience: 1.0 }
     }
 
     pub fn has(&self, id: &str) -> bool {
@@ -174,6 +179,93 @@ impl Audio {
     pub fn current_music(&self) -> Option<&str> {
         self.music.as_deref()
     }
+
+    /// The player's ambience volume (Options › Ambience volume), also for the playing rain.
+    pub fn set_ambience_volume(&mut self, v: f32) {
+        self.ambience = v.clamp(0.0, 1.0);
+        if let (Some(s), true) = (&self.rain, self.rain_vol > 0.0) {
+            set_sound_volume(s, self.rain_vol * self.ambience);
+        }
+    }
+
+    /// The built-in rain loop at `volume` (0..1, before the ambience volume; 0 stops it).
+    pub fn set_rain(&mut self, volume: f32) {
+        let v = if self.enabled { volume.clamp(0.0, 1.0) } else { 0.0 };
+        if (v - self.rain_vol).abs() < 0.01 {
+            return;
+        }
+        if v <= 0.0 {
+            if let Some(s) = &self.rain {
+                stop_sound(s);
+            }
+            self.rain_vol = 0.0;
+            return;
+        }
+        if self.rain.is_none() {
+            let bytes = wav_bytes(&rain_samples(), MIX_RATE);
+            self.rain = poll_now(load_sound_from_bytes(&bytes)).and_then(|r| r.ok());
+        }
+        let Some(s) = &self.rain else { return };
+        if self.rain_vol <= 0.0 {
+            play_sound(s, PlaySoundParams { looped: true, volume: v * self.ambience });
+        } else {
+            set_sound_volume(s, v * self.ambience);
+        }
+        self.rain_vol = v;
+    }
+
+    /// Volume of the rain loop (0 = not playing).
+    pub fn rain_volume(&self) -> f32 {
+        self.rain_vol
+    }
+}
+
+/// Sample rate of macroquad's mixer (sounds at other rates are resampled when loaded).
+pub const MIX_RATE: u32 = 44_100;
+/// Frames macroquad's mixer (quad-snd) fills per pass on Linux.
+pub const MIX_BUFFER_FRAMES: usize = 4096;
+
+/// About six seconds of rain that loop seamlessly: filtered noise (the hiss) with soft drop
+/// ticks, at the mixer's own rate.
+///
+/// - The length is a whole number of mixer buffers: quad-snd rewinds a looped sound that ends
+///   inside a buffer but writes the rest at the buffer's start again, leaving the end of that
+///   buffer silent — a short gap at every loop. Sounds start at a buffer boundary, so a length
+///   of whole buffers always ends on one (and smaller power-of-two buffers divide it too).
+/// - The extra tail fades into the start with an equal-power crossfade: the two noises are
+///   unrelated, so a linear fade would dip in loudness at every loop.
+pub fn rain_samples() -> Vec<f32> {
+    let rate = MIX_RATE;
+    let n = MIX_BUFFER_FRAMES * 65;
+    let fade = rate as usize;
+    let mut seed = 0x1234_5678u32;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+    };
+    let (mut low, mut high, mut drop, mut drop_env) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut raw = Vec::with_capacity(n + fade);
+    for _ in 0..n + fade {
+        let w = rnd();
+        low += (w - low) * 0.18; // body of the hiss
+        high = 0.8 * (high + w - low) * 0.5; // a little brightness
+        if rnd() > 0.9975 {
+            drop_env = 0.6 + 0.4 * rnd().abs();
+        }
+        drop = drop * 0.6 + rnd() * drop_env;
+        drop_env *= 0.993;
+        raw.push(low * 0.55 + high * 0.25 + drop * 0.12);
+    }
+    // Crossfade the extra tail into the beginning so the loop has no seam.
+    let mut out: Vec<f32> = raw[..n].to_vec();
+    for i in 0..fade {
+        let t = i as f32 / fade as f32 * std::f32::consts::FRAC_PI_2;
+        out[i] = out[i] * t.sin() + raw[n + i] * t.cos();
+    }
+    let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs())).max(1e-6);
+    out.iter().map(|v| v / peak * 0.6).collect()
 }
 
 /// Encodes mono 16-bit PCM samples (-1..1) as a WAV file.
@@ -201,6 +293,71 @@ pub fn wav_bytes(samples: &[f32], sample_rate: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// quad-snd's mixing of one looped sound, as it is (0.2.8): buffers of `MIX_BUFFER_FRAMES`
+    /// stereo frames; after a rewind the rest is written from the buffer's start again.
+    fn quad_snd_mix(data: &[f32], buffers: usize) -> Vec<f32> {
+        let mut out = Vec::new();
+        let mut pos = 0usize;
+        for _ in 0..buffers {
+            let mut buffer = vec![0.0f32; MIX_BUFFER_FRAMES * 2];
+            let mut remainder = buffer.len();
+            loop {
+                let chunk = &data[pos.min(data.len())..];
+                let chunk = &chunk[..remainder.min(chunk.len())];
+                pos += remainder;
+                for (b, s) in buffer.iter_mut().zip(chunk) {
+                    *b += s;
+                }
+                remainder -= chunk.len();
+                if remainder > 0 {
+                    pos = 0;
+                    continue;
+                }
+                break;
+            }
+            out.extend(buffer);
+        }
+        out
+    }
+
+    #[test]
+    fn rain_loop_survives_quad_snds_mixer() {
+        let stereo = |m: &[f32]| m.iter().flat_map(|&v| [v, v]).collect::<Vec<f32>>();
+        let rain = stereo(&rain_samples());
+        let n = rain.len() / (MIX_BUFFER_FRAMES * 2);
+        let mixed = quad_snd_mix(&rain, 2 * n + 3);
+        let ideal: Vec<f32> = rain.iter().cycle().take(mixed.len()).copied().collect();
+        assert_eq!(mixed, ideal, "the rain loops exactly through the mixer");
+        // A loop that ends inside a buffer (like the old 6 s at 22 050 Hz, resampled) gets a gap.
+        let odd = &rain[..rain.len() - 3000];
+        let mixed = quad_snd_mix(odd, n + 2);
+        let silent = mixed.chunks(2).skip(odd.len() / 2).take(MIX_BUFFER_FRAMES).filter(|f| f[0] == 0.0).count();
+        assert!(silent > 1000, "the mixer bug this avoids: {silent} silent frames after the loop point");
+    }
+
+    #[test]
+    fn rain_loops_without_a_click() {
+        let s = rain_samples();
+        assert_eq!(s.len() % MIX_BUFFER_FRAMES, 0, "whole mixer buffers (quad-snd's loop gap)");
+        assert!((5.9..6.2).contains(&(s.len() as f32 / MIX_RATE as f32)));
+        // At the mixer's rate: loading doesn't resample (which could change the length).
+        let wav = wav_bytes(&s, MIX_RATE);
+        assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 44_100);
+        let peak = s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((0.59..=0.61).contains(&peak), "normalized: {peak}");
+        // Loudness stays even across the loop point (no dip after it): RMS of 50 ms windows over
+        // two passes.
+        let two: Vec<f32> = s.iter().chain(s.iter()).copied().collect();
+        let rms: Vec<f32> = two.chunks(1102).map(|c| (c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).sqrt()).collect();
+        let avg = rms.iter().sum::<f32>() / rms.len() as f32;
+        let low = rms.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(low > avg * 0.8, "no loudness dip: lowest {low} vs average {avg}");
+        // The end flows into the start like any two neighbouring samples do.
+        let step = |a: f32, b: f32| (a - b).abs();
+        let typical = s.windows(2).map(|w| step(w[0], w[1])).sum::<f32>() / s.len() as f32;
+        assert!(step(s[s.len() - 1], s[0]) < typical * 6.0, "seam {} vs typical {typical}", step(s[s.len() - 1], s[0]));
+    }
 
     #[test]
     fn wav_header() {

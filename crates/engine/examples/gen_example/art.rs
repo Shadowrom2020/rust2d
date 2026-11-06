@@ -6,11 +6,11 @@
 use std::path::Path;
 
 use macroquad::prelude::{Color, Image};
-use rust2d_engine::defs::{Armor, EquipSlot, ItemDef, SpriteRef};
-use rust2d_engine::entity::Facing;
+use rustpg2d_engine::defs::{Armor, EquipSlot, ItemDef, SpriteRef};
+use rustpg2d_engine::entity::Facing;
 
 /// Tile size in pixels.
-pub const TS: u32 = rust2d_engine::project::TILE_SIZE;
+pub const TS: u32 = rustpg2d_engine::project::TILE_SIZE;
 /// Scale of the art relative to the classic 16px grid (hitboxes and speeds are given in
 /// 16px units and multiplied by this).
 pub const R: f32 = TS as f32 / 16.0;
@@ -859,7 +859,7 @@ impl EdgeArt<'_> {
     /// band along every open side (whose neighbour isn't the terrain), with rounded corners. The
     /// wobble repeats every 32 px, so the bands of neighbouring tiles join up.
     fn outside_at(&self, mask: usize, x: i32, y: i32) -> bool {
-        use rust2d_engine::autotile::{EAST, NORTH, SOUTH, WEST};
+        use rustpg2d_engine::autotile::{EAST, NORTH, SOUTH, WEST};
         let natural = self.natural;
         let wob = |p: i32| {
             if !natural {
@@ -894,7 +894,7 @@ impl EdgeArt<'_> {
 pub fn edge_block(c: &mut Canvas, first: u32, cols: u32, art: &EdgeArt) {
     let n = TS as i32;
     for k in 0..16usize {
-        let i = rust2d_engine::autotile::Terrain::block_tile(first, cols, k);
+        let i = rustpg2d_engine::autotile::Terrain::block_tile(first, cols, k);
         c.at(i % cols * TS, i / cols * TS);
         (art.inside)(c, k);
         let mut g = Canvas::new(TS, TS);
@@ -948,12 +948,12 @@ pub fn terrain_index(name: &str) -> usize {
 }
 
 /// The terrain tileset's auto-tiling terrains.
-pub fn terrains() -> Vec<rust2d_engine::autotile::Terrain> {
+pub fn terrains() -> Vec<rustpg2d_engine::autotile::Terrain> {
     TERRAINS
         .iter()
         .enumerate()
         .map(|(b, &(name, inside, base, joins))| {
-            let mut tr = rust2d_engine::autotile::Terrain { name: name.into(), base: Some(base), joins: joins.iter().map(|j| j.to_string()).collect(), ..Default::default() };
+            let mut tr = rustpg2d_engine::autotile::Terrain { name: name.into(), base: Some(base), joins: joins.iter().map(|j| j.to_string()).collect(), ..Default::default() };
             tr.fill_from_block(block_start(5, b as u32), 8);
             if let Some(i) = inside {
                 tr.tiles[15] = Some(i);
@@ -965,12 +965,12 @@ pub fn terrains() -> Vec<rust2d_engine::autotile::Terrain> {
 
 /// Animations of the terrain tileset: the water, and the insides of the water terrains with
 /// their own tiles (Shore, Stream) cycling through the same frames.
-pub fn terrain_anims() -> Vec<rust2d_engine::defs::TileAnim> {
+pub fn terrain_anims() -> Vec<rustpg2d_engine::defs::TileAnim> {
     let frames = vec![t::WATER, t::WATER_2, t::WATER_3, t::WATER_2];
-    let mut v = vec![rust2d_engine::defs::TileAnim { tile: t::WATER, frames: frames.clone(), fps: 3.0 }];
+    let mut v = vec![rustpg2d_engine::defs::TileAnim { tile: t::WATER, frames: frames.clone(), fps: 3.0 }];
     for name in ["Shore", "Stream"] {
-        let inside = rust2d_engine::autotile::Terrain::block_tile(block_start(5, terrain_index(name) as u32), 8, 15);
-        v.push(rust2d_engine::defs::TileAnim { tile: inside, frames: frames.clone(), fps: 3.0 });
+        let inside = rustpg2d_engine::autotile::Terrain::block_tile(block_start(5, terrain_index(name) as u32), 8, 15);
+        v.push(rustpg2d_engine::defs::TileAnim { tile: inside, frames: frames.clone(), fps: 3.0 });
     }
     v
 }
@@ -981,7 +981,7 @@ pub fn terrain_solid() -> Vec<u32> {
     let water = ["Pond", "Shore", "Stream"].map(terrain_index);
     let mut v: Vec<u32> = SOLID.to_vec();
     for b in water {
-        v.extend((0..16).map(|k| rust2d_engine::autotile::Terrain::block_tile(block_start(5, b as u32), 8, k)));
+        v.extend((0..16).map(|k| rustpg2d_engine::autotile::Terrain::block_tile(block_start(5, b as u32), 8, k)));
     }
     v
 }
@@ -1532,6 +1532,8 @@ pub enum Held {
     Shield,
     Lantern,
     Torch,
+    /// A fishing rod (in the hand while fishing): its tip is where the engine starts the line.
+    Rod,
 }
 
 impl Held {
@@ -1645,6 +1647,23 @@ pub fn held_canvas(kind: Held) -> Canvas {
                     c.rect(x - 1, y + 4, 3, 5, hex(0xffd166));
                     c.px(x - 1, y + 4, hex(0xfff2b0));
                 }
+                Held::Rod => {
+                    // From the hand out to the tip (idle frame: the tip at the engine's
+                    // `rod_tip` offsets: down (3, 48), up (30, 6), right (29, 12), left (3, 12)).
+                    let tip = match f {
+                        Facing::Down => (x - 4, y + 16),
+                        Facing::Up => (x + 4, y - 25),
+                        Facing::Right => (x + 13, y - 20),
+                        Facing::Left => (x - 13, y - 20),
+                    };
+                    let (hx, hy) = (x as f32, y as f32);
+                    let (tx, ty) = (tip.0 as f32, tip.1 as f32);
+                    let mid = (hx + (tx - hx) * 0.4, hy + (ty - hy) * 0.4);
+                    c.stroke(hx, hy, mid.0, mid.1, 1.6, hex(WOOD[1]));
+                    c.stroke(mid.0, mid.1, tx, ty, 1.0, hex(WOOD[2]));
+                    c.disc(hx + (tx - hx) * 0.12, hy + (ty - hy) * 0.12 + 1.0, 1.6, hex(IRON[2]));
+                    c.px(tip.0, tip.1, hex(0xe53935));
+                }
                 Held::Torch => {
                     c.rect(x - 1, y - 8, 2, 11, hex(WOOD[1]));
                     c.disc(x as f32, y as f32 - 10.0, 2.5, hex(0xe8590c));
@@ -1696,13 +1715,13 @@ fn rgb(v: u32) -> [u8; 3] {
 }
 
 /// The layered model of a look: body, skin, hair style, beard.
-pub fn appearance_of(look: &Look) -> rust2d_engine::defs::Appearance {
-    rust2d_engine::defs::Appearance { body: body_id(look).into(), skin: rgb(look.skin), hair: hair_id(look).into(), hair_color: rgb(look.hair), beard: beard_id(look).into() }
+pub fn appearance_of(look: &Look) -> rustpg2d_engine::defs::Appearance {
+    rustpg2d_engine::defs::Appearance { body: body_id(look).into(), skin: rgb(look.skin), hair: hair_id(look).into(), hair_color: rgb(look.hair), beard: beard_id(look).into() }
 }
 
 /// The shared layer sheets of layered characters: (sheet id, canvas, kind, female body).
-pub fn shared_layers() -> Vec<(String, Canvas, rust2d_engine::defs::SheetKind, bool)> {
-    use rust2d_engine::defs::SheetKind as K;
+pub fn shared_layers() -> Vec<(String, Canvas, rustpg2d_engine::defs::SheetKind, bool)> {
+    use rustpg2d_engine::defs::SheetKind as K;
     let hair = |s: HairStyle| Look { hair_style: s, ..Default::default() };
     let beard = |s: BeardStyle| Look { beard: true, beard_style: s, ..Default::default() };
     let mut v = vec![
@@ -1725,6 +1744,7 @@ pub fn shared_layers() -> Vec<(String, Canvas, rust2d_engine::defs::SheetKind, b
         ("shield", Held::Shield),
         ("lantern", Held::Lantern),
         ("torch", Held::Torch),
+        ("rod", Held::Rod),
     ] {
         v.push((format!("held_{id}"), held_canvas(kind), K::Held, false));
     }
@@ -1774,6 +1794,7 @@ pub fn clothing_item(id: &str, name: &str, description: &str, icon_sheet: &str, 
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
     }
 }
 
@@ -2036,6 +2057,149 @@ pub mod p {
     /// The forest shrine (3x2): a monolith with a crystal between two lamp pillars on a
     /// stepped dais; glowing state at +3.
     pub const GRAND_SHRINE: u32 = 56;
+    /// An alchemy table (crafting station), on row 9 (added below the older rows so existing
+    /// libraries take the larger sheet: their pixels stay the same).
+    pub const ALCHEMY: u32 = 72;
+    /// Furniture (row 9, the bed's foot on row 10): a chair, a bench (2x1), a bed (1x2) and
+    /// the bed's blanket alone (1x2: drawn over a sleeper).
+    pub const CHAIR: u32 = 73;
+    pub const BENCH: u32 = 74;
+    pub const BED: u32 = 76;
+    pub const BLANKET: u32 = 77;
+    /// A chair facing up (seen from behind) and its backrest alone (drawn over a sitter).
+    pub const CHAIR_UP: u32 = 78;
+    pub const CHAIR_UP_BACK: u32 = 79;
+    /// A sideways bed (2x1, the head at the left) and its quilt alone.
+    pub const BED_SIDE: u32 = 80;
+    pub const BLANKET_SIDE: u32 = 82;
+    /// Chairs facing left / right (side views).
+    pub const CHAIR_LEFT: u32 = 86;
+    pub const CHAIR_RIGHT: u32 = 87;
+}
+
+/// Chair, bench, bed and the bed's blanket (furniture the player can use).
+fn furniture(c: &mut Canvas) {
+    let n = TS as i32;
+    // Chair (seen from the front): back with two slats, seat, legs.
+    let (x, y) = cell(p::CHAIR);
+    c.at(x, y);
+    // Wide enough that a sitter (drawn over it) leaves the posts and legs in sight.
+    for px in [3, 26] {
+        c.shade_box(px, 1, 3, 29, WOOD); // back posts, down to the floor
+    }
+    for sy in [3, 8] {
+        c.shade_box(6, sy, 20, 3, WOOD); // slats
+    }
+    c.shade_box(2, 17, 28, 5, WOOD); // seat
+    c.hline(2, 17, 28, hex(WOOD[3]));
+    for lx in [3, 26] {
+        c.shade_box(lx, 22, 3, 8, WOOD);
+    }
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.5, 10.0, 1.5);
+    // Bench (2x1): a plank seat with a backrest on stone feet.
+    let (x, y) = cell(p::BENCH);
+    c.at(x, y);
+    for sy in [6, 11] {
+        c.shade_box(4, sy, 56, 3, WOOD);
+    }
+    for px in [6, 55] {
+        c.shade_box(px, 4, 3, 14, WOOD);
+    }
+    c.shade_box(2, 16, 60, 5, WOOD);
+    c.hline(2, 16, 60, hex(WOOD[3]));
+    for lx in [5, 53] {
+        c.shade_box(lx, 21, 6, 9, STONE);
+    }
+    c.auto_outline(2 * n, n, OUTLINE);
+    c.shadow(32.0, 30.5, 26.0, 1.5);
+    // Bed (1x2, 32 x 64): headboard, pillow, sheet and a quilt; the quilt alone is the cover.
+    let quilt = |c: &mut Canvas| {
+        c.shade_box(4, 24, 24, 34, [0x7a1f1f, 0xa83232, 0xc94a4a, 0xe07a6a]);
+        c.hline(4, 24, 24, hex(0xf2e8d8)); // the folded sheet's edge
+        c.hline(4, 25, 24, hex(0xf2e8d8));
+        for k in 0..3 {
+            c.hline(5, 34 + k * 9, 22, hex(0x8a2626)); // quilt seams
+        }
+    };
+    let (x, y) = cell(p::BED);
+    c.at(x, y);
+    c.shade_box(2, 2, 28, 10, WOOD); // headboard
+    c.hline(2, 2, 28, hex(WOOD[3]));
+    c.shade_box(3, 10, 26, 50, [0xc8c0b0, 0xe0d8c8, 0xf2ecdf, 0xffffff]); // mattress + sheet
+    c.shade_box(7, 12, 18, 9, [0xc8c8d0, 0xe0e0e8, 0xf4f4f8, 0xffffff]); // pillow
+    quilt(c);
+    c.shade_box(2, 57, 28, 6, WOOD); // footboard
+    c.auto_outline(n, 2 * n, OUTLINE);
+    // The cover: the same quilt, outlined on its own, drawn over a sleeper.
+    let (x, y) = cell(p::BLANKET);
+    c.at(x, y);
+    quilt(c);
+    c.shade_box(2, 57, 28, 6, WOOD); // the footboard stays in front of the feet
+    c.auto_outline(n, 2 * n, OUTLINE);
+
+    // A chair facing up, seen from behind: the seat beyond, the backrest on the near side
+    // (the backrest alone is the cover: it hides the sitter's lower back).
+    let backrest = |c: &mut Canvas| {
+        for px in [3, 26] {
+            c.shade_box(px, 11, 3, 19, WOOD); // posts down to the floor
+        }
+        for sy in [12, 17] {
+            c.shade_box(6, sy, 20, 3, WOOD); // slats
+        }
+    };
+    let (x, y) = cell(p::CHAIR_UP);
+    c.at(x, y);
+    c.shade_box(4, 6, 24, 7, WOOD); // seat
+    c.hline(4, 6, 24, hex(WOOD[3]));
+    for lx in [5, 24] {
+        c.shade_box(lx, 3, 3, 4, WOOD); // the far legs' tops behind the seat
+    }
+    backrest(c);
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.5, 10.0, 1.5);
+    let (x, y) = cell(p::CHAIR_UP_BACK);
+    c.at(x, y);
+    backrest(c);
+    c.auto_outline(n, n, OUTLINE);
+
+    // Chairs seen from the side: the backrest on the side behind the sitter.
+    for (cellno, back_left) in [(p::CHAIR_LEFT, false), (p::CHAIR_RIGHT, true)] {
+        let (x, y) = cell(cellno);
+        c.at(x, y);
+        let bx = if back_left { 6 } else { 23 };
+        c.shade_box(bx, 3, 3, 27, WOOD); // backrest post, down to the floor
+        c.shade_box(if back_left { 6 } else { 9 }, 6, 17, 3, WOOD); // top rail
+        c.shade_box(5, 17, 22, 4, WOOD); // seat
+        c.hline(5, 17, 22, hex(WOOD[3]));
+        let fx = if back_left { 23 } else { 6 };
+        c.shade_box(fx, 21, 3, 9, WOOD); // front leg
+        c.auto_outline(n, n, OUTLINE);
+        c.shadow(16.0, 30.5, 10.0, 1.5);
+    }
+
+    // A sideways bed (64 x 32, the head at the left) and its quilt alone.
+    let quilt_side = |c: &mut Canvas| {
+        c.shade_box(22, 4, 36, 25, [0x7a1f1f, 0xa83232, 0xc94a4a, 0xe07a6a]);
+        c.vline(22, 4, 25, hex(0xf2e8d8)); // the folded sheet's edge
+        c.vline(23, 4, 25, hex(0xf2e8d8));
+        for k in 0..3 {
+            c.vline(32 + k * 9, 5, 23, hex(0x8a2626));
+        }
+        c.shade_box(58, 2, 5, 28, WOOD); // the footboard
+    };
+    let (x, y) = cell(p::BED_SIDE);
+    c.at(x, y);
+    c.shade_box(1, 0, 6, 31, WOOD); // headboard
+    c.vline(1, 0, 31, hex(WOOD[3]));
+    c.shade_box(6, 3, 54, 27, [0xc8c0b0, 0xe0d8c8, 0xf2ecdf, 0xffffff]); // mattress + sheet
+    c.shade_box(8, 7, 11, 18, [0xc8c8d0, 0xe0e0e8, 0xf4f4f8, 0xffffff]); // pillow
+    quilt_side(c);
+    c.auto_outline(2 * n, n, OUTLINE);
+    let (x, y) = cell(p::BLANKET_SIDE);
+    c.at(x, y);
+    quilt_side(c);
+    c.auto_outline(2 * n, n, OUTLINE);
 }
 
 /// The forest shrine, 96 x 64: a stepped dais, two lamp pillars and a rune-carved monolith with
@@ -2267,8 +2431,9 @@ fn big_props(c: &mut Canvas) {
 }
 
 pub fn props(out: &Path) {
-    // 9 rows: rows 7-8 (the grand shrine) were added later, below the older cells.
-    let mut c = Canvas::new(TS * 8, TS * 9);
+    // 11 rows: rows 7-8 (the grand shrine), 9 (the alchemy table, furniture) and 10 (the bed's
+    // foot) were added later, below the older cells.
+    let mut c = Canvas::new(TS * 8, TS * 11);
     let n = TS as i32;
     for i in 0..8u32 {
         let (x, y) = cell(i);
@@ -2403,6 +2568,34 @@ pub fn props(out: &Path) {
     }
     c.auto_outline(n, n, OUTLINE);
     c.shadow(16.0, 30.5, 14.0, 1.5);
+    // The alchemy table: a small workbench with a flask over a burner, bottles and a mortar.
+    let (x, y) = cell(p::ALCHEMY);
+    c.at(x, y);
+    c.shade_box(3, 16, 26, 5, WOOD); // table top
+    c.hline(3, 16, 26, hex(WOOD[3]));
+    for lx in [4, 25] {
+        c.shade_box(lx, 21, 3, 10, WOOD); // legs
+    }
+    c.hline(6, 26, 20, hex(WOOD[0])); // shelf
+    c.shade_box(8, 24, 4, 3, [0x5d4037, 0x795548, 0x8d6e63, 0xa1887f]); // a jar on the shelf
+    c.shade_box(19, 24, 3, 3, [0x33691e, 0x558b2f, 0x7cb342, 0xaed581]);
+    // A round flask with green brew over a small burner.
+    c.shade_box(9, 13, 6, 3, IRON);
+    c.px(12, 12, hex(0xffb300));
+    c.px(11, 12, hex(0xff6f00));
+    c.shade_disc(12.0, 8.0, 4.5, [0x7fa8c8, 0xa8cbe8, 0xcfe8ff, 0xffffff]);
+    c.shade_disc(12.0, 9.0, 3.2, [0x1b5e20, 0x2e7d32, 0x43a047, 0xa5d6a7]);
+    c.rect(11, 1, 2, 4, hex(0xcfe8ff));
+    c.px(14, 6, hex(0xffffff));
+    // Two bottles and a mortar.
+    c.shade_box(18, 8, 3, 8, [0x7a1010, 0xb71c1c, 0xe53935, 0xff8a80]);
+    c.rect(18, 6, 3, 2, hex(WOOD[2]));
+    c.shade_box(22, 10, 3, 6, [0x1a237e, 0x283593, 0x3f51b5, 0x7986cb]);
+    c.rect(22, 8, 3, 2, hex(WOOD[2]));
+    c.shade_box(25, 12, 3, 4, STONE);
+    c.auto_outline(n, n, OUTLINE);
+    c.shadow(16.0, 30.5, 13.0, 1.5);
+    furniture(&mut c);
     big_props(&mut c);
     c.save(&out.join("sprites/props.png"));
 }
@@ -2450,8 +2643,15 @@ pub mod it {
     pub const ANTIDOTE: u32 = 32;
     pub const ELIXIR: u32 = 33;
     pub const SWIFTNESS: u32 = 34;
+    /// Crafting ingredients: a healing herb and a red-capped mushroom.
+    pub const HERB: u32 = 35;
+    pub const MUSHROOM: u32 = 36;
+    /// Fishing: the rod and two catches.
+    pub const ROD: u32 = 37;
+    pub const TROUT: u32 = 38;
+    pub const BOOT: u32 = 39;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 35;
+    pub const COUNT: u32 = 40;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -2762,6 +2962,65 @@ pub fn items(out: &Path) {
                     c.vline(x, 6, 21, hex(WOOD[0]));
                 }
                 c.shade_disc(16.0, 16.0, 3.5, [0x5f6b73, 0x90a4ae, 0xc5d0d6, 0xf0f4f6]);
+            }
+            it::ROD => {
+                // A long wooden rod with a reel and the line hanging down.
+                c.stroke(5.0, 28.0, 27.0, 4.0, 2.0, hex(WOOD[2]));
+                c.stroke(5.0, 28.0, 12.0, 20.5, 2.6, hex(WOOD[0]));
+                c.shade_disc(11.0, 23.0, 3.2, IRON);
+                c.disc(11.0, 23.0, 1.2, hex(0xc5d0d6));
+                c.vline(27, 5, 16, hex(0xe0e0e0));
+                c.rect(26, 20, 3, 3, hex(0xe53935));
+            }
+            it::TROUT => {
+                // A speckled fish swimming right.
+                let body = [0x4e6a3a, 0x7a9a5a, 0xa8c08a, 0xe0ecd0];
+                c.shade_disc(15.0, 16.0, 8.0, body);
+                c.rect(4, 10, 24, 3, CLEAR);
+                c.rect(4, 20, 24, 3, CLEAR);
+                c.shade_disc(15.0, 16.0, 6.0, body);
+                c.shade_disc(21.0, 16.0, 4.5, body);
+                for (fx, fy) in [(3, 11), (3, 21), (5, 13), (5, 19), (6, 15), (6, 17)] {
+                    c.px(fx, fy, hex(body[1]));
+                }
+                c.rect(4, 12, 3, 9, hex(body[1])); // tail
+                c.hline(9, 17, 16, hex(0xe57373)); // pink stripe
+                for (sx, sy) in [(11, 13), (14, 12), (17, 14), (12, 19)] {
+                    c.px(sx, sy, hex(0x2e3b22));
+                }
+                c.px(23, 15, hex(0x111111));
+            }
+            it::BOOT => {
+                // A soggy old boot.
+                let leather = [0x3e2a1a, 0x5d4030, 0x7b5a44, 0x9c7a62];
+                c.shade_box(9, 5, 9, 17, leather);
+                c.shade_box(9, 19, 18, 7, leather);
+                c.hline(9, 26, 18, hex(0x2a1c10));
+                c.hline(9, 8, 9, hex(leather[3]));
+                c.px(22, 17, hex(0x6fa8dc)); // a drip
+                c.px(22, 18, hex(0x6fa8dc));
+            }
+            it::HERB => {
+                // A sprig with three pairs of leaves and a tied stem.
+                let leaf = [0x1b5e20, 0x2e7d32, 0x43a047, 0x81c784];
+                c.stroke(16.0, 28.0, 16.0, 6.0, 1.4, hex(0x33691e));
+                for (k, y) in [9.0f32, 15.0, 21.0].into_iter().enumerate() {
+                    let w = 6.5 - k as f32;
+                    c.shade_disc(16.0 - w * 0.8, y, w * 0.6, leaf);
+                    c.shade_disc(16.0 + w * 0.8, y + 1.5, w * 0.6, leaf);
+                }
+                c.shade_disc(16.0, 5.5, 2.5, leaf);
+                c.rect(14, 24, 5, 2, hex(0xd7ccc8)); // string
+            }
+            it::MUSHROOM => {
+                // A red cap with white spots on a pale stem.
+                c.shade_disc(16.0, 16.0, 11.0, [0x7a1010, 0xb71c1c, 0xe53935, 0xff8a80]);
+                c.rect(4, 16, 24, 12, CLEAR); // a dome: only the upper half
+                c.shade_box(13, 15, 6, 13, [0xbcaaa4, 0xd7ccc8, 0xefebe9, 0xffffff]);
+                c.hline(6, 15, 20, hex(0x7a1010));
+                for (sx, sy) in [(11, 9), (18, 7), (21, 12), (14, 13)] {
+                    c.rect(sx, sy, 2, 2, hex(0xffffff));
+                }
             }
             _ => {}
         }

@@ -1,19 +1,21 @@
 //! Generates `example_project/`: procedural pixel art, definitions, maps and scripts.
 //!
-//! Run: `cargo run -p rust2d-engine --example gen_example [OUT_DIR]`
+//! Run: `cargo run -p rustpg2d-engine --example gen_example [OUT_DIR]`
 
 use std::path::{Path, PathBuf};
 
-use rust2d_engine::defs::*;
-use rust2d_engine::effects::{EffectKind, EffectSpec};
-use rust2d_engine::entity::{EntityInstance, EntityKind};
-use rust2d_engine::events::*;
-use rust2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
-use rust2d_engine::audio::wav_bytes;
-use rust2d_engine::inventory::ItemStack;
-use rust2d_engine::project::{GameSfx, Project, ProjectConfig};
-use rust2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
-use rust2d_engine::skills::{SkillDef, SpellDef};
+use rustpg2d_engine::defs::*;
+use rustpg2d_engine::effects::{EffectKind, EffectSpec};
+use rustpg2d_engine::achievements::AchievementDef;
+use rustpg2d_engine::crafting::RecipeDef;
+use rustpg2d_engine::entity::{EntityInstance, EntityKind, Facing, ScheduleStop};
+use rustpg2d_engine::events::*;
+use rustpg2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
+use rustpg2d_engine::audio::wav_bytes;
+use rustpg2d_engine::inventory::ItemStack;
+use rustpg2d_engine::project::{GameSfx, Project, ProjectConfig};
+use rustpg2d_engine::quest::{QuestCheck, QuestDef, QuestOp};
+use rustpg2d_engine::skills::{SkillDef, SpellDef};
 
 mod art;
 mod music;
@@ -154,7 +156,7 @@ impl B {
         self.set(1, door.0, door.1, t::DOOR);
         self.set(1, door.0, door.1 - 1, t::HOUSE_WALL);
         // The door tile is walkable so the player can step into the portal.
-        self.m.set_collision(door.0 as u32, door.1 as u32, rust2d_engine::map::CollisionOverride::Walkable);
+        self.m.set_collision(door.0 as u32, door.1 as u32, rustpg2d_engine::map::CollisionOverride::Walkable);
         door
     }
     fn zone(&mut self, name: &str, x: u32, y: u32, w: u32, h: u32, kind: ZoneKind) -> u32 {
@@ -213,7 +215,7 @@ fn teach(mut d: ItemDef, spell: &str) -> ItemDef {
 
 /// The example's skills: combat, defense, lockpicking, haggling, arcana and a scripted one.
 fn skills() -> Vec<SkillDef> {
-    use rust2d_engine::skills::SkillEffect as E;
+    use rustpg2d_engine::skills::SkillEffect as E;
     let icon = |f: u32| SpriteRef::new("items", f);
     vec![
         SkillDef::new("swordsmanship", "Swordsmanship", "Training with blades and fists: every level adds 10% to your melee damage.", icon(it::SWORD), 5, E::MeleeDamage { percent: 10.0 }),
@@ -227,9 +229,43 @@ fn skills() -> Vec<SkillDef> {
     ]
 }
 
+/// The example's achievements (Database › Achievements; unlocks are the player's, kept next to
+/// the game's settings). Hidden Hoard has no conditions: the mine chest's Unlock trigger
+/// unlocks it with the action.
+fn achievements() -> Vec<AchievementDef> {
+    let icon = |f: u32| SpriteRef::new("items", f);
+    let defeated = |c: &str, n: i64| cond(Cond::Defeated { character: c.into(), op: CmpOp::Ge, count: n });
+    vec![
+        AchievementDef::new("first_blood", "First Blood", "Defeat your first slime.", icon(it::SWORD), vec![defeated("slime", 1)]),
+        AchievementDef::new("pest_control", "Pest Control", "Rid Tilda's deliveries of the slimes.", icon(it::POTION), vec![quest_is("pest_control", QuestCheck::Completed, 0)]),
+        AchievementDef::new("lights_in_the_dark", "Lights in the Dark", "Wake the old shrine in Whisperwood.", icon(it::SPELL_LIGHT), vec![cond(flag("shrine_lit"))]),
+        AchievementDef::new("seasoned", "Seasoned", "Reach level 5.", icon(it::STAR), vec![cond(Cond::Level { op: CmpOp::Ge, value: 5 })]),
+        AchievementDef::new(
+            "naturalist",
+            "Naturalist",
+            "Face a slime, a goblin archer, an outlaw and the bandit chief.",
+            icon(it::BOOK),
+            vec![defeated("slime", 1), defeated("goblin", 1), defeated("outlaw", 1), defeated("bandit_chief", 1)],
+        ),
+        AchievementDef { hidden: true, ..AchievementDef::new("hidden_hoard", "Hidden Hoard", "Pick the lock of the old mine's treasure chest.", icon(it::LOCKPICK), vec![]) },
+    ]
+}
+
+/// The example's crafting recipes, all brewed at the alchemy table ("alchemy" station).
+fn recipes() -> Vec<RecipeDef> {
+    let i = ItemStack::new;
+    vec![
+        RecipeDef::new("brew_potion", "potion", 1, vec![i("herb", 2)], "alchemy"),
+        RecipeDef::new("brew_antidote", "antidote", 1, vec![i("herb", 1), i("mushroom", 1)], "alchemy"),
+        RecipeDef::new("brew_mana", "mana_potion", 1, vec![i("mushroom", 2), i("apple", 1)], "alchemy"),
+        // Harder brews need some knowledge of magic.
+        RecipeDef { skill: "arcana".into(), level: 1, ..RecipeDef::new("brew_swiftness", "swiftness", 1, vec![i("herb", 2), i("mushroom", 2)], "alchemy") },
+    ]
+}
+
 /// The example's spells, learned from scrolls and books.
 fn spells() -> Vec<SpellDef> {
-    use rust2d_engine::skills::SpellEffect as E;
+    use rustpg2d_engine::skills::SpellEffect as E;
     let icon = |f: u32| SpriteRef::new("items", f);
     vec![
         SpellDef::new("heal", "Heal", "Mends your wounds: restores 3 hearts.", icon(it::SPELL_HEAL), 10, 2.0, E::Heal { amount: 6 }),
@@ -285,7 +321,7 @@ fn ground(m: &Map, x: i32, y: i32) -> Option<u32> {
 fn autotile_terrain(m: &mut Map, class: impl Fn(&Map, i32, i32) -> Option<&'static str>, extra: impl Fn(&Map, &str, i32, i32) -> bool) {
     let terrains = terrains();
     let slot = m.tileset_slot("terrain");
-    rust2d_engine::autotile::retile(
+    rustpg2d_engine::autotile::retile(
         m,
         0,
         slot,
@@ -446,7 +482,21 @@ fn village() -> Map {
     v.name = "mira".into();
     v.triggers = vec![trig(TriggerOn::Interact, vec![], vec![Action::RunScript { function: "mira_talk".into() }])];
     let v2 = b.entity(EntityKind::Character, "villager", 34, 14);
-    v2.triggers = vec![trig(TriggerOn::Interact, vec![], vec![dialog("Villager", "Lovely weather today, isn't it, {sir|miss}?")])];
+    // Tomas has a daily schedule (map inspector: Daily schedule): the shop in the morning, the
+    // duck pond at noon, the big pond in the afternoon, home (inside the elder's house, whose
+    // door is at 20,7) at night. What he says depends on the time (Time of day condition).
+    v2.name = "tomas".into();
+    v2.schedule = vec![
+        ScheduleStop::new(7.0, 34, 14),
+        ScheduleStop { facing: Some(Facing::Down), ..ScheduleStop::new(12.0, 22, 23) },
+        ScheduleStop { facing: Some(Facing::Down), ..ScheduleStop::new(16.0, 9, 23) },
+        ScheduleStop { facing: Some(Facing::Up), inside: true, ..ScheduleStop::new(20.5, 20, 7) },
+    ];
+    let daytime = |from: f32, to: f32| cond(Cond::TimeBetween { from, to });
+    v2.triggers = vec![
+        trig(TriggerOn::Interact, vec![daytime(6.0, 18.0)], vec![dialog("Tomas", "Lovely weather today, isn't it, {sir|miss}?")]),
+        trig(TriggerOn::Interact, vec![daytime(18.0, 6.0)], vec![dialog("Tomas", "Getting late, {sir|miss}. I'll be heading home soon - the elder keeps the door open for me.")]),
+    ];
     b.entity(EntityKind::Item, "apple", 8, 12);
     b.entity(EntityKind::Item, "apple", 37, 21);
 
@@ -466,9 +516,9 @@ fn village() -> Map {
     guard.name = "guard".into();
     // The guard carries a lantern: at night it lights the road as he walks.
     guard.light = Some(LightSpec::new(4.5, [255, 220, 170], false));
-    guard.patrol = Some(rust2d_engine::entity::PatrolRoute {
+    guard.patrol = Some(rustpg2d_engine::entity::PatrolRoute {
         points: vec![(8, 18), (20, 18), (30, 18), (38, 18)],
-        mode: rust2d_engine::entity::PatrolMode::PingPong,
+        mode: rustpg2d_engine::entity::PatrolMode::PingPong,
         pause: 1.5,
         speed: 0.0,
     });
@@ -491,6 +541,16 @@ fn village() -> Map {
         }
     }
 
+    // The big pond is a fishing spot (the zone covers its water; fish from the shore with the
+    // Fishing Rod from Tilda): mostly trout, now and then an old boot (chances are weights).
+    let spot = b.zone("pond_fishing", 6, 25, 9, 5, ZoneKind::FishingSpot { rod: "fishing_rod".into() });
+    if let Some(z) = b.m.zones.iter_mut().find(|z| z.uid == spot) {
+        z.loot = Some(vec![LootEntry::new("trout", 75.0, 1, 1), LootEntry::new("old_boot", 25.0, 1, 1)]);
+    }
+    // Benches by the road to sit on (furniture).
+    b.entity(EntityKind::Prop, "bench", 12, 16);
+    b.entity(EntityKind::Prop, "bench", 31, 16);
+
     b.m.edges.east = Some(EdgeLink { target_map: "forest".into(), offset: 6, depth: 1 });
     b.m.triggers = vec![
         // A new game's intro: a cut-scene (the script's intro_cutscene()), then the welcome.
@@ -500,7 +560,7 @@ fn village() -> Map {
         conditions: vec![],
         actions: vec![dialog(
             "",
-            "Welcome to the rust2d demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Character & inventory: C or I, skills: K, spells: L. Quest journal: J. Map: M. Save/Load: F5/F9. Debug: F3.",
+            "Welcome to the R(ust)PG2D demo! Move: arrows/WASD or left-click. Interact: E/Space or right-click. Attack: X or left-click an enemy. Switch weapon: Q. Character & inventory: C or I, skills: K, spells: L. Quest journal: J. Map: M. Save/Load: F5/F9. Debug: F3.",
         )],
         once: true,
     }];
@@ -541,18 +601,20 @@ fn shop() -> Map {
     b.fill(0, 4, 6, 5, 2, t::RUG);
     b.set(0, 6, 9, t::WOOD_FLOOR);
     b.set(1, 6, 9, t::DOOR);
-    b.m.set_collision(6, 9, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(6, 9, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.spawn("entrance", 6, 8);
     b.portal(6, 9, "village", "shop_door");
     // Tilda behind her counter, with her own stock and prices.
     let merchant = b.entity(EntityKind::Character, "merchant_f", 6, 3);
     merchant.name = "tilda".into();
-    merchant.facing = rust2d_engine::entity::Facing::Down;
+    merchant.facing = rustpg2d_engine::entity::Facing::Down;
     merchant.shop = Some(ShopSpec {
         title: "Tilda's Wares".into(),
         currency: "coin".into(),
         items: vec![
             ShopEntry { unlimited: true, ..ShopEntry::new("apple", 0, 4) },
+            ShopEntry { unlimited: true, ..ShopEntry::new("herb", 0, 3) },
+            ShopEntry::new("fishing_rod", 2, 20),
             ShopEntry::new("potion", 5, 0),
             ShopEntry { unlimited: true, ..ShopEntry::new("arrows", 0, 2) },
             ShopEntry::new("bolts", 20, 0),
@@ -633,6 +695,10 @@ fn shop() -> Map {
     barrel.container = Some(ContainerSpec { size: 4, items: vec![ItemStack::new("apple", 1)], ..Default::default() });
     b.entity(EntityKind::Prop, "barrel", 10, 6);
     b.entity(EntityKind::Prop, "barrel", 10, 8);
+    // An alchemy table for the customers (crafting: Database › Recipes, station "alchemy").
+    b.entity(EntityKind::Prop, "alchemy_table", 1, 8);
+    // A chair to rest on.
+    b.entity(EntityKind::Prop, "chair", 2, 6);
     b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
     autotile_terrain(&mut b.m, |m, x, y| (ground(m, x, y)? == t::RUG).then_some("Rug"), |_, _, _, _| false);
@@ -651,13 +717,12 @@ fn house() -> Map {
     b.fill(1, 11, 0, 1, h as i32, t::VOID);
     b.fill(1, 0, 9, w as i32, 1, t::VOID);
     b.fill(0, 4, 4, 4, 3, t::RUG);
-    b.set(1, 2, 2, t::BED);
-    b.set(1, 2, 3, t::BED_FOOT);
+    // (The bed is a prop now: furniture the player sleeps in, placed at the end.)
     b.fill(1, 6, 2, 2, 1, t::SHELF);
     b.set(1, 9, 5, t::TABLE);
     b.set(0, 6, 9, t::WOOD_FLOOR);
     b.set(1, 6, 9, t::DOOR);
-    b.m.set_collision(6, 9, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(6, 9, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.spawn("entrance", 6, 8);
     b.portal(6, 9, "village", "house_door");
     // The elder's chest: a container that only opens once the quest was accepted.
@@ -674,6 +739,16 @@ fn house() -> Map {
     b.entity(EntityKind::Item, "bow", 1, 7);
     let arrows = b.entity(EntityKind::Item, "arrows", 2, 8);
     arrows.count = 20;
+    // The elder's bed: sleep until morning (Database › Props › Bed › Furniture).
+    b.entity(EntityKind::Prop, "bed", 2, 3);
+    // The elder's table with a chair on each side (chairs face every way).
+    b.set(1, 8, 5, t::TABLE);
+    b.entity(EntityKind::Prop, "chair", 8, 4);
+    b.entity(EntityKind::Prop, "chair_right", 7, 5);
+    b.entity(EntityKind::Prop, "chair_left", 10, 5);
+    b.entity(EntityKind::Prop, "chair_up", 9, 6);
+    // A sideways bed for a guest by the door.
+    b.entity(EntityKind::Prop, "bed_side", 4, 8);
     b.m.background = [13, 13, 20];
     b.m.music = "music_village".into();
     autotile_terrain(&mut b.m, |m, x, y| (ground(m, x, y)? == t::RUG).then_some("Rug"), |_, _, _, _| false);
@@ -713,7 +788,7 @@ fn forest() -> Map {
     // Cave entrance to the wilds in the north-east.
     b.fill(1, 52, 3, 9, 4, t::CLIFF);
     b.set(1, 56, 6, t::CAVE);
-    b.m.set_collision(56, 6, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(56, 6, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.fill(0, 56, 7, 1, 10, t::PATH);
     b.portal(56, 6, "wilds", "start");
     b.spawn("cave", 56, 7);
@@ -806,6 +881,8 @@ fn forest() -> Map {
     b.m.background = [10, 25, 10];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.8 };
+    // An eerie fog over Whisperwood: it lifts when the shrine is lit (shrine_awakening).
+    b.m.weather = rustpg2d_engine::map::Weather::new(rustpg2d_engine::map::WeatherKind::Fog, 0.45);
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
     // The old mine: a second cave mouth in the cliff, west of the one to the wilds.
@@ -816,7 +893,7 @@ fn forest() -> Map {
         }
     }
     b.set(1, 53, 6, t::CAVE);
-    b.m.set_collision(53, 6, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(53, 6, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.fill(0, 53, 7, 4, 1, t::PATH);
     b.portal(53, 6, "mine", "entrance");
     b.spawn("mine", 53, 7);
@@ -854,6 +931,12 @@ fn forest() -> Map {
     for y in 16..30 {
         if b.get(0, 39, y) == Some(t::PATH) {
             b.fill(0, 40, y, 2, 1, t::PATH);
+        }
+    }
+    // Herbs and mushrooms along the path (alchemy ingredients).
+    for (k, x) in [5, 11, 17, 24, 31, 37].into_iter().enumerate() {
+        if let Some(y) = (16..32).find(|&y| b.get(0, x, y) == Some(t::PATH) && b.free(x, y)) {
+            b.entity(EntityKind::Item, if k % 2 == 0 { "herb" } else { "mushroom" }, x, y);
         }
     }
     autotile_terrain(
@@ -925,7 +1008,7 @@ fn wilds() -> Map {
     }
     b.fill(1, 510, 506, 5, 3, t::CLIFF);
     b.set(1, 512, 508, t::CAVE);
-    b.m.set_collision(512, 508, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(512, 508, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.portal(512, 508, "forest", "cave");
     b.spawn("start", 512, 510);
     // Scatter coins across the land.
@@ -994,6 +1077,7 @@ fn wilds() -> Map {
     b.m.background = [30, 60, 120];
     b.m.music = "music_forest".into();
     b.m.lighting = MapLighting { mode: LightMode::Outdoor, darkness: 0.75 };
+    b.m.weather = rustpg2d_engine::map::Weather::new(rustpg2d_engine::map::WeatherKind::Rain, 0.5);
     // Explored regions: the map screen reveals it as the player walks around.
     b.m.fog = true;
     // Auto-tiling: lakes with sandy shores, soft edges between grass, forest and snow.
@@ -1027,6 +1111,7 @@ fn database() -> Database {
         default_state: default_state_name(),
         states: vec![],
         light: None,
+        use_spot: None,
     };
     let state = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid, light: None };
     // `body` = the body sheet of monsters; people get their layered look in `layered_characters`.
@@ -1067,6 +1152,7 @@ fn database() -> Database {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -1241,6 +1327,14 @@ fn database() -> Database {
                 item("swiftness", "Swiftness Potion", "You move 30% faster for half a minute.", it::SWIFTNESS, true, use_trig(vec![Action::ApplyEffect { target: "player".into(), effect: EffectSpec::new(EffectKind::Haste, 30.0, 30.0) }])),
                 10,
             ),
+            // Fishing (village pond: a fishing spot zone). The rod is needed to fish there.
+            // A tool (Tool slot, tool kind "fishing rod"): in the hand while fishing.
+            stack(ItemDef { tool: "fishing rod".into(), ..item("fishing_rod", "Fishing Rod", "A tool: stand at the pond's edge and press E to cast.", it::ROD, false, vec![]) }, 1),
+            stack(item("trout", "Trout", "A fresh trout. Eating it restores a heart.", it::TROUT, true, use_trig(vec![Action::Heal { amount: 2 }])), 10),
+            stack(item("old_boot", "Old Boot", "Soggy. Nobody wants it - except perhaps a merchant who buys anything.", it::BOOT, false, vec![]), 5),
+            // Crafting ingredients (Database › Recipes: brewed at the alchemy table in Tilda's shop).
+            stack(item("herb", "Healing Herb", "A fragrant herb. Brewed into potions at an alchemy table.", it::HERB, false, vec![]), 20),
+            stack(item("mushroom", "Red Cap", "A red forest mushroom. Useful in brews, not for dinner.", it::MUSHROOM, false, vec![]), 20),
             stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new(), overlay_f: String::new() }), 1),
             stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
         ],
@@ -1279,6 +1373,47 @@ fn database() -> Database {
                 ..prop("shrine", "Shrine", p::GRAND_SHRINE, true, [40.0, 7.0])
             },
             prop("well", "Well", p::WELL, true, [14.0, 8.0]),
+            // Furniture (Database › Props › Furniture): sit on chairs and benches, sleep in beds.
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Down, ..Default::default() }),
+                ..prop("chair", "Chair", p::CHAIR, true, [10.0, 4.0])
+            },
+            // The same chair facing the other ways (one prop per direction): facing up, its
+            // backrest is drawn over the sitter (the cover).
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, -8.0], facing: Facing::Up, cover: sprite("props", p::CHAIR_UP_BACK), ..Default::default() }),
+                ..prop("chair_up", "Chair (facing up)", p::CHAIR_UP, true, [10.0, 4.0])
+            },
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Left, ..Default::default() }),
+                ..prop("chair_left", "Chair (facing left)", p::CHAIR_LEFT, true, [10.0, 4.0])
+            },
+            PropDef {
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Right, ..Default::default() }),
+                ..prop("chair_right", "Chair (facing right)", p::CHAIR_RIGHT, true, [10.0, 4.0])
+            },
+            PropDef {
+                sprite: SpriteRef::block("props", p::BENCH, 2, 1),
+                use_spot: Some(UseSpot { pose: Pose::Sit, offset: [0.0, 2.0], facing: Facing::Down, ..Default::default() }),
+                ..prop("bench", "Bench", p::BENCH, true, [28.0, 4.0])
+            },
+            PropDef {
+                sprite: SpriteRef::block("props", p::BED, 1, 2),
+                // The head on the pillow; the quilt (cover) is drawn over the sleeper.
+                use_spot: Some(UseSpot { pose: Pose::Lie, offset: [0.0, -17.0], facing: Facing::Up, sleep_until: 7.0, cover: SpriteRef::block("props", p::BLANKET, 1, 2), ..Default::default() }),
+                ..prop("bed", "Bed", p::BED, true, [14.0, 28.0])
+            },
+            // A sideways bed: the head at the left (the sleeper is drawn turned).
+            PropDef {
+                sprite: SpriteRef::block("props", p::BED_SIDE, 2, 1),
+                use_spot: Some(UseSpot { pose: Pose::Lie, offset: [19.0, -16.0], facing: Facing::Left, sleep_until: 7.0, cover: SpriteRef::block("props", p::BLANKET_SIDE, 2, 1), ..Default::default() }),
+                ..prop("bed_side", "Bed (sideways)", p::BED_SIDE, true, [30.0, 12.0])
+            },
+            // A crafting station: its definition's Interact trigger opens the "alchemy" recipes.
+            PropDef {
+                triggers: vec![trig(TriggerOn::Interact, vec![], vec![Action::OpenCrafting { station: "alchemy".into(), title: "Alchemy Table".into() }])],
+                ..prop("alchemy_table", "Alchemy Table", p::ALCHEMY, true, [26.0, 10.0])
+            },
             // Multi-tile props.
             PropDef {
                 sprite: SpriteRef::block("props", p::DOUBLE_GATE, 2, 2),
@@ -1321,7 +1456,8 @@ fn database() -> Database {
             hero,
             ch("elder", "Elder", "", 40.0, Behavior::Static),
             ch("villager", "Villager", "", 35.0, Behavior::Wander { radius: 3.0 }),
-            ch("guard", "Town Guard", "", 40.0, Behavior::Static),
+            // The guard can be hurt (he can come along as a companion: guard_talk()).
+            CharacterDef { max_hp: 8, ..ch("guard", "Town Guard", "", 40.0, Behavior::Static) },
             slime,
             goblin,
             goblin_f,
@@ -1338,6 +1474,8 @@ fn database() -> Database {
         ],
         skills: skills(),
         spells: spells(),
+        recipes: recipes(),
+        achievements: achievements(),
     };
     layered_characters(&mut db);
     // Trade values (merchants use them unless their stock sets a price).
@@ -1423,7 +1561,7 @@ fn mine() -> Map {
     // Entrance: a door in the bottom wall leads back to the forest.
     set(&mut b, 0, 14, 19, 0);
     set(&mut b, 1, 14, 19, 6);
-    b.m.set_collision(14, 19, rust2d_engine::map::CollisionOverride::Walkable);
+    b.m.set_collision(14, 19, rustpg2d_engine::map::CollisionOverride::Walkable);
     b.portal(14, 19, "forest", "mine");
     b.spawn("entrance", 14, 18);
     // Wall torches (tile lights) in the entrance hall and the cavern.
@@ -1446,6 +1584,8 @@ fn mine() -> Map {
     });
     // No key exists for it: only lockpicking 2 opens it.
     chest.lock = Some(LockSpec { pick_difficulty: 2, locked_text: "An old lock with no keyhole worth the name. A skilled lockpick might manage.".into(), ..Default::default() });
+    // Opening it unlocks the hidden achievement "Hidden Hoard" (Database › Achievements).
+    chest.triggers = vec![trig(TriggerOn::Unlock, vec![], vec![Action::UnlockAchievement { id: "hidden_hoard".into() }])];
     b.m.background = [0, 0, 0];
     b.m.lighting = MapLighting { mode: LightMode::Dark, darkness: 1.0 };
     // Explored regions: the map screen reveals it as the player walks around.
@@ -1464,13 +1604,13 @@ fn mine() -> Map {
         set(&mut b, 0, x, y, chasm_tile);
     }
     let of = |m: &Map, x: i32, y: i32| m.layers[0].get(x as u32, y as u32).parts().filter(|p| p.0 == dg as usize).map(|p| p.1);
-    rust2d_engine::autotile::retile(
+    rustpg2d_engine::autotile::retile(
         &mut b.m,
         0,
         dg,
         &dterrains,
-        |m, x, y| of(m, x, y).and_then(|i| rust2d_engine::autotile::terrain_of(&dterrains, i)),
-        |m, k, x, y| of(m, x, y).is_some_and(|i| rust2d_engine::autotile::counts_as(&dterrains, k, i)),
+        |m, x, y| of(m, x, y).and_then(|i| rustpg2d_engine::autotile::terrain_of(&dterrains, i)),
+        |m, k, x, y| of(m, x, y).is_some_and(|i| rustpg2d_engine::autotile::counts_as(&dterrains, k, i)),
     );
     b.m
 }
@@ -1488,6 +1628,9 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               heal(n) play_sound(id) play_music(id) set_locked(target, b)
 //               open_shop(target) set_state(target, state)
 //               patrol(target) patrol(target, [[x, y], ...]) stop_patrol(target)
+//               follow(target) stop_following(target) is_companion(name) companion_count()
+//               unlock_achievement(id) achievement_unlocked(id) open_crafting(station[, title]) can_craft(recipe)
+//               stop_schedule(target) follow_schedule(target)
 // Cut-scenes:   cutscene(fn) walk_to(target, x, y) approach(target, other) place(target, x, y)
 //               hide_ui() show_ui() dim(amount, seconds) disable_spawners(map) enable_spawners(map)
 // Quests:       start_quest(id) advance_quest(id) set_quest_stage(id, n) complete_quest(id)
@@ -1504,6 +1647,8 @@ const SCRIPT: &str = r#"// Rhai scripts for the example project.
 //               fn(x, y) on arrival; effect(sheet, x, y, #{ ... }); damage_area(x, y, r, dmg)
 // Other:        player_hp() player_max_hp() player_x() player_y() player_facing()
 //               random(n) current_map()
+// Weather:      set_weather(kind, [intensity]) set_map_weather(map, kind, intensity) (queued;
+//               "rain", "snow", "fog", "none", "default"); weather() weather_intensity()
 // Targets: "self" (trigger owner), "player", or an entity name.
 
 fn mira_talk() {
@@ -1583,6 +1728,7 @@ fn shrine_awakening() {
     set_flag("shrine_lit", true);
     set_quest_stage("strange_lights", 2);
     dim(0, 2);
+    set_weather("none");                        // the eerie fog lifts (kept in the save game)
     wait(1.5);
     emit("shrine_lit");
 }
@@ -1624,17 +1770,40 @@ fn intro_cutscene() {
     wait(0.4);
     approach("guard", "player");
     say("Guard", "Halt, traveller! ... {player}? Thank the stars, you came!");
+    say("{player}", "I came as fast as I could. What is going on?");
     say("Guard", "Something is not right in Whisperwood, east of town. Strange lights flicker between the trees at night, and the slimes grow bolder every day.");
     say("Guard", "Please, talk to Elder Rowan at once - he is waiting by the well in the middle of town.");
     wait(0.3);
 }
 
+// Once the player took on the elder's quest, the guard offers to come along: follow(target)
+// makes a character a companion (it follows from map to map and fights by the player's side),
+// stop_following(target) sends it home; is_companion(name) tells.
 fn guard_talk() {
-    if flag("shrine_lit") {
+    if is_companion("guard") {
+        choice("Shall I go back to my post, {player}?", ["Yes, thank you", "No, stay with me"], "guard_leave");
+        then_call("guard_answer");
+    } else if flag("shrine_lit") {
         say("Guard", "The lights are gone - I can finally take a rest. Thank you, {player}!");
         stop_patrol("guard");
+    } else if flag("quest_accepted") {
+        say("Guard", "Whisperwood, is it? You shouldn't go alone - the slimes grow bolder every day.");
+        choice("Take the guard along?", ["Come with me", "I'll manage"], "guard_join");
+        then_call("guard_answer");
     } else {
         say("Guard", "Halt! Oh, it's you, {player}. Careful in Whisperwood, {sir|ma'am} - strange lights out there.");
+    }
+}
+
+fn guard_answer() {
+    if is_companion("guard") {
+        if get_var("guard_leave") == 0 {
+            say("Guard", "Back to the road, then. Good luck, {player}!");
+            stop_following("guard");
+        }
+    } else if get_var("guard_join") == 0 {
+        say("Guard", "Lead the way, {player}!");
+        follow("guard");
     }
 }
 
@@ -1699,7 +1868,7 @@ fn layered_characters(db: &mut Database) {
     }
     db.sheets.push(SheetDef::new("outfit_icons", "sprites/outfit_icons.png", 32, 32));
     // What weapons, shields and lights look like in a hand.
-    for (item, held) in [("sword", "held_sword"), ("spear", "held_spear"), ("axe", "held_axe"), ("bow", "held_bow"), ("crossbow", "held_crossbow"), ("wooden_shield", "held_shield"), ("lantern", "held_lantern"), ("torch", "held_torch")] {
+    for (item, held) in [("sword", "held_sword"), ("spear", "held_spear"), ("axe", "held_axe"), ("bow", "held_bow"), ("crossbow", "held_crossbow"), ("wooden_shield", "held_shield"), ("lantern", "held_lantern"), ("torch", "held_torch"), ("fishing_rod", "held_rod")] {
         db.items.iter_mut().find(|d| d.id == item).expect(item).held = held.into();
     }
     // The goblins' own bow: what they shoot with, dropped when they are defeated.
@@ -1719,7 +1888,7 @@ fn layered_characters(db: &mut Database) {
         beard: if beard { "beard_full".into() } else { String::new() },
     };
     let worn = |slots: &[(EquipSlot, &str)]| {
-        let mut e = rust2d_engine::state::Equipment::default();
+        let mut e = rustpg2d_engine::state::Equipment::default();
         for (slot, item) in slots {
             *e.slot_mut(*slot) = Some(ItemStack::new(item, 1));
         }
@@ -1794,7 +1963,7 @@ fn main() {
     let project = Project {
         root: out.clone(),
         config: ProjectConfig {
-            name: "rust2d example".into(),
+            name: "R(ust)PG2D example".into(),
             tile_size: TS,
             start_map: "village".into(),
             start_spawn: "start".into(),
@@ -1812,9 +1981,9 @@ fn main() {
                 unlock: "unlock".into(),
             },
             inventory_size: 24,
-            creation: rust2d_engine::project::CharacterCreation {
+            creation: rustpg2d_engine::project::CharacterCreation {
                 enabled: true,
-                sex: rust2d_engine::project::SexChoice::Both,
+                sex: rustpg2d_engine::project::SexChoice::Both,
                 default_name: "Alex".into(),
                 // The player picks skin, hair style, hair color and (men) a beard.
                 body_male: "body_male".into(),
@@ -1825,9 +1994,11 @@ fn main() {
                 beards: vec![String::new(), "beard_full".into(), "beard_goatee".into()],
             },
         day_minutes: 24.0, start_hour: 8.0,
-        skills: rust2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
+        skills: rustpg2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
         // Experience and levels: a few levels over the example's quests and fights.
-        progression: rust2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
+        progression: rustpg2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
+        // Dialog boxes show the speaker's portrait (found from the speaker's name).
+        dialog_portraits: true,
         },
         db: database(),
     };
@@ -1847,8 +2018,8 @@ fn main() {
 /// Rhai functions are dropped (they belong to the example's story); skills and spells made of
 /// scripts keep the functions they need.
 fn write_starter_pack(project: &Project) {
-    use rust2d_engine::library::{all_assets, Bundle};
-    let mut b = Bundle::collect(&project.db, &project.root, TS, "rust2d starter assets", &all_assets(&project.db)).unwrap();
+    use rustpg2d_engine::library::{all_assets, Bundle};
+    let mut b = Bundle::collect(&project.db, &project.root, TS, "R(ust)PG2D starter assets", &all_assets(&project.db)).unwrap();
     // Library-only extras: more tilesets, props and characters.
     let extra = art::extra::library_extras();
     // (The example project's own version wins when an id exists in both, e.g. "merchant_f".)
@@ -1877,9 +2048,9 @@ fn write_starter_pack(project: &Project) {
     }
     // Script functions the remaining assets need travel along (Fireball's cast_fireball() and
     // what it calls, Scavenging's scavenging()); everything else in main.rhai stays behind.
-    let fns = rust2d_engine::library::read_scripts(&project.root);
-    let roots: Vec<String> = all_assets(&b.db).iter().flat_map(|a| rust2d_engine::library::script_roots(&b.db, a)).collect();
-    let needed = rust2d_engine::script_refs::needed_functions(&fns, &roots);
+    let fns = rustpg2d_engine::library::read_scripts(&project.root);
+    let roots: Vec<String> = all_assets(&b.db).iter().flat_map(|a| rustpg2d_engine::library::script_roots(&b.db, a)).collect();
+    let needed = rustpg2d_engine::script_refs::needed_functions(&fns, &roots);
     b.scripts = fns.into_iter().filter(|f| needed.contains(&f.name)).map(|f| (f.name, f.text)).collect();
     println!("starter scripts: {:?}", b.scripts.keys().collect::<Vec<_>>());
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../editor/assets/starter.r2dpack");

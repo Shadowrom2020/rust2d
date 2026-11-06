@@ -92,7 +92,9 @@ pub struct TileAnim {
 impl ItemDef {
     /// The equipment slot this item goes into, if it can be equipped.
     pub fn equip_slot(&self) -> Option<EquipSlot> {
-        if self.weapon.is_some() {
+        if !self.tool.is_empty() {
+            Some(EquipSlot::Tool)
+        } else if self.weapon.is_some() {
             Some(EquipSlot::Weapon)
         } else {
             self.armor.as_ref().map(|a| a.slot)
@@ -327,6 +329,9 @@ pub enum EquipSlot {
     Offhand,
     /// An outfit: changes how a layered character looks (armor is worn over it).
     Clothing,
+    /// A tool used for an activity (a fishing rod, later pickaxes, hoes, …): held in the
+    /// right hand while it is being used, the weapon otherwise.
+    Tool,
 }
 
 impl EquipSlot {
@@ -338,10 +343,11 @@ impl EquipSlot {
             "body" | "armor" => EquipSlot::Body,
             "weapon" | "hand" | "right" => EquipSlot::Weapon,
             "offhand" | "left" | "left hand" | "shield" => EquipSlot::Offhand,
+            "tool" => EquipSlot::Tool,
             _ => return None,
         })
     }
-    pub const ALL: [EquipSlot; 5] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand];
+    pub const ALL: [EquipSlot; 6] = [EquipSlot::Clothing, EquipSlot::Head, EquipSlot::Body, EquipSlot::Weapon, EquipSlot::Offhand, EquipSlot::Tool];
     pub fn label(self) -> &'static str {
         match self {
             EquipSlot::Clothing => "Clothing",
@@ -349,6 +355,7 @@ impl EquipSlot {
             EquipSlot::Body => "Body",
             EquipSlot::Weapon => "Weapon",
             EquipSlot::Offhand => "Left hand",
+            EquipSlot::Tool => "Tool",
         }
     }
 }
@@ -441,9 +448,13 @@ pub struct ItemDef {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub teaches: String,
     /// Sheet (character layout) drawn in the character's hand while the item is in the Weapon
-    /// or left-hand slot; "" = not visible.
+    /// or left-hand slot, or a tool while it is used; "" = not visible.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub held: String,
+    /// What kind of tool it is ("fishing rod", "pickaxe", …; "" = no tool): tools go into the
+    /// Tool slot and are what activities ask for (a fishing spot needs a fishing rod).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tool: String,
 }
 
 fn default_max_stack() -> u32 {
@@ -578,6 +589,68 @@ pub struct PropDef {
     /// Light of the default state (e.g. a lit lamp).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<LightSpec>,
+    /// Furniture: where and how a character uses it (sits, lies, stands at it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_spot: Option<UseSpot>,
+}
+
+/// How a character uses a piece of furniture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Pose {
+    /// Chairs, benches: a short rest.
+    #[default]
+    Sit,
+    /// Beds: sleeping skips time.
+    Lie,
+    /// Counters, anvils, desks: only facing it.
+    Stand,
+}
+
+impl Pose {
+    pub const ALL: [Pose; 3] = [Pose::Sit, Pose::Lie, Pose::Stand];
+    pub fn label(self) -> &'static str {
+        match self {
+            Pose::Sit => "Sit",
+            Pose::Lie => "Lie (bed)",
+            Pose::Stand => "Stand",
+        }
+    }
+}
+
+/// The spot of a piece of furniture: where the user's feet go (relative to the prop's feet,
+/// pixels) and how they are posed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UseSpot {
+    #[serde(default)]
+    pub pose: Pose,
+    #[serde(default)]
+    pub offset: [f32; 2],
+    /// The way the user looks (chairs: any of the four). In a bed: the side the head is on
+    /// (Up = at the top, an upright bed; Left / Right = a sideways bed; Down = at the bottom).
+    #[serde(default)]
+    pub facing: crate::entity::Facing,
+    /// Beds: the hour sleeping lasts until.
+    #[serde(default = "default_wake")]
+    pub sleep_until: f32,
+    /// Drawn over the user while it is used (a bed's blanket); empty sheet = nothing.
+    #[serde(default)]
+    pub cover: SpriteRef,
+    /// The furniture can only be used when these hold (a paid inn room)...
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<crate::events::Condition>,
+    /// ...else this is shown ("" = "You can't use that now.").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub refuse_text: String,
+}
+
+fn default_wake() -> f32 {
+    7.0
+}
+
+impl Default for UseSpot {
+    fn default() -> Self {
+        UseSpot { pose: Pose::Sit, offset: [0.0, 0.0], facing: Default::default(), sleep_until: default_wake(), cover: SpriteRef::default(), conditions: Vec::new(), refuse_text: String::new() }
+    }
 }
 
 /// A named look of a prop: its sprite and whether it blocks movement.
@@ -915,6 +988,10 @@ pub struct Database {
     /// Skills and spells (`ProjectConfig::skills` switches the systems on).
     pub skills: Vec<crate::skills::SkillDef>,
     pub spells: Vec<crate::skills::SpellDef>,
+    /// Crafting recipes.
+    pub recipes: Vec<crate::crafting::RecipeDef>,
+    /// Achievements (the game's; unlocks are the player's, see `achievements::Progress`).
+    pub achievements: Vec<crate::achievements::AchievementDef>,
 }
 
 /// A multi-tile asset ("structure"): tiles on several map layers, collision overrides and
@@ -976,6 +1053,16 @@ impl Database {
     }
     pub fn spell(&self, id: &str) -> Option<&crate::skills::SpellDef> {
         self.spells.iter().find(|d| d.id == id)
+    }
+    pub fn achievement(&self, id: &str) -> Option<&crate::achievements::AchievementDef> {
+        self.achievements.iter().find(|d| d.id == id)
+    }
+    pub fn recipe(&self, id: &str) -> Option<&crate::crafting::RecipeDef> {
+        self.recipes.iter().find(|d| d.id == id)
+    }
+    /// Recipes of a crafting station, in definition order.
+    pub fn recipes_at<'a>(&'a self, station: &'a str) -> impl Iterator<Item = &'a crate::crafting::RecipeDef> + 'a {
+        self.recipes.iter().filter(move |r| r.station == station)
     }
 
     /// Ids of all definitions of a kind (for editor dropdowns).
@@ -1136,6 +1223,7 @@ mod tests {
         light: None,
         teaches: String::new(),
         held: String::new(),
+        tool: String::new(),
             });
         }
         let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };
@@ -1244,5 +1332,20 @@ mod tests {
         assert_eq!(a.frame_at(1.5), 3);
         let still = TileAnim { tile: 3, frames: vec![], fps: 2.0 };
         assert_eq!(still.frame_at(9.0), 3);
+    }
+}
+
+#[cfg(test)]
+mod furniture_tests {
+    use super::*;
+
+    #[test]
+    fn use_spots_in_ron() {
+        // Props from before furniture have none; a minimal spot gets the defaults.
+        let p: PropDef = ron::from_str("(id: \"bed\", name: \"Bed\", sprite: (sheet: \"props\", frame: 0))").unwrap();
+        assert!(p.use_spot.is_none());
+        let s: UseSpot = ron::from_str("(pose: Lie)").unwrap();
+        assert_eq!((s.pose, s.sleep_until, s.cover.sheet.as_str()), (Pose::Lie, 7.0, ""));
+        assert!(!ron::to_string(&p).unwrap().contains("use_spot"));
     }
 }

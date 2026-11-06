@@ -4,8 +4,8 @@
 //! the speed from the frames' durations.
 
 use anyhow::{bail, Result};
-use rust2d_engine::defs::SheetTag;
-use rust2d_engine::imageio::Rgba;
+use rustpg2d_engine::defs::SheetTag;
+use rustpg2d_engine::imageio::Rgba;
 
 use super::tiled::{j_arr, j_map, j_num, j_str, json};
 
