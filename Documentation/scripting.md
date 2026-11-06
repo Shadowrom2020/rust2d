@@ -289,6 +289,19 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
+| `defeated_count(character)` | How many characters of a definition the player has defeated (the bestiary's count), e.g. `defeated_count("slime")`. |
+| `hp_of(target)` | A character's HP right now: `"player"`, `"self"` (or `SELF`) or the name of a character on this map; `-1` if there is none (or it can't be hurt). |
+
+A character's *HP below %* trigger runs when its HP falls below that share of its max HP and it
+survives the hit, e.g. a boss calling for help at half its HP. It runs again if the character
+is healed above the threshold and falls below it once more; tick *once* to prevent that.
+
+```rust
+fn ogre_hurt() {                      // the ogre's "HP below 30 %" trigger runs this
+    say(SELF, "You will pay for that!");
+    if hp_of(SELF) < 3 { apply_effect("self", "strength", 50, 20); }
+}
+```
 
 ### Cut-scenes
 
@@ -359,6 +372,8 @@ are still shown. Not saved: a loaded game always starts with the HUD visible.
 |---|---|
 | `hide_ui()` | Hides the HUD. *(queued)* |
 | `show_ui()` | Shows it again. *(queued)* |
+| `shake(seconds)` | Shakes the screen as hard as a hit on the player, fading out (earthquakes, explosions, a boss landing). *(queued)* |
+| `shake(seconds, strength)` | The same with a strength: `1` = like a hit, `2` = twice as hard. *(queued)* |
 
 ### Saving
 
@@ -413,6 +428,68 @@ These only matter in projects with skills (and magic) enabled in *Database › P
 | `mana()` | Current mana. |
 | `add_mana(amount)` | Adds mana (negative drains it). *(queued)* |
 
+### Experience and levels
+
+These only matter in projects with *Experience and levels* enabled in *Database › Project*. Defeated
+characters give the experience set in their definition (*Combat › Experience*), completed quests their
+*Experience reward*; enough experience raises the level, which adds max HP, mana and skill points as set
+in the project. *Defeat all enemies* / `defeat_enemies()` gives no experience.
+
+| Function | Description |
+|---|---|
+| `xp()` | All the experience points the player has gained. |
+| `level()` | The player's level (`1` = the first). |
+| `give_xp(amount)` | Gives experience; enough of it raises the level, possibly several at once. Negative takes experience away, but the level never drops. *(queued)* |
+
+```rust
+fn trainer_talk() {
+    if level() < 3 {
+        say(SELF, "Come back when you have seen a few more fights.");
+        return;
+    }
+    say(SELF, "You have grown strong. Take this lesson.");
+    give_xp(50);
+}
+```
+
+### Status effects
+
+Timed effects on the player or a character. Weapons can give them on hit and hostile characters
+on touch (set in the Database); these functions start and end them from scripts, like the
+*Apply effect* / *Cure effect* actions. The player's effects are saved; a character's last until
+the map is left. Applying an effect that is already running restarts it with the longer duration
+and the stronger strength.
+
+| Effect | `strength` means |
+|---|---|
+| `"poison"`, `"burn"` | HP lost per second (fractions add up; defense doesn't help) |
+| `"regen"` | HP regained per second |
+| `"slow"`, `"haste"` | percent slower / faster movement |
+| `"strength"`, `"weakness"` | percent more / less damage dealt |
+| `"shield"` | extra defense |
+| `"stun"` | (unused) can't move or attack |
+
+| Function | Description |
+|---|---|
+| `apply_effect(target, effect, strength, seconds)` | Starts an effect on `"player"`, `"self"` or a character's name. *(queued)* |
+| `cure(target, effect)` | Ends one effect, e.g. `cure("player", "poison")`. *(queued)* |
+| `cure(target)` | Ends all of the target's effects. *(queued)* |
+| `has_effect(effect)` | Whether the player has the effect right now. |
+
+```rust
+fn swamp_gas() {
+    if !has_effect("poison") {
+        say("The air here burns in your throat.");
+    }
+    apply_effect("player", "poison", 1, 5);   // 1 HP per second for 5 seconds
+}
+
+fn holy_water() {
+    cure("player");                              // every effect
+    apply_effect("player", "regen", 0.5, 10);
+}
+```
+
 ### Spell effects: targeting, flying sprites, animations, damage
 
 Use these to build spells (and traps, cut-scenes, …) in scripts.
@@ -423,7 +500,7 @@ Use these to build spells (and traps, cut-scenes, …) in scripts.
 | `fly(sheet, x, y, function)` | An animated sprite flies from the player to point `x, y`, turned in its direction, then calls `function(x, y)` (`""` = call nothing). *(queued)* |
 | `fly(sheet, x, y, function, options)` | Like above with [options](#options-maps): `speed`, `frames`, `fps`, `scale`, `light`, `color`. *(queued)* |
 | `effect(sheet, x, y)` | Plays the frames of a sprite sheet once, centered on `x, y` (explosions, sparkles). *(queued)* |
-| `effect(sheet, x, y, options)` | Like above with options: `frames`, `fps`, `scale`, `light`, `color`. *(queued)* |
+| `effect(sheet, x, y, options)` | Like above with options: `frames`, `fps`, `scale`, `light`, `color`, `shake` (seconds the screen shakes as it starts). *(queued)* |
 | `damage_area(x, y, radius, damage)` | Damages every character within `radius` tiles of `x, y`. Spell damage skills increase it. Never hurts the player. *(queued)* |
 | `damage_around(damage, radius)` | The same around the player. *(queued)* |
 
@@ -550,7 +627,7 @@ fn fireball_at(x, y) {
 
 fn fireball_hit(x, y) {
     play_sound("explosion");
-    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5, shake: 0.3 });
     damage_area(x, y, 2, 5);
     light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });   // embers
 }

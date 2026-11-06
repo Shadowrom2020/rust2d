@@ -60,4 +60,13 @@
         max_mana: 20,
         mana_regen: 0.5,
     ),
+    progression: (
+        enabled: true,
+        base_xp: 60,
+        growth: 1.4,
+        max_level: 20,
+        hp_per_level: 2,
+        mana_per_level: 2,
+        skill_points_per_level: 1,
+    ),
 )

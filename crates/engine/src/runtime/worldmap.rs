@@ -6,7 +6,8 @@
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Game, RtEntity};
+use super::input::{self, Act};
+use super::{ui::panel, Game, RtEntity};
 use crate::entity::EntityKind;
 use crate::map::{Edge, ZoneKind};
 use crate::render;
@@ -235,7 +236,7 @@ impl Game {
                 && !self.inventory_open()
                 && self.game_over.is_none()
                 && !self.aiming();
-            if can_open && input::pressed(KeyCode::M) {
+            if can_open && input::act_pressed(Act::Map) {
                 self.open_world_map();
                 return true;
             }
@@ -243,33 +244,33 @@ impl Game {
         }
         let m = input::mouse_pos();
         let click = input::mouse_pressed(MouseButton::Left);
-        if input::any_pressed(&[KeyCode::M, KeyCode::Escape]) || (click && button_rect(Button::Close).contains(m)) {
+        if input::any_act_pressed(&[Act::Map, Act::Cancel]) || (click && button_rect(Button::Close).contains(m)) {
             self.worldmap.open = false;
             self.worldmap.drag = None;
             return true;
         }
-        // Zoom: + / - keys and buttons.
-        if input::any_pressed(&[KeyCode::Equal, KeyCode::KpAdd]) || (click && button_rect(Button::ZoomIn).contains(m)) {
+        // Zoom: + / - keys (RB / LB) and buttons.
+        if input::act_pressed(Act::ZoomIn) || (click && button_rect(Button::ZoomIn).contains(m)) {
             self.zoom_map(1);
         }
-        if input::any_pressed(&[KeyCode::Minus, KeyCode::KpSubtract]) || (click && button_rect(Button::ZoomOut).contains(m)) {
+        if input::act_pressed(Act::ZoomOut) || (click && button_rect(Button::ZoomOut).contains(m)) {
             self.zoom_map(-1);
         }
-        if input::any_pressed(&[KeyCode::Space, KeyCode::Home, KeyCode::C]) || (click && button_rect(Button::Center).contains(m)) {
+        if input::act_pressed(Act::MapCenter) || (click && button_rect(Button::Center).contains(m)) {
             self.worldmap.center = self.player.pos / self.ts();
         }
         // Keyboard scrolling.
         let mut dir = Vec2::ZERO;
-        if input::down(KeyCode::Left) || input::down(KeyCode::A) {
+        if input::act_down(Act::Left) {
             dir.x -= 1.0;
         }
-        if input::down(KeyCode::Right) || input::down(KeyCode::D) {
+        if input::act_down(Act::Right) {
             dir.x += 1.0;
         }
-        if input::down(KeyCode::Up) || input::down(KeyCode::W) {
+        if input::act_down(Act::Up) {
             dir.y -= 1.0;
         }
-        if input::down(KeyCode::Down) || input::down(KeyCode::S) {
+        if input::act_down(Act::Down) {
             dir.y += 1.0;
         }
         let zoom = self.worldmap.zoom;
@@ -278,7 +279,7 @@ impl Game {
         let wheel = input::wheel();
         if wheel != 0.0 {
             let step = -wheel.signum() * WHEEL_STEP / zoom;
-            if input::down(KeyCode::LeftShift) || input::down(KeyCode::RightShift) {
+            if input::act_down(Act::Run) {
                 self.worldmap.center.x += step;
             } else {
                 self.worldmap.center.y += step;

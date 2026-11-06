@@ -161,8 +161,10 @@ impl Renamer<'_> {
 
     fn conditions(&mut self, cs: &mut [Condition]) {
         for c in cs {
-            if let Cond::HasItem { item, .. } = &mut c.cond {
-                self.fix(RefKind::Item, item);
+            match &mut c.cond {
+                Cond::HasItem { item, .. } => self.fix(RefKind::Item, item),
+                Cond::Defeated { character, .. } => self.fix(RefKind::Character, character),
+                _ => {}
             }
         }
     }
@@ -383,6 +385,19 @@ mod tests {
     }
 
     #[test]
+    fn renames_characters_in_defeated_conditions() {
+        let mut m = Map::new("village", 4, 4);
+        m.triggers.push(Trigger {
+            on: TriggerOn::MapEnter,
+            conditions: vec![Condition::new(Cond::Defeated { character: "slime".into(), op: crate::events::CmpOp::Ge, count: 3 })],
+            actions: vec![],
+            once: false,
+        });
+        assert_eq!(rename_in_map(&mut m, RefKind::Character, "slime", "jelly"), 1);
+        assert_eq!(m.triggers[0].conditions[0].cond, Cond::Defeated { character: "jelly".into(), op: crate::events::CmpOp::Ge, count: 3 });
+    }
+
+    #[test]
     fn renames_reach_structures() {
         let mut db = Database::default();
         let mut e = EntityInstance::new(0, EntityKind::Prop, "chest", 0.0, 0.0);
@@ -445,6 +460,7 @@ mod tests {
             creation: Default::default(),
         day_minutes: 24.0, start_hour: 8.0,
         skills: Default::default(),
+        progression: Default::default(),
         };
         cfg.sfx.pickup = "blip".into();
         assert_eq!(rename_in_db(&mut db, &mut cfg, RefKind::Sheet, "items", "icons"), 1);

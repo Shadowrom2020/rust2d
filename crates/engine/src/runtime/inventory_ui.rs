@@ -7,7 +7,8 @@
 
 use macroquad::prelude::*;
 
-use super::{input, ui::panel, Game};
+use super::input::{self, Act};
+use super::{ui::panel, Game};
 use crate::defs::EquipSlot;
 use crate::inventory::{Inventory, ItemStack};
 use crate::render::wrap_text;
@@ -32,8 +33,6 @@ pub(super) enum Side {
 
 /// Number of quick bar slots (keys 1-8).
 pub const QUICK_SLOTS: usize = 8;
-const QUICK_KEYS: [KeyCode; QUICK_SLOTS] =
-    [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4, KeyCode::Key5, KeyCode::Key6, KeyCode::Key7, KeyCode::Key8];
 const QUICK_SLOT: f32 = 44.0;
 
 /// Screen rects of the quick bar slots (bottom center).
@@ -606,7 +605,7 @@ impl Game {
             }
             // Quick bar: keys 1-8 or a click use the item.
             if !key_consumed {
-                if let Some(k) = QUICK_KEYS.iter().position(|k| input::pressed(*k)) {
+                if let Some(k) = Act::QUICK.iter().position(|a| input::act_pressed(*a)) {
                     self.use_quick(k);
                     return (true, false);
                 }
@@ -622,22 +621,22 @@ impl Game {
 
         // ---- keyboard
         let layout = self.layout();
-        if input::pressed(KeyCode::Escape) || (self.inv.loot.is_some() && input::pressed(KeyCode::I)) {
+        if input::act_pressed(Act::Cancel) || (self.inv.loot.is_some() && input::act_pressed(Act::Character)) {
             self.inv.close();
             return (true, true);
         }
-        if self.inv.loot.is_some() && input::pressed(KeyCode::T) {
+        if self.inv.loot.is_some() && input::act_pressed(Act::TakeAll) {
             self.take_all();
         }
         // 1-8 puts the selected item on the quick bar.
-        if let Some(k) = QUICK_KEYS.iter().position(|k| input::pressed(*k)) {
+        if let Some(k) = Act::QUICK.iter().position(|a| input::act_pressed(*a)) {
             if let Some((side @ (Side::Player | Side::Equip), i)) = self.inv.sel {
                 if let Some(id) = self.slot_item(side, i) {
                     self.assign_quick(k, &id);
                 }
             }
         }
-        if self.inv.loot.is_some() && input::pressed(KeyCode::Tab) {
+        if self.inv.loot.is_some() && input::any_act_pressed(&[Act::NextTab, Act::PrevTab]) {
             if let Some((s, _)) = self.inv.sel {
                 self.inv.sel = Some((if s == Side::Player { Side::Container } else { Side::Player }, 0));
             }
@@ -647,8 +646,8 @@ impl Game {
                 let n = g.slots.len() as i32;
                 let c = g.cols as i32;
                 let mut j = i as i32;
-                let left = input::pressed(KeyCode::Left) || input::pressed(KeyCode::A);
-                let right = input::pressed(KeyCode::Right) || input::pressed(KeyCode::D);
+                let left = input::act_pressed(Act::Left);
+                let right = input::act_pressed(Act::Right);
                 // Hop between the character sheet and the inventory grid.
                 if side == Side::Player && left && i % g.cols == 0 && layout.grid(Side::Equip).is_some() {
                     self.inv.sel = Some((Side::Equip, (i / g.cols).min(EQUIP_SLOTS.len() - 1)));
@@ -664,15 +663,15 @@ impl Game {
                 if right {
                     j += 1;
                 }
-                if input::pressed(KeyCode::Up) || input::pressed(KeyCode::W) {
+                if input::act_pressed(Act::Up) {
                     j -= c;
                 }
-                if input::pressed(KeyCode::Down) || input::pressed(KeyCode::S) {
+                if input::act_pressed(Act::Down) {
                     j += c;
                 }
                 self.inv.sel = Some((side, j.clamp(0, n - 1) as usize));
                 let i = self.inv.sel.unwrap().1;
-                if input::any_pressed(&[KeyCode::Enter, KeyCode::E, KeyCode::Space]) {
+                if input::act_pressed(Act::Confirm) {
                     if side == Side::Equip {
                         self.unequip(EQUIP_SLOTS[i], None);
                     } else if self.inv.loot.is_some() {
@@ -680,11 +679,11 @@ impl Game {
                     } else {
                         self.use_slot(i);
                     }
-                } else if input::pressed(KeyCode::U) && side == Side::Player {
+                } else if input::act_pressed(Act::Use) && side == Side::Player {
                     self.use_slot(i);
-                } else if input::pressed(KeyCode::G) && side == Side::Player {
+                } else if input::act_pressed(Act::Drop) && side == Side::Player {
                     // G drops the stack, Shift+G a single item.
-                    let one = input::down(KeyCode::LeftShift) || input::down(KeyCode::RightShift);
+                    let one = input::act_down(Act::Run);
                     self.drop_slot(i, one.then_some(1));
                 }
             }
@@ -919,16 +918,20 @@ impl Game {
             }
         }
         let st = self.stats();
-        let hp = self.world.player_hp.unwrap_or(self.combat.max_hp);
+        let hp = self.hp();
         let reach = if st.ranged { format!("Range       {:.0} tiles", st.reach) } else { format!("Reach       {:.1} tiles", st.reach) };
-        let lines = [
-            format!("Health      {} / {}", hp, self.combat.max_hp),
+        let mut lines = vec![
+            format!("Health      {} / {}", hp, self.player_max_hp()),
             format!("Attack      {}", st.attack),
             format!("Defense     {}", st.defense),
             format!("Speed       {:.0}", st.speed),
             format!("Attack time {:.2}s", st.cooldown),
             reach,
         ];
+        if self.progression_on() {
+            let (have, need) = self.xp_progress();
+            lines.insert(0, format!("Level       {}  (XP {have} / {need})", self.world.player_level()));
+        }
         let y0 = p.y + 50.0 + EQUIP_SLOTS.len() as f32 * EQUIP_STEP + 20.0;
         draw_line(p.x + PAD, y0 - 12.0, p.x + p.w - PAD, y0 - 12.0, 1.0, Color::new(0.85, 0.8, 0.6, 0.4));
         for (n, l) in lines.iter().enumerate() {
@@ -1058,5 +1061,5 @@ impl Game {
 
 /// The quick bar key (1-8) pressed this frame, if any.
 pub(super) fn quick_key_pressed() -> Option<usize> {
-    QUICK_KEYS.iter().position(|k| input::pressed(*k))
+    Act::QUICK.iter().position(|a| input::act_pressed(*a))
 }

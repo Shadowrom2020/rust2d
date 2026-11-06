@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use rust2d_engine::defs::*;
+use rust2d_engine::effects::{EffectKind, EffectSpec};
 use rust2d_engine::entity::{EntityInstance, EntityKind};
 use rust2d_engine::events::*;
 use rust2d_engine::map::{EdgeLink, LightMode, Map, MapLighting, Respawn, Tile, Zone, ZoneKind};
@@ -499,6 +500,9 @@ fn shop() -> Map {
             ShopEntry { unlimited: true, ..ShopEntry::new("torch", 0, 0) },
             ShopEntry::new("wooden_shield", 1, 0),
             ShopEntry::new("scroll_heal", 2, 0),
+            ShopEntry::new("antidote", 5, 0),
+            ShopEntry::new("elixir_strength", 2, 0),
+            ShopEntry::new("swiftness", 2, 0),
             ShopEntry::new("scroll_light", 1, 0),
             ShopEntry::new("tunic_green", 1, 0),
             ShopEntry::new("tunic_red", 1, 0),
@@ -753,6 +757,28 @@ fn forest() -> Map {
     // A torch lies at the mine entrance (it glows on the ground at night).
     let torch = b.entity(EntityKind::Item, "torch", 54, 8);
     torch.count = 2;
+    // The bandit camp (south-east): the chief, and two outlaws who only show up when he calls
+    // for help at half his HP. Spots are moved off trees like the slimes'.
+    let free = |b: &B, x: i32, y: i32| (0..6).flat_map(|d| [(x + d, y), (x - d, y), (x, y + d), (x, y - d)]).find(|&(x, y)| b.free(x, y)).unwrap();
+    let (cx, cy) = free(&b, 58, 38);
+    let chief = b.entity(EntityKind::Character, "bandit_chief", cx, cy);
+    chief.name = "bandit_chief".into();
+    chief.triggers = vec![Trigger {
+        on: TriggerOn::HpBelow { percent: 50 },
+        conditions: vec![],
+        actions: vec![
+            dialog("{self}", "Argh! Lads, to me! Cut this one down!"),
+            Action::SetActive { target: "outlaw_1".into(), active: true },
+            Action::SetActive { target: "outlaw_2".into(), active: true },
+        ],
+        once: true,
+    }];
+    for (k, (x, y)) in [(55, 41), (61, 35)].into_iter().enumerate() {
+        let (x, y) = free(&b, x, y);
+        let o = b.entity(EntityKind::Character, "outlaw", x, y);
+        o.name = format!("outlaw_{}", k + 1);
+        o.active = false;
+    }
     b.m
 }
 
@@ -912,6 +938,9 @@ fn database() -> Database {
         hostile: false,
         weapon: None,
         defense: 0,
+        xp: 0,
+        touch_effect: None,
+        description: String::new(),
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -948,22 +977,52 @@ fn database() -> Database {
         i
     };
     let use_trig = |actions: Vec<Action>| vec![trig(TriggerOn::UseItem { item: String::new() }, vec![], actions)];
-    let mut slime = ch("slime", "Slime", "slime", 32.0, Behavior::Chase { sight: 4.0 });
+    let mut slime = ch("slime", "Slime", "slime", 32.0, Behavior::chase(4.0));
     slime.hitbox = [12.0 * R, 6.0 * R];
     slime.max_hp = 3;
     slime.damage = 2;
     slime.hostile = true;
+    slime.xp = 5;
+    slime.description = "A wobbling lump of green jelly from the Whisperwood dens. Slow and harmless-looking, but its touch is poisonous - keep an antidote handy.".into();
+    // A slime's touch poisons: half a heart over six seconds (antidotes cure it).
+    slime.touch_effect = Some(EffectSpec::new(EffectKind::Poison, 0.5, 6.0));
     slime.triggers = vec![trig(TriggerOn::Defeat, vec![], vec![Action::RunScript { function: "slime_defeated".into() }])];
     slime.loot = vec![LootEntry::new("coin", 50.0, 1, 3), LootEntry::new("apple", 10.0, 1, 1)];
-    let mut goblin = ch("goblin", "Goblin Archer", "", 38.0, Behavior::Chase { sight: 7.0 });
+    // Goblin archers give up 10 tiles from home, run away once wounded (2 HP: at 1) and keep 4
+    // tiles between them and the player while shooting.
+    let mut goblin = ch("goblin", "Goblin Archer", "", 38.0, Behavior::Chase { sight: 7.0, leash: 10.0, flee_below: 0.6, keep_distance: 4.0 });
     goblin.max_hp = 2;
     goblin.damage = 1;
     goblin.hostile = true;
+    goblin.xp = 12;
+    goblin.description = "Goblin archers guard a camp south of the forest path. They shoot from a distance, back off when you close in and run once wounded - but never far from their camp.".into();
     goblin.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 150.0 * R, range: 6.0, ammo: String::new() }));
     // Goblin archers drop arrows (and sometimes coins) from their loot table.
     goblin.loot = vec![LootEntry::new("arrows", 70.0, 2, 4), LootEntry::new("coin", 25.0, 1, 2)];
     // Goblin scouts (female) roam the wilds with the archers.
-    let goblin_f = CharacterDef { id: "goblin_f".into(), name: "Goblin Scout".into(), speed: 42.0 * R, ..goblin.clone() };
+    let goblin_f = CharacterDef {
+        id: "goblin_f".into(),
+        name: "Goblin Scout".into(),
+        speed: 42.0 * R,
+        description: "Quicker than the archers, goblin scouts roam the wilds in small bands, bows ready.".into(),
+        ..goblin.clone()
+    };
+    // The bandits' camp in the south-east of Whisperwood: the chief calls two outlaws when hurt
+    // (an 'HP below 50 %' trigger on the placed chief).
+    let mut chief = ch("bandit_chief", "Bandit Chief", "", 40.0, Behavior::Chase { sight: 6.0, leash: 9.0, flee_below: 0.0, keep_distance: 0.0 });
+    chief.max_hp = 10;
+    chief.damage = 2;
+    chief.hostile = true;
+    chief.xp = 60;
+    chief.description = "The leader of the bandits in south-east Whisperwood: tough, armed with an axe, and quick to call his outlaws for help when a fight turns against him.".into();
+    chief.loot = vec![LootEntry::new("coin", 100.0, 10, 20), LootEntry::new("potion", 100.0, 1, 1), LootEntry::new("elixir_strength", 50.0, 1, 1)];
+    let mut outlaw = ch("outlaw", "Outlaw", "", 46.0, Behavior::Chase { sight: 7.0, leash: 12.0, flee_below: 0.3, keep_distance: 0.0 });
+    outlaw.max_hp = 4;
+    outlaw.damage = 2;
+    outlaw.hostile = true;
+    outlaw.xp = 20;
+    outlaw.description = "The Bandit Chief's men. They hide in the woods until he calls, fight with swords and flee when the fight goes badly.".into();
+    outlaw.loot = vec![LootEntry::new("coin", 60.0, 2, 6)];
     let mut hero = ch("hero", "Hero", "", 70.0, Behavior::Static);
     hero.max_hp = 12; // 6 hearts
     hero.damage = 1;
@@ -988,12 +1047,14 @@ fn database() -> Database {
                     "Open the east gate and find the old shrine deep in Whisperwood.".into(),
                     "Return to Elder Rowan.".into(),
                 ],
+                xp: 80,
             },
             QuestDef {
                 id: "pest_control".into(),
                 title: "Pest Control".into(),
                 description: "Slimes from Whisperwood keep eating Tilda's deliveries. She promised 30 coins and a potion if I get rid of five of them.".into(),
                 stages: vec!["Defeat slimes in Whisperwood ({pest_slimes}/5).".into(), "Return to Tilda's shop for the reward.".into()],
+                xp: 40,
             },
         ],
         sounds: SOUNDS
@@ -1065,6 +1126,16 @@ fn database() -> Database {
             teach(stack(item("tome_fireball", "Tome of the Fireball", "Teaches Fireball: aim it at a spot and it explodes there. Needs Arcana 3.", it::BOOK, false, vec![]), 1), "fireball"),
             teach(stack(item("tome_fire", "Tome of Fire", "Fire Burst: flames around you. Needs a trained arcanist.", it::BOOK, false, vec![]), 1), "fire_burst"),
             stack(item("mana_potion", "Blue Potion", "Restores 20 mana.", it::MANA_POTION, true, use_trig(vec![Action::AddMana { amount: 20 }])), 10),
+            // Status effect potions.
+            stack(item("antidote", "Antidote", "Cures poison.", it::ANTIDOTE, true, use_trig(vec![Action::CureEffect { target: "player".into(), kind: Some(EffectKind::Poison) }])), 10),
+            stack(
+                item("elixir_strength", "Elixir of Strength", "Your blows hit 30% harder for a minute.", it::ELIXIR, true, use_trig(vec![Action::ApplyEffect { target: "player".into(), effect: EffectSpec::new(EffectKind::Strength, 30.0, 60.0) }])),
+                10,
+            ),
+            stack(
+                item("swiftness", "Swiftness Potion", "You move 30% faster for half a minute.", it::SWIFTNESS, true, use_trig(vec![Action::ApplyEffect { target: "player".into(), effect: EffectSpec::new(EffectKind::Haste, 30.0, 30.0) }])),
+                10,
+            ),
             stack(armor(item("wooden_shield", "Wooden Shield", "Blocks some damage. Held in the left hand.", it::SHIELD, false, vec![]), Armor { slot: EquipSlot::Offhand, defense: 1, speed: 0.0, overlay: String::new(), overlay_f: String::new() }), 1),
             stack(item("letter", "Old Letter", "A letter addressed to the elder.", it::LETTER, false, use_trig(vec![dialog("Letter", "\"Rowan, the shrine's flame must never go out. - M.\"")])), 1),
         ],
@@ -1149,6 +1220,8 @@ fn database() -> Database {
             slime,
             goblin,
             goblin_f,
+            chief,
+            outlaw,
             // Every merchant sells these by default; the one in the village has their own stock.
             CharacterDef {
                 shop: Some(ShopSpec {
@@ -1189,6 +1262,9 @@ fn database() -> Database {
         ("tunic_green", 25),
         ("tunic_red", 25),
         ("mana_potion", 12),
+        ("antidote", 8),
+        ("elixir_strength", 25),
+        ("swiftness", 20),
     ] {
         db.items.iter_mut().find(|i| i.id == id).expect(id).value = v;
     }
@@ -1454,7 +1530,7 @@ fn fireball_at(x, y) {
 
 fn fireball_hit(x, y) {
     play_sound("explosion");
-    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+    effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5, shake: 0.3 });
     damage_area(x, y, 2, 5);
     // Embers glow on for a few seconds.
     light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });
@@ -1531,6 +1607,12 @@ fn layered_characters(db: &mut Database) {
             "merchant_f" => (look("body_female", 0xe8b88a, "hair_long", 0x3a2418, false), vec![(EquipSlot::Clothing, "merchant_dress")]),
             "goblin" => (look("body_goblin", 0x7cb342, "hair_short", 0x33691e, false), vec![(EquipSlot::Clothing, "goblin_rags"), (EquipSlot::Weapon, "crude_bow")]),
             "goblin_f" => (look("body_goblin_female", 0x8bc34a, "hair_ponytail", 0x2a4a14, false), vec![(EquipSlot::Clothing, "goblin_rags"), (EquipSlot::Weapon, "crude_bow")]),
+            "bandit_chief" => (
+                look("body_male", 0xd09068, "hair_long", 0x1e1612, true),
+                // Light armor (defense 2) and an axe; all of it drops when he is defeated.
+                vec![(EquipSlot::Clothing, "tunic_red"), (EquipSlot::Body, "leather_armor"), (EquipSlot::Head, "leather_cap"), (EquipSlot::Weapon, "axe")],
+            ),
+            "outlaw" => (look("body_male", 0xe8b88a, "hair_short", 0x7a4a22, false), vec![(EquipSlot::Clothing, "tunic_green"), (EquipSlot::Head, "leather_cap"), (EquipSlot::Weapon, "sword")]),
             _ => continue,
         };
         d.appearance = app;
@@ -1617,6 +1699,8 @@ fn main() {
             },
         day_minutes: 24.0, start_hour: 8.0,
         skills: rust2d_engine::skills::SkillSettings { enabled: true, magic: true, start_points: 2, max_mana: 20, mana_regen: 0.5 },
+        // Experience and levels: a few levels over the example's quests and fights.
+        progression: rust2d_engine::progression::Progression { enabled: true, base_xp: 60, growth: 1.4, ..Default::default() },
         },
         db: database(),
     };

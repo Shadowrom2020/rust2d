@@ -1,16 +1,20 @@
 //! The game runtime: loads a project and plays it.
 
+mod ai;
 mod charwin;
 mod combat;
 mod cutscene;
+mod effects;
 mod equipment;
 mod fx;
 mod inventory_ui;
 mod journal;
+mod juice;
 mod skills;
 mod lights;
 mod creator;
 mod patrol;
+mod progression;
 mod paperdoll;
 mod npc_items;
 mod shop_ui;
@@ -19,6 +23,7 @@ mod menu;
 pub mod input;
 mod mouse;
 mod spawner;
+mod thumbs;
 mod ui;
 mod worldmap;
 
@@ -30,6 +35,7 @@ use macroquad::prelude::*;
 use crate::audio::Audio;
 use crate::defs::{Behavior, Weapon};
 use crate::entity::{EntityKind, Facing};
+use input::Act;
 use crate::events::runner::{conditions_met, ActionCtx, ActionHost, ActionRunner, Step};
 use crate::events::{Action, GameEvent, Trigger};
 use crate::map::transition::edge_destination;
@@ -142,6 +148,10 @@ struct RtEntity {
     /// Characters: what they wear and hold, and carry (dropped when defeated).
     equipment: crate::state::Equipment,
     inventory: Vec<crate::inventory::ItemStack>,
+    /// Running status effects (not saved, like the HP).
+    effects: Vec<crate::effects::ActiveEffect>,
+    /// Chasing characters: hunting, returning home, fleeing (not saved).
+    ai: ai::Ai,
 }
 
 struct Loaded {
@@ -174,6 +184,11 @@ pub struct Game {
     pub assets: Assets,
     pub audio: Audio,
     combat: PlayerCombat,
+    /// Screen shake and the hurt flash.
+    juice: juice::Juice,
+    /// A save waits for its thumbnail (captured while drawing), and what waits for that.
+    thumb_request: Option<String>,
+    after_thumb: Option<thumbs::AfterThumb>,
     /// Seconds since the player was defeated.
     game_over: Option<f32>,
     /// Short-lived visual effects: (position, age).
@@ -261,6 +276,9 @@ impl Game {
             resuming: false,
             autosave_pending: false,
             settings: crate::settings::Settings::default(),
+            juice: Default::default(),
+            thumb_request: None,
+            after_thumb: None,
             fullscreen: None,
             loaded: Loaded { map: Map::new("", 1, 1), solid: vec![], entities: vec![], tile_lights: vec![] },
             project,
@@ -405,6 +423,8 @@ impl Game {
             appearance: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.appearance.clone()).unwrap_or_default(),
             equipment: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.equipment.clone()).unwrap_or_default(),
             inventory: self.project.db.character(def).filter(|_| kind == EntityKind::Character).map(|d| d.inventory.clone()).unwrap_or_default(),
+            effects: Vec::new(),
+            ai: ai::Ai::default(),
         };
         npc_items::apply_gear(&self.project.db, &mut rt);
         rt
@@ -825,12 +845,15 @@ impl Game {
 
     /// Runs one frame: update and draw.
     pub fn frame(&mut self) {
+        input::poll_pad();
         let dt = get_frame_time().min(0.05);
         self.update(dt);
         self.draw();
     }
 
     pub fn update(&mut self, dt: f32) {
+        self.update_juice(dt);
+        self.after_thumbnail();
         self.sync_script_player();
         // Esc opens the pause menu (unless a window or dialog uses Esc); it pauses everything.
         // (While a bolt spell is being aimed, Esc cancels the spell instead.)
@@ -858,16 +881,16 @@ impl Game {
         if !self.on_title() && self.project.config.day_minutes > 0.0 {
             self.world.hour = (self.world.hour + dt * 24.0 / (self.project.config.day_minutes * 60.0)).rem_euclid(24.0);
         }
-        if input::pressed(KeyCode::F3) {
+        if input::act_pressed(Act::Debug) {
             self.debug = !self.debug;
         }
-        if input::pressed(KeyCode::F5) {
+        if input::act_pressed(Act::QuickSave) {
             match self.save_game("quick") {
                 Ok(()) => self.ui.toast("Game saved".into()),
                 Err(e) => self.ui.toast(format!("Save failed: {e}")),
             }
         }
-        if input::pressed(KeyCode::F9) {
+        if input::act_pressed(Act::QuickLoad) {
             if let Err(e) = self.load_game("quick") {
                 self.ui.toast(format!("Load failed: {e}"));
             }
@@ -912,7 +935,7 @@ impl Game {
         let (shop_key, shop_mouse) = (shop_key || win_key, shop_mouse || win_mouse);
         let allow_windows = allow_windows && !win_mouse;
         // H hides / shows the HUD.
-        let hide_key = allow_windows && !input.consumed && !shop_key && input::pressed(KeyCode::H);
+        let hide_key = allow_windows && !input.consumed && !shop_key && input::act_pressed(Act::HideUi);
         if hide_key {
             self.ui_hidden = !self.ui_hidden;
             if self.ui_hidden {
@@ -934,12 +957,16 @@ impl Game {
 
         let mut runner = std::mem::take(&mut self.runner);
         runner.update(self, dt);
-        self.runner = runner;
+        // Actions queued while it ran (triggers fired by an action, e.g. the 'Defeated' triggers
+        // of characters a 'Damage area' defeats) went to the stand-in runner: keep them.
+        let queued = std::mem::replace(&mut self.runner, runner);
+        self.runner.append(queued);
         self.update_cutscene(dt);
 
         let frozen = self.runner.busy() || !matches!(self.fade, Fade::None) || self.modal();
         if !frozen && !self.on_title() {
             self.update_skills(dt);
+            self.tick_effects(dt);
         }
         self.update_player(dt, frozen, consumed);
         self.reveal_fog();
@@ -981,21 +1008,27 @@ impl Game {
         if self.apply_player_knockback(dt) {
             return;
         }
+        // Stunned: no moving, attacking or interacting until it wears off.
+        if self.player_stunned() {
+            self.player.moving = false;
+            self.order = None;
+            return;
+        }
 
         let mut dir = Vec2::ZERO;
-        if input::down(KeyCode::Left) || input::down(KeyCode::A) {
+        if input::act_down(Act::Left) {
             dir.x -= 1.0;
         }
-        if input::down(KeyCode::Right) || input::down(KeyCode::D) {
+        if input::act_down(Act::Right) {
             dir.x += 1.0;
         }
-        if input::down(KeyCode::Up) || input::down(KeyCode::W) {
+        if input::act_down(Act::Up) {
             dir.y -= 1.0;
         }
-        if input::down(KeyCode::Down) || input::down(KeyCode::S) {
+        if input::act_down(Act::Down) {
             dir.y += 1.0;
         }
-        let mut run = if input::down(KeyCode::LeftShift) { 1.8 } else { 1.0 };
+        let mut run = if input::act_down(Act::Run) { 1.8 } else { 1.0 };
         if dir != Vec2::ZERO {
             // Keyboard movement cancels click-to-move.
             self.order = None;
@@ -1050,7 +1083,7 @@ impl Game {
             }
         }
 
-        if !key_consumed && input::any_pressed(&[KeyCode::E, KeyCode::Space, KeyCode::Enter]) {
+        if !key_consumed && input::act_pressed(Act::Confirm) {
             self.interact();
         }
     }
@@ -1287,7 +1320,17 @@ impl Game {
                 self.loaded.entities[i].body.moving = false;
                 continue;
             }
-            if self.entity_knockback(i, dt) || self.chase(i, dt) || self.patrol_step(i, dt) {
+            if self.entity_knockback(i, dt) {
+                continue;
+            }
+            // Slow / haste scale the time the character moves in; stunned ones stand still.
+            let f = self.npc_speed_factor(i);
+            if f <= 0.0 {
+                self.loaded.entities[i].body.moving = false;
+                continue;
+            }
+            let dt = dt * f;
+            if self.chase(i, dt) || self.patrol_step(i, dt) {
                 continue;
             }
             let e = &self.loaded.entities[i];
@@ -1337,7 +1380,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.menu_status(),
             self.autosave_status(),
             self.cutscene_status(),
@@ -1347,6 +1390,14 @@ impl Game {
             self.fx_status(),
             self.world_map_status(),
             self.skills_status(),
+            self.progression_status(),
+            self.effects_status(),
+            self.ai_status(),
+            self.bestiary_status(),
+            self.world.dialog_log.len(),
+            input::pad_name(),
+            self.combat.cooldown > 0.0,
+            self.juice_status(),
             self.clock_text(),
             self.loaded.map.lighting.mode,
             self.lights().len(),
@@ -1401,6 +1452,7 @@ impl Game {
         let dir = self.project.saves_dir();
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join(format!("{slot}.ron")), self.world.to_ron()?)?;
+        self.request_thumbnail(slot);
         Ok(())
     }
 
@@ -1449,7 +1501,7 @@ impl Game {
         self.autosave_pending = false;
         self.combat.reset();
         if self.world.player_hp.is_none_or(|hp| hp <= 0) {
-            self.world.player_hp = Some(self.combat.max_hp);
+            self.world.player_hp = Some(self.player_max_hp());
         }
         // Rebuild the map from scratch so entity states from the save apply.
         self.cache.clear();
@@ -1478,7 +1530,7 @@ impl Game {
             let t = get_time() as f32;
             focus += vec2((t * 0.07).sin() * 12.0 * ts, (t * 0.05).cos() * 6.0 * ts);
         }
-        let target = vec2(clamp_axis(focus.x, vw, mw), clamp_axis(focus.y, vh, mh));
+        let target = vec2(clamp_axis(focus.x, vw, mw), clamp_axis(focus.y, vh, mh)) + self.shake_offset();
         render::pixel_camera(target, scale)
     }
 
@@ -1526,7 +1578,7 @@ impl Game {
                     let col = if self.player.moving { (self.player.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };
                     // During a melee swing the weapon is drawn along the swing instead.
                     let swinging = self.combat.swing > 0.0;
-                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, WHITE, swinging));
+                    let drawn = self.player_appearance().is_some_and(|a| self.draw_character(&a, &self.world.equipment, (self.player.facing, col), self.player.pos, Self::effect_tint(&self.world.effects).unwrap_or(WHITE), swinging));
                     if !drawn {
                         let r = self.player.rect();
                         draw_rectangle(r.x, r.y - ts * 0.5, r.w, r.h + ts * 0.5, YELLOW);
@@ -1552,6 +1604,8 @@ impl Game {
             self.light_pass.get_or_insert_with(render::lighting::LightPass::new).draw(&cam, ambient, &lights, ts, get_time());
             set_camera(&cam);
         }
+        // A save's thumbnail: the world as it is now, before overlays, HUD and menus.
+        self.capture_thumbnail();
 
         if self.debug {
             self.draw_debug(view);
@@ -1566,6 +1620,7 @@ impl Game {
         if alpha > 0.0 {
             draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0., 0., 0., alpha));
         }
+        self.draw_hurt_flash();
         if !self.on_title() {
             if !self.ui_hidden {
                 self.draw_hud();
@@ -1613,7 +1668,7 @@ impl Game {
     fn draw_entity(&self, e: &RtEntity, t: f32) {
         let ts = self.ts();
         let db = &self.project.db;
-        let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { WHITE };
+        let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { Self::effect_tint(&e.effects).unwrap_or(WHITE) };
         let drawn = match e.kind {
             EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE)),
             EntityKind::Character => db.character(&e.def).is_some() && {
@@ -1685,6 +1740,7 @@ impl ActionHost for Game {
                 self.audio.play(&self.project.config.sfx.dialog);
                 let speaker = self.entity_names_in(speaker, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
+                self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_dialog(&speaker, &text);
                 Step::Block
             }
@@ -1693,6 +1749,7 @@ impl ActionHost for Game {
                 let speaker = self.entity_names_in(speaker, ctx.owner);
                 let (speaker, text) = (self.world.expand_text(&speaker), self.world.expand_text(text));
                 let options: Vec<String> = options.iter().map(|o| self.world.expand_text(o)).collect();
+                self.world.log_dialog(&speaker, &text, false);
                 self.ui.show_choice(&speaker, &text, &options, var);
                 Step::Block
             }
@@ -1889,6 +1946,22 @@ impl ActionHost for Game {
             Action::Autosave => {
                 // The event that queued it is still running; it saves once that is done.
                 self.autosave_pending = true;
+                Step::Continue
+            }
+            Action::GiveXp { amount } => {
+                self.give_xp(*amount);
+                Step::Continue
+            }
+            Action::ApplyEffect { target, effect } => {
+                self.apply_effect(target, ctx.owner, effect);
+                Step::Continue
+            }
+            Action::CureEffect { target, kind } => {
+                self.cure_effect(target, ctx.owner, *kind);
+                Step::Continue
+            }
+            Action::Shake { seconds, strength } => {
+                self.shake_screen(*seconds, *strength);
                 Step::Continue
             }
             Action::OpenShop { target } => {

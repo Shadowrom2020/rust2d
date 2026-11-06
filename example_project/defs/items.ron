@@ -545,6 +545,101 @@
         value: 12,
     ),
     (
+        id: "antidote",
+        name: "Antidote",
+        description: "Cures poison.",
+        icon: (
+            sheet: "items",
+            frame: 32,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    CureEffect(
+                        target: "player",
+                        kind: Some(Poison),
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 8,
+    ),
+    (
+        id: "elixir_strength",
+        name: "Elixir of Strength",
+        description: "Your blows hit 30% harder for a minute.",
+        icon: (
+            sheet: "items",
+            frame: 33,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    ApplyEffect(
+                        target: "player",
+                        effect: (
+                            kind: Strength,
+                            strength: 30.0,
+                            seconds: 60.0,
+                        ),
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 25,
+    ),
+    (
+        id: "swiftness",
+        name: "Swiftness Potion",
+        description: "You move 30% faster for half a minute.",
+        icon: (
+            sheet: "items",
+            frame: 34,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    ApplyEffect(
+                        target: "player",
+                        effect: (
+                            kind: Haste,
+                            strength: 30.0,
+                            seconds: 30.0,
+                        ),
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 20,
+    ),
+    (
         id: "wooden_shield",
         name: "Wooden Shield",
         description: "Blocks some damage. Held in the left hand.",

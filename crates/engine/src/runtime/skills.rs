@@ -6,7 +6,8 @@ use std::collections::HashMap;
 
 use macroquad::prelude::*;
 
-use super::{input, Game};
+use super::input::{self, Act};
+use super::Game;
 use crate::defs::LightSpec;
 use crate::render::wrap_text;
 use crate::skills::{SkillEffect, SpellEffect, SPELL_PREFIX};
@@ -118,7 +119,7 @@ impl Game {
             SkillEffect::Mana { points } => (*points * l) as f32,
             _ => 0.0,
         });
-        self.project.config.skills.max_mana + bonus as u32
+        self.project.config.skills.max_mana + bonus as u32 + self.level_mana()
     }
     fn mana_regen(&self) -> f32 {
         self.project.config.skills.mana_regen
@@ -373,7 +374,7 @@ impl Game {
             }
             let r = crate::defs::Ranged { projectile: projectile.clone(), speed: *speed, range: *range, ammo: String::new() };
             let dmg = (*damage as f32 * self.spell_damage_factor()).round() as i32;
-            self.shoot(origin, dir, &r, dmg, true, None);
+            self.shoot(origin, dir, &r, dmg, true, None, None);
             self.ui.toast(d.name);
             return;
         };
@@ -408,12 +409,12 @@ impl Game {
             // A dialog or window opened meanwhile: the spell waits (the cursor stays normal there).
             return (false, false);
         }
-        if !key_consumed && input::pressed(KeyCode::Escape) {
+        if !key_consumed && input::act_pressed(Act::Cancel) {
             self.cancel_aim();
             self.ui.toast("Spell cancelled".into());
             return (true, false);
         }
-        if !key_consumed && input::pressed(KeyCode::X) {
+        if !key_consumed && input::act_pressed(Act::Attack) {
             self.fire_aim(None);
             return (true, false);
         }
@@ -539,17 +540,17 @@ impl Game {
         let r = self.skills_rect();
         let m = input::mouse_pos();
         let click = input::mouse_pressed(MouseButton::Left);
-        if input::pressed(KeyCode::Escape) || (click && !self.window_rect().contains(m)) {
+        if input::act_pressed(Act::Cancel) || (click && !self.window_rect().contains(m)) {
             self.skills.open = false;
             return (true, true);
         }
         let rows = self.skill_rows();
         let tab = self.skills.tab;
         let sel = &mut self.skills.sel[tab];
-        if input::any_pressed(&[KeyCode::Down, KeyCode::S]) {
+        if input::act_pressed(Act::Down) {
             *sel = (*sel + 1).min(rows.len().saturating_sub(1));
         }
-        if input::any_pressed(&[KeyCode::Up, KeyCode::W]) {
+        if input::act_pressed(Act::Up) {
             *sel = sel.saturating_sub(1);
         }
         if click {
@@ -561,7 +562,7 @@ impl Game {
         }
         let sel = self.skills.sel[tab].min(rows.len().saturating_sub(1));
         let Some(id) = rows.get(sel).cloned() else { return (true, true) };
-        let enter = input::any_pressed(&[KeyCode::Enter, KeyCode::E, KeyCode::Space]) || (click && Self::button_rect(r).contains(m));
+        let enter = input::act_pressed(Act::Confirm) || (click && Self::button_rect(r).contains(m));
         if tab == 0 {
             if enter || (click && Self::plus_rect(row_rect(r, sel)).contains(m)) {
                 self.spend_skill_point(&id);

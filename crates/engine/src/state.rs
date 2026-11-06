@@ -177,6 +177,35 @@ pub struct WorldState {
     /// The player definition's clothing was put on (saves from before clothing get it once).
     #[serde(default)]
     pub dressed: bool,
+    /// Experience points gained in total (experience and levels).
+    #[serde(default)]
+    pub xp: u64,
+    /// The player's level; 0 in old saves and fresh worlds means 1 (see [`WorldState::player_level`]).
+    #[serde(default)]
+    pub level: u32,
+    /// The player's running status effects (poison, haste, ...).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<crate::effects::ActiveEffect>,
+    /// Bestiary: character definition id -> how many the player has defeated.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bestiary: BTreeMap<String, u32>,
+    /// The last dialog lines (oldest first, at most [`DIALOG_LOG_MAX`]) for the journal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dialog_log: Vec<LogLine>,
+}
+
+/// How many dialog lines the journal keeps.
+pub const DIALOG_LOG_MAX: usize = 1000;
+
+/// One line of the dialog log: who said what, or what the player answered.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LogLine {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub speaker: String,
+    pub text: String,
+    /// The option the player picked in a choice.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub answer: bool,
 }
 
 /// Worn and carried items of an NPC (saved once they differ from the map / definition).
@@ -228,6 +257,28 @@ impl Sex {
 }
 
 impl WorldState {
+    /// Adds a line to the dialog log (dropping the oldest beyond [`DIALOG_LOG_MAX`]).
+    pub fn log_dialog(&mut self, speaker: &str, text: &str, answer: bool) {
+        if text.trim().is_empty() {
+            return;
+        }
+        self.dialog_log.push(LogLine { speaker: speaker.to_string(), text: text.to_string(), answer });
+        if self.dialog_log.len() > DIALOG_LOG_MAX {
+            let extra = self.dialog_log.len() - DIALOG_LOG_MAX;
+            self.dialog_log.drain(..extra);
+        }
+    }
+
+    /// How many characters of a definition have been defeated.
+    pub fn defeated(&self, character: &str) -> u32 {
+        self.bestiary.get(character).copied().unwrap_or(0)
+    }
+
+    /// The player's level (at least 1).
+    pub fn player_level(&self) -> u32 {
+        self.level.max(1)
+    }
+
     pub fn skill_level(&self, id: &str) -> u32 {
         self.skills.get(id).copied().unwrap_or(0)
     }
@@ -364,7 +415,10 @@ impl WorldState {
         Ok(ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?)
     }
     pub fn from_ron(s: &str) -> anyhow::Result<Self> {
-        Ok(ron::from_str(s)?)
+        let mut w: WorldState = ron::from_str(s)?;
+        let extra = w.dialog_log.len().saturating_sub(DIALOG_LOG_MAX);
+        w.dialog_log.drain(..extra);
+        Ok(w)
     }
 }
 
@@ -411,9 +465,40 @@ mod tests {
         let old: WorldState = ron::from_str(r#"(flags: [], vars: {}, inventory: {"bow": 1}, entities: {}, fired: [], current_map: "m", player_pos: (0.0, 0.0), player_facing: Down, equipped: "bow")"#).unwrap();
         assert_eq!((old.equipped.as_str(), old.equipment.weapon.is_none()), ("bow", true));
         assert!(old.quickbar.is_empty());
+        // Saves from before experience and levels start at level 1 without XP.
+        assert_eq!((old.xp, old.player_level()), (0, 1));
+        assert!(old.effects.is_empty() && old.bestiary.is_empty() && old.dialog_log.is_empty());
+        let mut w = WorldState { xp: 250, level: 3, ..Default::default() };
+        crate::effects::apply(&mut w.effects, &crate::effects::EffectSpec::new(crate::effects::EffectKind::Haste, 30.0, 12.5));
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!((back.xp, back.player_level()), (250, 3));
+        assert_eq!(back.effects, w.effects);
+        let w = WorldState { bestiary: [("slime".to_string(), 4)].into(), ..Default::default() };
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!((back.defeated("slime"), back.defeated("goblin")), (4, 0));
         let w = WorldState { quickbar: vec!["potion".into(), String::new()], ..Default::default() };
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert_eq!(back.quickbar, w.quickbar);
+    }
+
+    #[test]
+    fn dialog_log_keeps_the_newest_lines() {
+        let mut w = WorldState::default();
+        w.log_dialog("Bob", "  ", false);
+        assert!(w.dialog_log.is_empty(), "empty text is not logged");
+        for i in 0..DIALOG_LOG_MAX + 5 {
+            w.log_dialog("Bob", &format!("line {i}"), false);
+        }
+        w.log_dialog("Alex", "Yes", true);
+        assert_eq!(w.dialog_log.len(), DIALOG_LOG_MAX);
+        assert_eq!(w.dialog_log[0].text, "line 6");
+        assert_eq!(w.dialog_log.last().unwrap(), &LogLine { speaker: "Alex".into(), text: "Yes".into(), answer: true });
+        // Saved and loaded; an over-long log (older versions, edited saves) is trimmed on load.
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!(back.dialog_log, w.dialog_log);
+        let mut long = w.clone();
+        long.dialog_log.extend(w.dialog_log.iter().take(50).cloned());
+        assert_eq!(WorldState::from_ron(&long.to_ron().unwrap()).unwrap().dialog_log.len(), DIALOG_LOG_MAX);
     }
 
     #[test]

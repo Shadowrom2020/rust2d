@@ -3,6 +3,77 @@
 All notable changes to rust2d (engine, game runner and editor). Versions follow
 `MAJOR.MINOR.PATCH`; see AGENTS.md for how releases are made.
 
+## 0.3.0 — 2026-11-06
+
+### Gameplay
+- **Experience and levels** (optional per project, *Database › Project › Experience and levels*):
+  defeated characters give the XP set in their definition (*Combat › Experience*), completed quests
+  their *Experience reward*. Levels raise max HP, mana and skill points; the XP each level needs
+  grows by a factor per level. The status frame shows the level and an XP bar, the character window
+  the level and the XP to the next one, and a message announces each level. New: the *Give
+  experience* action, the *Player level* condition and the script functions `give_xp(n)`, `xp()` and
+  `level()`. Older projects keep it off; older saves start at level 1. The example project uses it.
+- **Status effects**: poison, burning, regeneration, slow, haste, stun, strength, weakness and
+  shield, timed, on the player and on characters. Weapons apply one on hit (*On hit* in the weapon
+  form), hostile characters on touch (*On touch* in the character form, or the effect of a melee
+  weapon they hold); the *Apply effect* / *Cure effect* actions, the *Player has effect* condition
+  and the script functions `apply_effect`, `cure` and `has_effect` do the rest. Badges with the
+  seconds left in the status frame, markers over characters, tints for poison / burning / stun;
+  the player's effects are saved. Example: poisonous slimes, an *Antidote*, an *Elixir of
+  Strength* and a *Swiftness Potion* at Tilda's (new icons); skeletons in the starter library slow.
+- **Enemy behaviour**: *Chase player* characters notice the player in a clear line within their
+  sight (through walls and trees only within half of it), hunt on for a few seconds after losing
+  them, and slide around obstacles instead of getting stuck on a corner. New per character: *Leash*
+  (give up and walk home), *Flee below %* and, for shooters, *Keep distance*. The *HP below %*
+  trigger (characters) and `hp_of(target)` for scripts let bosses react to their HP. Example: goblin
+  archers keep their distance, flee once wounded and stay near their camp; a *Bandit Chief* in the
+  south-east of Whisperwood calls two outlaws at half his HP.
+- **Bestiary**: the journal (J) has a second tab listing every kind of character the player has
+  defeated, with the count, a portrait, the new *Description* of characters, health, damage,
+  defense, experience, weapon, touch effect and drops. The *Defeated count* condition and
+  `defeated_count(character)` read the counts (saved). The example's monsters have descriptions.
+- **Dialog log**: the journal's third tab, *Dialogs*, shows the last 1000 dialog lines of the game
+  (speaker, text, and the options the player picked), newest at the bottom; scroll with Up / Down,
+  the mouse wheel, PgUp / PgDn and Home / End. The log is saved with the game.
+- **Gamepads**: any controller Linux knows works next to keyboard and mouse - stick / d-pad to move
+  and navigate, A interact / confirm, B back, X attack, Y character window, RB / LB tabs, LT run,
+  RT switch weapon, Start pause, Select map (full table in the README). The game reads named actions
+  now instead of fixed keys (the groundwork for rebinding); keyboard controls are unchanged.
+  Flatpaks of games and of rust2d get `--device=all` (gamepads need /dev/input). Building rust2d
+  needs `libudev-dev` (the game links `libudev`, present on every desktop Linux).
+- **Key rebinding**: *Options › Controls* lists every action with its keys. Enter and a key adds a
+  key (up to three per action), Del clears, *Reset to defaults* restores them; keys that clash with
+  another action where both are used show in orange with the clash named. Saved per game in
+  `settings.ron` (only the changed actions); the Options page's own reset keeps the keys. Escape,
+  F3 and the gamepad buttons stay fixed.
+- **Screen shake and hit flash**: a hurt player gets a short camera shake and a red flash;
+  explosions shake the screen (`shake` option of `effect()` and the *Effect* action; the example's
+  Fireball uses it); scenes shake it with `shake(seconds[, strength])` or the new *Shake the
+  screen* action. *Options › Shake & flash* switches both off (accessibility).
+- **Save thumbnails**: every save (also quick saves, autosaves and *Save and quit*) stores a
+  small picture of the world next to the save file (`<slot>.png`, without HUD, dialogs and menus);
+  the Load and Save pages show it beside the map, play time and age. Older saves show a
+  placeholder; deleting a save deletes its picture.
+
+### Fixes
+- Triggers fired by an action were lost: the *Defeated* triggers of characters defeated by *Damage
+  area*, `damage_around()` or *Defeat all enemies* (e.g. quest counters) now run, as documented.
+- Editor: the Database tab bar wraps onto a second line in narrow windows; it used to widen the
+  forms below it past the window's right border (description boxes, separators, hints).
+
+### Maintenance
+- **Faster, cheaper CI**: pull requests into develop run only the branch policy (now seconds:
+  xtask builds without the engine unless `--features dist`, `cargo xtask-dist`) and one
+  unoptimized clippy + test job (no separate build); the version check and the AppImage / Flatpak
+  build run for pull requests into master (release / hotfix branches) only, or by hand with
+  *Actions › Release › Run workflow* (build only). Merges into develop no longer rerun CI;
+  Dependabot checks monthly.
+- **png 0.18** for reading and writing images in the engine (pixel editor, asset library,
+  package icons); an image too large to decode is reported instead of panicking. New tests decode
+  every example image and check lossless round trips.
+- Dependabot no longer proposes egui / egui-phosphor updates: they follow egui-macroquad, which
+  is still on egui 0.31 (egui-phosphor 0.14 needs egui 0.36).
+
 ## 0.2.0 — 2026-11-05
 
 ### Project

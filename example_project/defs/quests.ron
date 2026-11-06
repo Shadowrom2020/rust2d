@@ -8,6 +8,7 @@
             "Open the east gate and find the old shrine deep in Whisperwood.",
             "Return to Elder Rowan.",
         ],
+        xp: 80,
     ),
     (
         id: "pest_control",
@@ -17,5 +18,6 @@
             "Defeat slimes in Whisperwood ({pest_slimes}/5).",
             "Return to Tilda\'s shop for the reward.",
         ],
+        xp: 40,
     ),
 ]

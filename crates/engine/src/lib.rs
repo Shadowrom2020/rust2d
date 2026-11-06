@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod defs;
+pub mod effects;
 pub mod entity;
 pub mod events;
 pub mod fog;
@@ -13,6 +14,7 @@ pub mod library;
 pub mod map;
 pub mod migrate;
 pub mod path;
+pub mod progression;
 pub mod project;
 pub mod quest;
 pub mod refactor;

@@ -2,7 +2,7 @@
 
 A small 2D engine for top-down RPGs on Linux, written in Rust ([macroquad](https://macroquad.rs) + [egui](https://github.com/emilk/egui)), with a map/content editor.
 
-Current version: **0.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+Current version: **0.3.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release. Planned features: see [ROADMAP.md](ROADMAP.md).
 
 **Download**: every release on the [Releases page](https://github.com/Shadowrom2020/rust2d/releases) has the editor (with the game runner and the example project) as an **AppImage** — `chmod +x rust2d-X.Y.Z-x86_64.AppImage` and start it — and as a **Flatpak** bundle — `flatpak install --user rust2d-X.Y.Z.flatpak`, then start *rust2d* from the app menu or with `flatpak run io.github.Shadowrom2020.rust2d`. Both run on Linux x86_64 with glibc 2.34 or newer (Debian 12, Ubuntu 22.04, Fedora 35, RHEL 9 and later); the welcome screen's **Example project** copies the bundled example to `~/rust2d/example_project` and opens it. Contributing: branches, versions and releases are described in [AGENTS.md](AGENTS.md).
 
@@ -17,6 +17,12 @@ Current version: **0.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed
 - **Layered characters & equipment for everyone**: every character is a **body** (people: in underwear — male, female, goblin, female goblin — with **skin and hair colors**, a hair style and beard; monsters: the whole creature) dressed by what it wears: a **Clothing** slot (outfits, with a fitted **female cut** on female bodies), armor on top, and **weapons, shields and lights visible in their hands** (per facing and walk frame; a melee swing shows the weapon sweeping). **NPCs have equipment and carried items too** — set per character definition or per placed NPC — that count in combat and are **dropped when they are defeated**; scripts and actions change them (saved).
 - **Character sheet & equipment**: clothing, head, body, weapon and left-hand slots next to the inventory grid, with a portrait wearing what is equipped and live stats (attack, defense, speed, attack time, reach/range). Armor reduces damage (`max(1, damage − defense)`) and can slow you down; armor sprites are drawn over the player.
 - **Real-time combat**: hearts (1 heart = 2 HP) in the **status frame** at the top left (a small portrait of the hero as dressed, the hero's name, the hearts, the mana bar, the defense and the ammo of an equipped bow or crossbow; the held weapon shows in the hero's hand), **melee weapons** with their own damage, speed, reach, swing arc and knockback (sword, spear, axe) and **ranged weapons** (bow, crossbow, with ammo), knockback and invulnerability frames, hostile characters that chase or shoot at the player, `Defeated` triggers, healing items. A defeated player gets a **defeat menu**: *Continue from last save* (the newest save, autosave included), *Start over* (a new game as the same hero) or *Quit to main menu*.
+- **Experience and levels** (optional, *Database › Project › Experience and levels*): defeated characters give the XP set in their definition, completed quests their *Experience reward*. Enough XP raises the level: each level adds max HP (and heals as much), mana and skill points as set in the project; the XP needed grows per level (*XP for level 2* × *Growth* per level, up to the *Highest level*). The status frame shows `Lv N` with a gold XP bar under the mana bar, the character window *Level N (XP a / b)*, and a message announces every level. Triggers use the *Give experience* action and the *Player level* condition, scripts `give_xp(n)`, `xp()` and `level()`. *Defeat all enemies* gives no XP. The example levels up over its fights and quests (slime 5 XP, goblin 12, quests 40 and 80).
+- **Status effects**: timed effects on the player and on characters — *poison* and *burning* (HP lost per second, defense doesn't help), *regeneration*, *slow* / *haste* (movement), *strength* / *weakness* (damage dealt), *shield* (defense) and *stun* (can't move, attack or interact). Weapons give one *on hit* (melee and projectiles), hostile characters *on touch* (or through a melee weapon they hold), potions, traps and scripts with the *Apply effect* / *Cure effect* actions or `apply_effect` / `cure`. Applying a running effect again restarts it (longer duration, stronger strength wins). The status frame shows a badge per effect with the seconds left (e.g. `PSN 5`), characters with effects get small colored markers over their head, poisoned / burning / stunned ones are tinted. The player's effects are saved; a character's last until the map is left. In the example, slimes poison, skeletons in the library slow, and Tilda sells an *Antidote*, an *Elixir of Strength* and a *Swiftness Potion*.
+- **Enemy behaviour** (*Chase player* characters): they notice the player within their *sight* in a clear line (behind walls and trees only within half of it), keep hunting for a few seconds after losing them (walking to where they saw them last), and slide around obstacles. Per character: a *Leash* (beyond that many tiles from home they give up and walk back, harmless on the way), *Flee below %* (badly hurt, they run away and stop attacking) and, for shooters, *Keep distance* (they back off when the player comes closer). An *HP below %* trigger lets a character react when its HP falls below a share of its max HP, e.g. a boss calling for help; scripts read any character's HP with `hp_of(target)`. In the example the goblin archers keep 4 tiles away, flee once wounded and give up 10 tiles from their camp, and a *Bandit Chief* in the south-east of Whisperwood calls two outlaws at half his HP.
+- **Bestiary**: the journal's second tab lists every kind of character the player has defeated, with the count, a portrait and its numbers and drops, and the *Description* set in the character form. Triggers check the counts with the *Defeated count* condition (e.g. a "kill ten slimes" quest without a script), scripts with `defeated_count("slime")`. The counts are saved.
+- **Dialog log**: the journal's *Dialogs* tab keeps the last 1000 lines of every conversation (speaker, text and the options the player picked), saved with the game, so the player can read again what an NPC said.
+- **Screen shake and hit flash**: when the player is hurt the view shakes briefly and the screen flashes red; explosions shake it too (`effect(..., #{ shake: 0.3 })`, the *Effect* action's *shake* field, used by the example's Fireball), and scenes shake it with `shake(seconds)` / `shake(seconds, strength)` or the *Shake the screen* action. Players switch both off with *Options › Shake & flash*.
 - **Autosave**: the game saves to the *Autosave* slot after every map change (once the new map's *Map enter* events and cut-scenes are done; "Autosaved" shows briefly). Scripts add autosaves with `autosave()`, triggers with the *Autosave* action; it is written as soon as the running event has finished.
 - **Inventory & containers**: slot-based inventory (size set per project, stack size per item) with a grid window (drag to rearrange, double-click to use/equip). Chests, barrels etc. are lootable containers: a window shows the container next to your inventory and you choose what to take (or store things in it). Size, starting contents, lock conditions and an "opened" sprite frame are set in the editor; contents are saved.
 - **Mouse controls**: left-click a tile to walk there (A* pathfinding), left-click an enemy to attack it, right-click an NPC/item/prop to walk over and interact; dialogs, choices and the inventory are clickable.
@@ -26,6 +32,8 @@ Current version: **0.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed
 - **Safe renaming**: renaming an item, prop, character, tileset, sprite sheet, sound or map updates every reference in the project.
 
 ## Quick start
+
+Building needs a Rust toolchain and the ALSA and udev headers (Debian / Ubuntu: `sudo apt install libasound2-dev libudev-dev`; Fedora: `alsa-lib-devel systemd-devel`).
 
 ```sh
 cargo run -p rust2d-engine --example gen_example   # (re)generate example_project/
@@ -43,6 +51,8 @@ The example project contains a short quest: talk to the elder, get the key from 
 
 ### Game controls
 
+The default keys; players change them in *Options › Controls*.
+
 | Key | Action |
 |---|---|
 | Arrows / WASD (Shift = run) | Move |
@@ -50,7 +60,7 @@ The example project contains a short quest: talk to the elder, get the key from 
 | X | Attack in the facing direction |
 | K / L | The character window's **Skills** tab (K) and **Spells** tab (L; "Library"), if the game has them: *Skills* — Up/Down select, Enter or the + button spends a skill point; *Spells* — Enter casts the selected spell, 1–8 puts it on the quick bar. The key of the open tab or Esc closes the window |
 | M / map button (bottom right) | Map of the current map: the area as seen from above (on maps with fog of war only what the player has explored) (tiles, buildings, props) with the player (a red marker with an arrow showing where they face; an arrow at the edge points to them when scrolled away) and the exits labelled with the map they lead to. The game is paused while the map is open. Large maps scroll: arrow keys / WASD, dragging the map or the scrollbars, mouse wheel (Shift+wheel sideways); + / - or the buttons zoom, Space or *Center* returns to the player, M / Esc / the close button continue the game. |
-| J | Quest journal: active quests (newest first) and finished ones; the selected quest shows its description and the objectives reached so far (Up/Down or click select, J / Esc close) |
+| J | Journal with three tabs (Tab, Left / Right or a click switch): *Quests* — active quests (newest first) and finished ones; the selected quest shows its description and the objectives reached so far. *Bestiary* — every kind of character you have defeated, how many, its portrait, description, health, damage, defense, experience, weapon, touch effect and drops. *Dialogs* — the last 1000 dialog lines of the game (who said what, and the options you picked), newest at the bottom: Up / Down / mouse wheel scroll, PgUp / PgDn by ten, Home / End jump to the oldest / newest. Up/Down or click select, J / Esc close |
 | Q | Switch weapon (bare hands → owned weapons) |
 | H | Hide / show the interface (status frame, clock, quick bar, buttons; dialogs and windows still show). Scripts: `hide_ui()` / `show_ui()`, triggers: action *Show / hide UI* |
 | 1–8 / click a quick bar slot | Use that item (inventory open: 1–8 puts the selected item on the bar; drag shortcuts to rearrange, drag off or right-click to remove) |
@@ -60,11 +70,28 @@ The example project contains a short quest: talk to the elder, get the key from 
 | C / I / Tab / button bottom right (person with bag; the map button next to it) | The **character window**: one window with the tabs *Character* (character sheet + inventory; C and I open it), *Skills* (K) and *Spells* (L) — click a tab or press its key to switch, Tab cycles the tabs, the key of the open tab, the × or Esc closes. Character tab: arrows/click select, Enter / double-click / right-click use or equip, **G drops the selected stack on the ground (Shift+G: one item), dragging a stack out of the window drops it too** — dropped items stay where they are (also after leaving the map and in save games) until picked up again, drag items onto / off the equipment slots or to rearrange, left arrow from the first column moves to the equipment slots (Enter unequips), Esc close |
 | In a shop | Click a *Buy* / *Sell* button (or double-click a row, or Enter / E on the selected row) to trade one, hold Shift for ten; arrows / W S select, Tab / ← → switch between the merchant's stock and your items, mouse wheel moves the selection up / down (on the list under the pointer), Esc close |
 | In a loot window | Click a stack to take it (right-click: take one), click your own stack to store it, drag between grids, T take all, Tab switch side, Esc close |
-| Esc | Pause menu: Resume, Save game (new named save or overwrite), Load game (all saves incl. the quicksave and the autosave, newest first; Del deletes), Options (see below), Save and quit (saves to the slot this game was last saved to / loaded from, or a new "Save N", then returns to the main menu), Quit (back to the main menu without saving, after a confirmation). Only *Exit* on the main menu closes the game. |
-| Options (title screen and pause menu) | Player settings: *Fullscreen*, *Zoom* (75–250 % on top of the game's pixel scale), *Show FPS*, *Master*, *Music* and *Effects volume* (10 % steps), *Text speed* (Slow, Normal, Fast, Instant) and *Reset to defaults*. Up/Down select, Left/Right or a click on a row's `<` / `>` arrow go to the previous / next value (a click elsewhere on the row or Enter cycles), Esc back. Changes apply and are saved at once, per game, in `~/.config/rust2d/<game>/settings.ron` (`$XDG_CONFIG_HOME` is honoured; `RUST2D_SETTINGS_DIR` overrides the folder), so they persist between sessions and across save games. |
+| Esc | Pause menu: Resume, Save game (new named save or overwrite), Load game (all saves incl. the quicksave and the autosave, newest first, each with a small picture of the world when it was saved, the map, play time and age; Del deletes), Options (see below), Save and quit (saves to the slot this game was last saved to / loaded from, or a new "Save N", then returns to the main menu), Quit (back to the main menu without saving, after a confirmation). Only *Exit* on the main menu closes the game. |
+| Options (title screen and pause menu) | Player settings: *Fullscreen*, *Zoom* (75–250 % on top of the game's pixel scale), *Show FPS*, *Master*, *Music* and *Effects volume* (10 % steps), *Text speed* (Slow, Normal, Fast, Instant), *Shake & flash* (the screen shake and red flash when hurt, and shakes from explosions and scripts; off for players who find them unpleasant), *Controls...* and *Reset to defaults* (keeps the keys). **Controls** lists every action with its keys: Enter, then a key, adds a key (up to three per action), Del / Backspace clears an action's keys, *Reset to defaults* restores all of them; a key that another action also uses where it matters shows in orange with the clash named below. Escape (back / pause menu) and F3 stay fixed; the gamepad buttons are fixed too. Up/Down select, Left/Right or a click on a row's `<` / `>` arrow go to the previous / next value (a click elsewhere on the row or Enter cycles), Esc back. Changes apply and are saved at once, per game, in `~/.config/rust2d/<game>/settings.ron` (`$XDG_CONFIG_HOME` is honoured; `RUST2D_SETTINGS_DIR` overrides the folder), so they persist between sessions and across save games. |
 | Window close button | While playing: asks *Save and exit* (to the slot "Save and quit" uses; not possible in the middle of an event), *Exit without saving* or *Cancel*. On the main menu or the game-over screen the game closes right away. |
 | F5 / F9 | Quick save / quick load (`<project>/saves/quick.ron`) |
 | F3 | Debug overlay (collision, zones, edge strips, hitboxes) |
+
+**Gamepad**: any controller Linux knows (Xbox, PlayStation, Switch Pro, generic ones) works next to the keyboard and mouse; the left stick and the d-pad move and navigate. Text fields (character name, save names) take Enter / A to confirm and Escape / B to go back.
+
+| Button (Xbox names) | Action |
+|---|---|
+| Left stick / d-pad | Move; navigate menus, windows, the map |
+| A | Interact, talk, advance dialogs, choose, use the selected item, buy / sell; on the map: center on the player |
+| B | Close a window, go back in a menu |
+| Start | Pause menu (also closes windows) |
+| X | Attack (while aiming a spell: cast straight ahead); in a loot window: take all; on the Load page: delete the save |
+| Y | Character window (inventory) |
+| RB / LB | Next / previous tab (character window, journal, shop and loot sides); on the map: zoom in / out |
+| LT (hold) | Run; buy / sell ten |
+| RT | Switch weapon |
+| Select | Map |
+| Right stick click | Journal |
+| Left stick click | Hide / show the interface |
 
 ### Editor basics
 
@@ -139,7 +166,7 @@ The executable is a copy of `rust2d-game`; started without arguments it runs the
 **Linux packages** (ticked in the export dialog, built from the bundle):
 
 - **AppImage** — one file that runs on most distributions: players make it executable (`chmod +x`) and start it; without FUSE, `./<game>-x86_64.AppImage --appimage-extract-and-run` works. The editor writes it itself; only the official AppImage runtime is downloaded once (from github.com/AppImage, checked against a pinned SHA-256, cached in `~/.cache/rust2d/`).
-- **Flatpak bundle** — a sandboxed single file: players install it with `flatpak install --user <game>.flatpak` (Flatpak fetches the freedesktop runtime from Flathub) and start it from the app menu or with `flatpak run <app id>`; saves go to `~/.var/app/<app id>/data/<game>/saves`. Needs the `flatpak` command on the creator's machine (not the runtime). Set the **app id** (default `org.rust2d.<game>`) and the **runtime** (freedesktop 25.08 or 26.08) in the dialog. The game gets a window (X11; XWayland on Wayland desktops), the GPU and sound — nothing else.
+- **Flatpak bundle** — a sandboxed single file: players install it with `flatpak install --user <game>.flatpak` (Flatpak fetches the freedesktop runtime from Flathub) and start it from the app menu or with `flatpak run <app id>`; saves go to `~/.var/app/<app id>/data/<game>/saves`. Needs the `flatpak` command on the creator's machine (not the runtime). Set the **app id** (default `org.rust2d.<game>`) and the **runtime** (freedesktop 25.08 or 26.08) in the dialog. The game gets a window (X11; XWayland on Wayland desktops), sound and device access (the GPU and gamepads) — nothing else.
 
 Both get a desktop entry and an **icon**: the player character, drawn large, or a PNG picked in the dialog.
 
@@ -193,6 +220,7 @@ A **trigger** = *when* (event) + *if* (all conditions) + *do* (actions), optiona
 | Defeated | a character whose HP reached 0 |
 | Unlocked | a prop whose key lock was opened |
 | Locked | a prop that was locked again |
+| HP below % | a character whose HP fell below that share of its max HP and survived the hit |
 
 The editor only offers the events that can reach a trigger where it is defined:
 
@@ -200,7 +228,7 @@ The editor only offers the events that can reach a trigger where it is defined:
 |---|---|
 | a map | Map enter, Custom event |
 | a zone | Enter, Leave, Interact, Custom event |
-| a character (placed or definition) | Interact, Use item, Defeat, Custom event |
+| a character (placed or definition) | Interact, Use item, Defeat, HP below %, Custom event |
 | a prop (placed or definition) | Interact, Use item, Unlocked, Locked, Custom event |
 | an item pickup on a map | Interact, Use item, Custom event |
 | an item's *On use* | Use item |
@@ -209,9 +237,9 @@ Older triggers with an event that can never reach them (e.g. a map trigger *On E
 
 Entities run their definition's triggers plus their own. Picking up an item entity is automatic on Interact.
 
-**Conditions:** flag set, variable comparison, has item (count), player HP comparison, prop state, quest, player sex, time of day (from–to hours, wraps around midnight), skill level comparison, knows spell, script function returning `bool`; each can be negated.
+**Conditions:** flag set, variable comparison, has item (count), player HP comparison, prop state, quest, player sex, time of day (from–to hours, wraps around midnight), skill level comparison, knows spell, player level comparison, player has a status effect, defeated count (how many of a character kind the player has defeated), script function returning `bool`; each can be negated.
 
-**Actions:** Dialog, Choice (stores the chosen index in a variable), Give/Take item, Set flag, Set variable (= or +=), Teleport (map + spawn), Set active (show/hide an entity), Set prop state (e.g. open / destroyed), Set frame (old frame offset), Move (walk by tiles, blocking), Face, Wait, Emit event, Run script, If/Else, Play sound, Play music, Heal player (negative = damage), Set locked, Set time of day, Give skill points, Set skill level, Learn spell, Add mana, Damage around player, Light around player. Action targets are `self` (the trigger's owner), `player`, or an entity name. Entity state changes persist across map changes and saves.
+**Actions:** Dialog, Choice (stores the chosen index in a variable), Give/Take item, Set flag, Set variable (= or +=), Teleport (map + spawn), Set active (show/hide an entity), Set prop state (e.g. open / destroyed), Set frame (old frame offset), Move (walk by tiles, blocking), Face, Wait, Emit event, Run script, If/Else, Play sound, Play music, Heal player (negative = damage), Set locked, Set time of day, Give skill points, Set skill level, Learn spell, Add mana, Give experience, Apply effect, Cure effect, Damage around player, Light around player, Shake the screen. Action targets are `self` (the trigger's owner), `player`, or an entity name. Entity state changes persist across map changes and saves.
 
 ### Scripting (Rhai)
 
@@ -250,13 +278,15 @@ fn shrine_touch() {
     }
     fn fireball_hit(x, y) {
         play_sound("explosion");
-        effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5 });
+        effect("explosion", x, y, #{ fps: 14, scale: 2.4, light: 5, shake: 0.3 });
         damage_area(x, y, 2, 5);
         light_at(x, y, 2, 4, #{ color: [255, 120, 50], flicker: true });   // embers
     }
     ```
   - The script editor completes every engine function with its parameters and a description (a test keeps the completion table in step with the engine).
-- Other: `player_hp()`, `random(n)` (0..n), `quest_stage(id)` (-1 = not started), `quest_active(id)`, `quest_done(id)`.
+- Experience and levels: `xp()`, `level()`; queued `give_xp(n)` (may raise several levels at once; negative takes XP away, the level never drops).
+- Status effects: queued `apply_effect(target, "poison", 1, 6)` (`poison`, `burn`, `regen`, `slow`, `haste`, `stun`, `strength`, `weakness`, `shield`), `cure(target, "poison")`, `cure(target)` (all); immediate `has_effect("poison")` (the player).
+- Other: `player_hp()`, `defeated_count(character)` (the bestiary's count), `hp_of(target)` (a character's HP: `"player"`, `"self"` / `SELF` or a name; -1 if none), `random(n)` (0..n), `quest_stage(id)` (-1 = not started), `quest_active(id)`, `quest_done(id)`.
 - `SELF` is the owner entity's uid (or -1). Scripts are sandboxed (no file access, operation limit); errors are logged and never crash the game.
 
 ## Architecture

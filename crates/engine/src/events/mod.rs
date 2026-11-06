@@ -32,6 +32,8 @@ pub enum GameEvent {
     Unlock,
     /// An opened prop was locked again.
     Lock,
+    /// A character's HP dropped from `from` to `to` (fractions of its max HP, still alive).
+    HpBelow { from: f32, to: f32 },
 }
 
 /// Which events a trigger reacts to.
@@ -50,6 +52,8 @@ pub enum TriggerOn {
     Unlock,
     /// The owning prop was locked again (by the player with its key, or by a Set locked action).
     Lock,
+    /// The owning character's HP fell below `percent` of its max HP (and it is still alive).
+    HpBelow { percent: u32 },
 }
 
 /// Where a trigger lives. The game only sends some events to each kind of owner (see
@@ -79,7 +83,7 @@ impl TriggerOwner {
             (O::Map | O::Zone | O::Character | O::Prop | O::Pickup, T::Custom { .. }) => true,
             (O::Map, T::MapEnter) => true,
             (O::Zone, T::Enter | T::Leave | T::Interact) => true,
-            (O::Character, T::Interact | T::UseItem { .. } | T::Defeat) => true,
+            (O::Character, T::Interact | T::UseItem { .. } | T::Defeat | T::HpBelow { .. }) => true,
             (O::Prop, T::Interact | T::UseItem { .. } | T::Unlock | T::Lock) => true,
             (O::Pickup, T::Interact | T::UseItem { .. }) => true,
             (O::ItemUse, T::UseItem { .. }) => true,
@@ -139,6 +143,11 @@ impl TriggerOn {
                 want.is_empty() || want == item
             }
             (TriggerOn::Custom { name: want }, GameEvent::Custom { name }) => want == name,
+            // Fires when the HP crosses the threshold on its way down.
+            (TriggerOn::HpBelow { percent }, GameEvent::HpBelow { from, to }) => {
+                let p = *percent as f32 / 100.0;
+                *from >= p && *to < p
+            }
             _ => false,
         }
     }
@@ -154,6 +163,7 @@ impl TriggerOn {
             TriggerOn::Defeat => "Defeated",
             TriggerOn::Unlock => "Unlocked",
             TriggerOn::Lock => "Locked again",
+            TriggerOn::HpBelow { .. } => "HP below %",
         }
     }
 
@@ -168,6 +178,7 @@ impl TriggerOn {
             TriggerOn::Defeat,
             TriggerOn::Unlock,
             TriggerOn::Lock,
+            TriggerOn::HpBelow { percent: 50 },
         ]
     }
 }
@@ -244,6 +255,12 @@ pub enum Cond {
     Skill { skill: String, op: CmpOp, level: i64 },
     /// The player has learned the spell.
     KnowsSpell { spell: String },
+    /// The player's level (experience and levels) compared with a value.
+    Level { op: CmpOp, value: i64 },
+    /// The player has a status effect.
+    HasEffect { kind: crate::effects::EffectKind },
+    /// How many characters of a definition the player has defeated, compared with a number.
+    Defeated { character: String, op: CmpOp, count: i64 },
 }
 
 /// Whether `hour` lies in `from..to` (hours 0..24; `from > to` wraps around midnight).
@@ -270,6 +287,9 @@ impl Cond {
             Cond::TimeBetween { .. } => "Time of day",
             Cond::Skill { .. } => "Skill level",
             Cond::KnowsSpell { .. } => "Knows spell",
+            Cond::Level { .. } => "Player level",
+            Cond::HasEffect { .. } => "Player has effect",
+            Cond::Defeated { .. } => "Defeated count",
         }
     }
     pub fn templates() -> Vec<Cond> {
@@ -285,6 +305,9 @@ impl Cond {
             Cond::TimeBetween { from: 20.0, to: 6.0 },
             Cond::Skill { skill: String::new(), op: CmpOp::Ge, level: 1 },
             Cond::KnowsSpell { spell: String::new() },
+            Cond::Level { op: CmpOp::Ge, value: 2 },
+            Cond::HasEffect { kind: crate::effects::EffectKind::Poison },
+            Cond::Defeated { character: String::new(), op: CmpOp::Ge, count: 10 },
         ]
     }
 }
@@ -315,6 +338,9 @@ impl Condition {
             Cond::TimeBetween { from, to } => hour_between(world.hour, *from, *to),
             Cond::Skill { skill, op, level } => op.apply(world.skill_level(skill) as i64, *level),
             Cond::KnowsSpell { spell } => world.spells.contains(spell),
+            Cond::Level { op, value } => op.apply(world.player_level() as i64, *value),
+            Cond::HasEffect { kind } => world.effects.iter().any(|e| e.kind == *kind),
+            Cond::Defeated { character, op, count } => op.apply(world.defeated(character) as i64, *count),
         };
         v != self.negate
     }
@@ -460,6 +486,14 @@ pub enum Action {
     /// Saves the game to the autosave slot as soon as the running event (dialogs, cut-scene)
     /// has finished.
     Autosave,
+    /// Gives the player experience (negative takes it away; the level never drops).
+    GiveXp { amount: i64 },
+    /// Starts a status effect on the player or a character.
+    ApplyEffect { target: TargetName, effect: crate::effects::EffectSpec },
+    /// Ends a status effect (`None` = all of them) on the player or a character.
+    CureEffect { target: TargetName, kind: Option<crate::effects::EffectKind> },
+    /// Shakes the screen (`strength` 1 = like a hit) - earthquakes, explosions, a boss landing.
+    Shake { seconds: f32, strength: f32 },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -483,11 +517,18 @@ pub struct FxSprite {
     pub light: f32,
     /// The color of that light (default: a warm fire glow).
     pub glow: [u8; 3],
+    /// *Effect*: shakes the screen this many seconds when it starts (0 = no shake).
+    #[serde(skip_serializing_if = "is_zero_f32")]
+    pub shake: f32,
+}
+
+fn is_zero_f32(v: &f32) -> bool {
+    *v == 0.0
 }
 
 impl Default for FxSprite {
     fn default() -> Self {
-        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70] }
+        FxSprite { sheet: String::new(), first: 0, last: 0, fps: 12.0, scale: 1.0, light: 0.0, glow: [255, 160, 70], shake: 0.0 }
     }
 }
 
@@ -544,6 +585,10 @@ impl Action {
             Action::SetSpawners { .. } => "Spawners on / off",
             Action::DefeatEnemies => "Defeat all enemies",
             Action::Autosave => "Autosave",
+            Action::GiveXp { .. } => "Give experience",
+            Action::ApplyEffect { .. } => "Apply effect",
+            Action::CureEffect { .. } => "Cure effect",
+            Action::Shake { .. } => "Shake the screen",
         }
     }
 
@@ -599,6 +644,10 @@ impl Action {
             Action::SetSpawners { map: s(), zone: s(), active: false },
             Action::DefeatEnemies,
             Action::Autosave,
+            Action::GiveXp { amount: 10 },
+            Action::ApplyEffect { target: "player".into(), effect: crate::effects::EffectSpec::template(crate::effects::EffectKind::Poison) },
+            Action::CureEffect { target: "player".into(), kind: Some(crate::effects::EffectKind::Poison) },
+            Action::Shake { seconds: 0.5, strength: 1.5 },
         ]
     }
 }
@@ -689,6 +738,17 @@ mod tests {
     }
 
     #[test]
+    fn hp_below_fires_on_crossing() {
+        let t = TriggerOn::HpBelow { percent: 50 };
+        assert!(t.matches(&GameEvent::HpBelow { from: 0.6, to: 0.4 }));
+        assert!(t.matches(&GameEvent::HpBelow { from: 0.5, to: 0.3 }));
+        assert!(!t.matches(&GameEvent::HpBelow { from: 0.4, to: 0.2 }), "already below");
+        assert!(!t.matches(&GameEvent::HpBelow { from: 0.9, to: 0.6 }), "not there yet");
+        assert!(TriggerOwner::Character.allows(&t));
+        assert!(!TriggerOwner::Prop.allows(&t));
+    }
+
+    #[test]
     fn conditions() {
         let mut w = WorldState::default();
         w.set_flag("door_open", true);
@@ -714,6 +774,20 @@ mod tests {
         ));
         let mut yes = |f: &str| f == "ok";
         assert!(met(&[Condition::new(Cond::Script { function: "ok".into() })], &w, &mut yes));
+        // A fresh world (and an old save) is level 1.
+        let level = |op, value| Condition::new(Cond::Level { op, value });
+        assert!(met(&[level(CmpOp::Eq, 1)], &w, &mut no_script));
+        w.level = 3;
+        assert!(met(&[level(CmpOp::Ge, 3)], &w, &mut no_script));
+        assert!(!met(&[level(CmpOp::Lt, 3)], &w, &mut no_script));
+        let poisoned = [Condition::new(Cond::HasEffect { kind: crate::effects::EffectKind::Poison })];
+        assert!(!met(&poisoned, &w, &mut no_script));
+        crate::effects::apply(&mut w.effects, &crate::effects::EffectSpec::new(crate::effects::EffectKind::Poison, 1.0, 3.0));
+        assert!(met(&poisoned, &w, &mut no_script));
+        let slimes = |count| [Condition::new(Cond::Defeated { character: "slime".into(), op: CmpOp::Ge, count })];
+        assert!(met(&slimes(0), &w, &mut no_script) && !met(&slimes(1), &w, &mut no_script));
+        w.bestiary.insert("slime".into(), 3);
+        assert!(met(&slimes(3), &w, &mut no_script) && !met(&slimes(4), &w, &mut no_script));
     }
 
     #[test]

@@ -32,6 +32,10 @@ pub enum Arg {
     Func,
     /// "up" / "down" / "left" / "right".
     Dir,
+    /// A status effect: "poison", "haste", ...
+    Effect,
+    /// A character definition id.
+    Character,
     /// Event name for emit().
     Event,
     Text,
@@ -81,6 +85,17 @@ pub const API: &[ApiFn] = api! {
     "learn_spell"(spell: Spell) "Teaches a spell (queued)";
     "mana"() "The player's current mana";
     "add_mana"(amount: Num) "Adds mana (negative drains) (queued)";
+    "xp"() "All the experience points the player has gained (experience and levels)";
+    "level"() "The player's level (1 = the first)";
+    "apply_effect"(target: Target, effect: Effect, strength: Num, seconds: Num) "Starts a status effect on \"player\" or a character: \"poison\", \"burn\" (HP per second), \"regen\" (HP per second), \"slow\", \"haste\", \"strength\", \"weakness\" (percent), \"shield\" (defense), \"stun\" (queued)";
+    "cure"(target: Target, effect: Effect) "Ends a status effect, e.g. cure(\"player\", \"poison\") (queued)";
+    "cure"(target: Target) "Ends all status effects (queued)";
+    "defeated_count"(character: Character) "How many characters of this definition the player has defeated (the bestiary's count), e.g. defeated_count(\"slime\")";
+    "shake"(seconds: Num) "Shakes the screen like a hit for a while: earthquakes, explosions (queued)";
+    "shake"(seconds: Num, strength: Num) "Shakes the screen; strength 1 = like a hit, 2 = twice as hard (queued)";
+    "hp_of"(target: Target) "A character's HP right now: \"player\", \"self\" (also SELF), or a name on this map; -1 if there is no such character";
+    "has_effect"(effect: Effect) "Whether the player has a status effect, e.g. has_effect(\"poison\")";
+    "give_xp"(amount: Num) "Gives experience; enough of it raises the level (negative takes it away, the level never drops) (queued)";
     "damage_around"(damage: Num, radius: Num) "Damages every character within radius tiles of the player (queued)";
     "player_light"(radius: Num, seconds: Num) "Lights the player's surroundings for a while (queued)";
     "player_light"(radius: Num, seconds: Num, options: Opts) "Like player_light(); options #{ color: [r, g, b], flicker: true } (queued)";
@@ -101,7 +116,7 @@ pub const API: &[ApiFn] = api! {
     "fly"(sheet: Sheet, x: Num, y: Num, function: Func) "An animated sprite flies from the player to tile x, y, then calls function(x, y) (queued)";
     "fly"(sheet: Sheet, x: Num, y: Num, function: Func, options: Opts) "Like fly(); options #{ speed: tiles/s, frames: [first, last], fps, scale, light: radius, color: [r, g, b] } (queued)";
     "effect"(sheet: Sheet, x: Num, y: Num) "Plays a sprite sheet's frames once, centered on tile x, y (explosions) (queued)";
-    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius, color: [r, g, b] } (queued)";
+    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius, color: [r, g, b], shake: seconds } (queued)";
     "damage_area"(x: Num, y: Num, radius: Num, damage: Num) "Damages every character within radius tiles of tile x, y (spell damage skills apply) (queued)";
     "text"(text: Text) "Fills in {player}, {sir|madam} and {variable} placeholders";
     "random"(n: Num) "Random integer from 0 to n-1";
@@ -452,6 +467,8 @@ pub fn candidates(place: &Place, call: Option<&CallAt>, known: &Known, src: &str
                 Some(Arg::Var) => known.vars.iter().map(|v| c(v, "variable")).collect(),
                 Some(Arg::Func) => known.functions.iter().map(|f| c(f, "script function")).collect(),
                 Some(Arg::Dir) => ["up", "down", "left", "right"].iter().map(|d| c(d, "direction")).collect(),
+                Some(Arg::Character) => db.characters.iter().map(|q| c(&q.id, &q.name)).collect(),
+                Some(Arg::Effect) => rust2d_engine::effects::EffectKind::ALL.iter().map(|k| c(k.id(), k.label())).collect(),
                 _ => Vec::new(),
             };
             rank(list, partial)

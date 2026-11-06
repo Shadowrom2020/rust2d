@@ -1417,6 +1417,9 @@ fn characters(x: &mut Extras) {
         hostile: false,
         weapon: None,
         defense: 0,
+        xp: 0,
+        touch_effect: None,
+        description: String::new(),
         triggers: vec![],
         shop: None,
         loot: vec![],
@@ -1425,19 +1428,34 @@ fn characters(x: &mut Extras) {
         equipment: Default::default(),
         inventory: Vec::new(),
     };
-    let foe = |mut d: CharacterDef, hp: i32, damage: i32| {
+    let foe = |mut d: CharacterDef, hp: i32, damage: i32, xp: u32| {
+        d.description = match d.id.as_str() {
+            "bandit" | "bandit_f" => "Highway robbers who chase travellers through the woods and over the roads.",
+            "skeleton" | "skeleton_f" => "Restless bones from old graves. Their cold touch slows you down.",
+            "goblin_f" => "Quicker than the archers, goblin scouts roam the wilds in small bands, bows ready.",
+            "bat" => "Fast, erratic and always in a swarm. Weak alone, a nuisance in caves.",
+            "ghost" => "A pale shape drifting through ruins at night. It passes through what you can't.",
+            _ => "",
+        }
+        .into();
         d.max_hp = hp;
         d.damage = damage;
         d.hostile = true;
+        d.xp = xp;
         d
     };
     for (id, name, _) in &people {
         let d = match *id {
-            "bandit" | "bandit_f" => foe(ch(id, name, 90.0, Behavior::Chase { sight: 6.0 }), 4, 2),
-            "skeleton" | "skeleton_f" => foe(ch(id, name, 70.0, Behavior::Chase { sight: 5.0 }), 3, 2),
+            "bandit" | "bandit_f" => foe(ch(id, name, 90.0, Behavior::chase(6.0)), 4, 2, 20),
+            "skeleton" | "skeleton_f" => {
+                // A skeleton's cold touch slows for a few seconds.
+                let mut d = foe(ch(id, name, 70.0, Behavior::chase(5.0)), 3, 2, 20);
+                d.touch_effect = Some(rust2d_engine::effects::EffectSpec::new(rust2d_engine::effects::EffectKind::Slow, 40.0, 3.0));
+                d
+            }
             "goblin_f" => {
                 // Like the example's goblin archer.
-                let mut d = foe(ch(id, name, 76.0, Behavior::Chase { sight: 7.0 }), 2, 1);
+                let mut d = foe(ch(id, name, 76.0, Behavior::chase(7.0)), 2, 1, 12);
                 d.weapon = Some(Weapon::ranged(2, 1.6, Ranged { projectile: SpriteRef::new("items", it::ARROW_SHOT), speed: 300.0, range: 6.0, ammo: String::new() }));
                 d
             }
@@ -1460,8 +1478,8 @@ fn characters(x: &mut Extras) {
         }
         x.db.characters.push(d);
     }
-    let mut bat = foe(ch("bat", "Bat", 130.0, Behavior::Chase { sight: 7.0 }), 1, 1);
+    let mut bat = foe(ch("bat", "Bat", 130.0, Behavior::chase(7.0)), 1, 1, 6);
     bat.hitbox = [14.0, 8.0];
     x.db.characters.push(bat);
-    x.db.characters.push(foe(ch("ghost", "Ghost", 60.0, Behavior::Chase { sight: 6.0 }), 3, 2));
+    x.db.characters.push(foe(ch("ghost", "Ghost", 60.0, Behavior::chase(6.0)), 3, 2, 15));
 }

@@ -14,7 +14,7 @@
 
 ## Checklist
 
-- [ ] `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` pass
+- [ ] `cargo build --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` pass
 - [ ] CHANGELOG.md (*Unreleased*), README.md and Documentation/scripting.md updated where users see a change
 - [ ] Old maps, definitions and save games still load (new enum variants appended, new fields have serde defaults)
 - [ ] `example_project/` regenerated if `gen_example` changed (`cargo run --example gen_example`)

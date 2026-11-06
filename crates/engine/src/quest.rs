@@ -17,6 +17,13 @@ pub struct QuestDef {
     /// value of variable `name` (e.g. "Defeat slimes ({slimes}/5)").
     #[serde(default)]
     pub stages: Vec<String>,
+    /// Experience given when the quest is completed (with experience and levels on).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub xp: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

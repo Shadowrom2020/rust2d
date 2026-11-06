@@ -70,6 +70,8 @@ impl Game {
             eprintln!("[fx] effect: unknown sprite sheet '{}'", sprite.sheet);
         }
         let pos = tile * self.ts();
+        // Explosions and the like can shake the screen (a bit harder than a hit).
+        self.shake_screen(sprite.shake, 1.3);
         self.fx.push(Fx { sprite, pos, age: 0.0, kind: FxKind::Once });
     }
 
@@ -93,8 +95,10 @@ impl Game {
     /// Tells the script engine where the player is (player_x() / player_y() / ...).
     pub(super) fn sync_script_player(&mut self) {
         let ts = self.ts();
-        let info = crate::script::PlayerInfo { x: self.player.pos.x / ts, y: self.player.pos.y / ts, max_hp: self.combat.max_hp, facing: self.player.facing };
+        let info = crate::script::PlayerInfo { x: self.player.pos.x / ts, y: self.player.pos.y / ts, max_hp: self.player_max_hp(), facing: self.player.facing };
         self.scripts.set_player(info);
+        let chars = self.loaded.entities.iter().filter(|e| e.active && e.max_hp > 0).map(|e| (e.uid, e.name.clone(), e.hp)).collect();
+        self.scripts.set_characters(chars);
     }
 
     /// Runs a script function and queues its actions (automated play-throughs).

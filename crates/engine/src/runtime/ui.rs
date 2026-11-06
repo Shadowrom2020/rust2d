@@ -34,7 +34,7 @@ const CHARS_PER_SEC: f32 = 60.0;
 const FONT: u16 = 26;
 
 fn confirm_pressed() -> bool {
-    input::any_pressed(&[KeyCode::E, KeyCode::Space, KeyCode::Enter])
+    input::act_pressed(input::Act::Confirm)
 }
 
 impl Ui {
@@ -75,10 +75,10 @@ impl Ui {
             d.revealed = if self.text_speed <= 0.0 { len } else { (d.revealed + dt * CHARS_PER_SEC * self.text_speed).min(len) };
             if let Some((opts, _, sel)) = &mut d.choice {
                 let n = opts.len().max(1);
-                if input::pressed(KeyCode::Up) || input::pressed(KeyCode::W) {
+                if input::act_pressed(input::Act::Up) {
                     *sel = (*sel + n - 1) % n;
                 }
-                if input::pressed(KeyCode::Down) || input::pressed(KeyCode::S) {
+                if input::act_pressed(input::Act::Down) {
                     *sel = (*sel + 1) % n;
                 }
             }
@@ -98,8 +98,13 @@ impl Ui {
                 if d.revealed < len {
                     d.revealed = len;
                 } else {
-                    if let Some((_, var, sel)) = &d.choice {
+                    if let Some((opts, var, sel)) = &d.choice {
                         world.set_var(var, *sel as i64);
+                        // The answer goes into the dialog log under the player's name.
+                        let me = if world.player_name.trim().is_empty() { "You".to_string() } else { world.player_name.clone() };
+                        if let Some(o) = opts.get(*sel) {
+                            world.log_dialog(&me, o, true);
+                        }
                     }
                     self.dialog = None;
                 }

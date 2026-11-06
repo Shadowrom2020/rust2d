@@ -275,6 +275,9 @@ pub struct Weapon {
     /// Needs both hands: nothing can be held in the left hand at the same time.
     #[serde(default)]
     pub two_handed: bool,
+    /// A status effect for whoever the weapon hits (melee or projectile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<crate::effects::EffectSpec>,
 }
 
 fn default_reach() -> f32 {
@@ -290,7 +293,7 @@ fn default_knockback() -> f32 {
 impl Weapon {
     /// A melee weapon with default reach / arc / knockback.
     pub fn melee(damage: i32, cooldown: f32) -> Self {
-        Weapon { damage, cooldown, ranged: None, reach: default_reach(), arc: default_arc(), knockback: default_knockback(), two_handed: false }
+        Weapon { damage, cooldown, ranged: None, reach: default_reach(), arc: default_arc(), knockback: default_knockback(), two_handed: false, effect: None }
     }
     pub fn ranged(damage: i32, cooldown: f32, ranged: Ranged) -> Self {
         Weapon { ranged: Some(ranged), ..Weapon::melee(damage, cooldown) }
@@ -666,8 +669,27 @@ pub enum Behavior {
     Static,
     /// Walks randomly within `radius` tiles of its start position.
     Wander { radius: f32 },
-    /// Runs at the player when closer than `sight` tiles, otherwise wanders near home.
-    Chase { sight: f32 },
+    /// Runs at the player when it sees them within `sight` tiles, otherwise wanders near home.
+    Chase {
+        sight: f32,
+        /// Gives up and walks back home when this many tiles from home (0 = never).
+        #[serde(default)]
+        leash: f32,
+        /// Runs away from the player below this fraction of its max HP (0 = never).
+        #[serde(default)]
+        flee_below: f32,
+        /// Shooters back off to stay this many tiles from the player (0 = they just stop
+        /// coming closer once the player is well within range).
+        #[serde(default)]
+        keep_distance: f32,
+    },
+}
+
+impl Behavior {
+    /// Chasing with only a sight range (no leash, never flees, no kept distance).
+    pub fn chase(sight: f32) -> Self {
+        Behavior::Chase { sight, leash: 0.0, flee_below: 0.0, keep_distance: 0.0 }
+    }
 }
 
 /// A character: a layered model (`appearance` + `equipment`) with behavior and combat values.
@@ -701,6 +723,15 @@ pub struct CharacterDef {
     /// Subtracted from incoming damage (player: base defense before armor).
     #[serde(default)]
     pub defense: i32,
+    /// Experience the player gains for defeating the character (with experience and levels on).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub xp: u32,
+    /// A status effect its touch gives the player (hostile characters, with contact damage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touch_effect: Option<crate::effects::EffectSpec>,
+    /// What the bestiary says about it (shown once the player has defeated one).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     #[serde(default)]
     pub triggers: Vec<Trigger>,
     /// Makes the character a merchant (placed instances can override it).
@@ -1038,9 +1069,19 @@ impl Database {
     }
 }
 
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_chase_behavior_loads() {
+        let b: Behavior = ron::from_str("Chase(sight: 4.0)").unwrap();
+        assert_eq!(b, Behavior::chase(4.0));
+    }
 
     #[test]
     fn loot_rolls() {

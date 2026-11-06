@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use egui_macroquad::egui::{self, pos2, vec2, Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui};
 use rust2d_engine::defs::{ContainerSpec, LockSpec, LootEntry, OnUnlock, PropDef, ShopEntry, ShopSpec, SpriteRef};
+use rust2d_engine::effects::{EffectKind, EffectSpec};
 use rust2d_engine::inventory::ItemStack;
 use rust2d_engine::entity::Facing;
 use rust2d_engine::events::{Action, CmpOp, Cond, Condition, Trigger, TriggerOn, TriggerOwner, VarOp};
@@ -701,7 +702,7 @@ fn speaker_field(ui: &mut Ui, id: &str, speaker: &mut String, refs: &Refs) {
 }
 
 /// The animated sprite of the Fly / Effect actions.
-fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs) {
+fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, refs: &Refs, shake: bool) {
     labeled(ui, "sheet", |ui| suggest(ui, &format!("{id}/sheet"), &mut s.sheet, &refs.sheets, 120.0));
     labeled(ui, "frames", |ui| {
         ui.add(egui::DragValue::new(&mut s.first).range(0..=999));
@@ -717,6 +718,12 @@ fn fx_sprite_ui(ui: &mut Ui, id: &str, s: &mut rust2d_engine::events::FxSprite, 
             ui.color_edit_button_srgb(&mut s.glow).on_hover_text("Color of the light");
         }
     });
+    if shake {
+        labeled(ui, "shake", |ui| {
+            ui.add(egui::DragValue::new(&mut s.shake).range(0.0..=5.0).speed(0.05).suffix(" s"))
+                .on_hover_text("Shakes the screen this long when it starts (explosions); 0 = no shake. Players can switch shaking off in the Options.");
+        });
+    }
 }
 
 /// A point in tile coordinates (10.5 = the middle of tile 10).
@@ -751,6 +758,7 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
             match &t.on {
                 TriggerOn::UseItem { item } if !item.is_empty() => format!(" [{item}]"),
                 TriggerOn::Custom { name } => format!(" [{name}]"),
+                TriggerOn::HpBelow { percent } => format!(" [{percent} %]"),
                 _ => String::new(),
             },
             t.conditions.len(),
@@ -776,6 +784,11 @@ pub fn triggers_ui(ui: &mut Ui, salt: &str, triggers: &mut Vec<Trigger>, refs: &
                     }
                     TriggerOn::Custom { name } => {
                         ui.add(egui::TextEdit::singleline(name).hint_text("event name").desired_width(110.0));
+                    }
+                    TriggerOn::HpBelow { percent } => {
+                        ui.add(egui::DragValue::new(percent).range(1..=99).suffix(" %")).on_hover_text(
+                            "Runs when the character's HP falls below this share of its max HP (and it survives the hit) — e.g. a boss calling for help at 50 %. Again after healing above it.",
+                        );
                     }
                     _ => {}
                 }
@@ -879,6 +892,29 @@ pub fn conditions_ui(ui: &mut Ui, salt: &str, conds: &mut Vec<Condition>, refs: 
                         }
                     });
                     ui.add(egui::DragValue::new(level).range(0..=99));
+                }
+                Cond::Level { op, value } => {
+                    ui.label("player level");
+                    egui::ComboBox::from_id_salt(format!("{id}/lvop")).width(40.0).selected_text(op.symbol()).show_ui(ui, |ui| {
+                        for o in CmpOp::ALL {
+                            ui.selectable_value(op, o, o.symbol());
+                        }
+                    });
+                    ui.add(egui::DragValue::new(value).range(1..=999));
+                }
+                Cond::Defeated { character, op, count } => {
+                    ui.label("defeated");
+                    suggest(ui, &format!("{id}/dc"), character, &refs.characters, 100.0);
+                    egui::ComboBox::from_id_salt(format!("{id}/dcop")).width(40.0).selected_text(op.symbol()).show_ui(ui, |ui| {
+                        for o in CmpOp::ALL {
+                            ui.selectable_value(op, o, o.symbol());
+                        }
+                    });
+                    ui.add(egui::DragValue::new(count).range(0..=100_000)).on_hover_text("How many characters of this kind the player has defeated (the bestiary's count)");
+                }
+                Cond::HasEffect { kind } => {
+                    ui.label("player has");
+                    effect_kind_combo(ui, &format!("{id}/fx"), kind);
                 }
                 Cond::KnowsSpell { spell } => {
                     ui.label("knows");
@@ -1102,7 +1138,7 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             ui.weak("The player clicks a target; the script function gets it as (x, y) in tiles.");
         }
         Action::Fly { sprite, x, y, speed, function } => {
-            fx_sprite_ui(ui, id, sprite, refs);
+            fx_sprite_ui(ui, id, sprite, refs, false);
             tile_point_ui(ui, "to", x, y);
             labeled(ui, "speed", |ui| {
                 ui.add(egui::DragValue::new(speed).range(0.5..=60.0).speed(0.1).suffix(" tiles/s"));
@@ -1110,7 +1146,7 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "then call", |ui| suggest(ui, &format!("{id}/fn"), function, &refs.functions, 130.0));
         }
         Action::Effect { sprite, x, y } => {
-            fx_sprite_ui(ui, id, sprite, refs);
+            fx_sprite_ui(ui, id, sprite, refs, true);
             tile_point_ui(ui, "at", x, y);
         }
         Action::DamageArea { x, y, radius, damage } => {
@@ -1240,6 +1276,36 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
         }
         Action::DefeatEnemies => {
             ui.weak("Every hostile character on the current map is defeated at once (loot drops, their 'Defeated' triggers run).");
+        }
+        Action::GiveXp { amount } => {
+            labeled(ui, "experience", |ui| {
+                ui.add(egui::DragValue::new(amount).range(-1_000_000..=1_000_000))
+                    .on_hover_text("Experience points for the player (Project › Experience and levels). Negative takes them away; the level never drops.");
+            });
+        }
+        Action::ApplyEffect { target, effect } => {
+            target_field(ui, id, target, refs);
+            effect_spec_ui(ui, &format!("{id}/fx"), effect);
+        }
+        Action::CureEffect { target, kind } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "effect", |ui| {
+                let text = kind.map_or("all effects", |k| k.label());
+                egui::ComboBox::from_id_salt(format!("{id}/cure")).selected_text(text).show_ui(ui, |ui| {
+                    ui.selectable_value(kind, None, "all effects");
+                    for k in EffectKind::ALL {
+                        ui.selectable_value(kind, Some(k), k.label());
+                    }
+                });
+            });
+        }
+        Action::Shake { seconds, strength } => {
+            labeled(ui, "shake for", |ui| {
+                ui.add(egui::DragValue::new(seconds).range(0.05..=10.0).speed(0.05).suffix(" s"));
+                ui.label("strength");
+                ui.add(egui::DragValue::new(strength).range(0.1..=5.0).speed(0.05).prefix("x "))
+                    .on_hover_text("1 = like a hit on the player. Players can switch shaking off in the Options.");
+            });
         }
         Action::Autosave => {
             ui.weak("Saves the game to the 'Autosave' slot once this event (dialogs, cut-scene) has finished. Map changes autosave by themselves.");
@@ -1707,6 +1773,49 @@ pub fn character_preview(ui: &mut Ui, tex: &Textures, assets: &Assets, db: &rust
             if !paint_character(ui, tex, assets, &layers, rect.shrink(2.0)) {
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "?", egui::FontId::default(), Color32::RED);
             }
+        }
+    });
+}
+
+/// A combo box of the status effect kinds.
+pub fn effect_kind_combo(ui: &mut egui::Ui, id: &str, kind: &mut EffectKind) -> bool {
+    let before = *kind;
+    egui::ComboBox::from_id_salt(id).selected_text(kind.label()).show_ui(ui, |ui| {
+        for k in EffectKind::ALL {
+            ui.selectable_value(kind, k, k.label()).on_hover_text(k.unit());
+        }
+    });
+    *kind != before
+}
+
+/// A status effect: kind, strength (unless it has none) and duration.
+pub fn effect_spec_ui(ui: &mut egui::Ui, id: &str, spec: &mut EffectSpec) {
+    ui.horizontal(|ui| {
+        if effect_kind_combo(ui, id, &mut spec.kind) {
+            *spec = EffectSpec { seconds: spec.seconds, ..EffectSpec::template(spec.kind) };
+        }
+        if spec.kind != EffectKind::Stun {
+            ui.add(egui::DragValue::new(&mut spec.strength).range(0.0..=1000.0).speed(0.1)).on_hover_text(spec.kind.unit());
+            ui.weak(match spec.kind {
+                EffectKind::Poison | EffectKind::Burn | EffectKind::Regen => "HP/s",
+                EffectKind::Shield => "def",
+                _ => "%",
+            });
+        }
+        ui.label("for");
+        ui.add(egui::DragValue::new(&mut spec.seconds).range(0.1..=3600.0).speed(0.1).suffix(" s"));
+    });
+}
+
+/// An optional status effect with a checkbox (weapons: on hit, characters: on touch).
+pub fn optional_effect_ui(ui: &mut egui::Ui, id: &str, label: &str, hint: &str, effect: &mut Option<EffectSpec>) {
+    ui.horizontal(|ui| {
+        let mut on = effect.is_some();
+        if ui.checkbox(&mut on, label).on_hover_text(hint).changed() {
+            *effect = on.then(|| EffectSpec::template(EffectKind::Poison));
+        }
+        if let Some(spec) = effect {
+            effect_spec_ui(ui, id, spec);
         }
     });
 }

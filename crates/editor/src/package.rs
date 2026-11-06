@@ -45,8 +45,9 @@ fn game_spec(folder: &Path, slug: &str, name: &str, app_id: &str, runtime: &str,
         categories: "Game;RolePlaying;".into(),
         app_id: app_id.into(),
         runtime: runtime.into(),
-        // Window (X11; Wayland desktops run it through XWayland), GPU, sound - nothing else.
-        finish_args: ["--share=ipc", "--socket=x11", "--socket=pulseaudio", "--device=dri"].map(String::from).to_vec(),
+        // Window (X11; Wayland desktops run it through XWayland), sound, and devices: the GPU and
+        // gamepads (/dev/input; `--device=input` would need Flatpak 1.15.6+) - nothing else.
+        finish_args: ["--share=ipc", "--socket=x11", "--socket=pulseaudio", "--device=all"].map(String::from).to_vec(),
         files: vec![
             Entry { dest: format!("{lib}/{slug}"), src: Source::Path(folder.join(slug)), exec: true },
             // The engine's license (the game runner is rust2d); the game's own license is its creator's choice.

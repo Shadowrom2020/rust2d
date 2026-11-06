@@ -12,10 +12,12 @@ postcard.workspace = true
 lz4_flex.workspace = true
 rhai.workspace = true
 anyhow.workspace = true
-png = "0.17"
+png = "0.18"
 # Portable math functions (glibc_compat.rs).
 libm = "0.2"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# Gamepads (macroquad reads only keyboard and mouse); needs libudev on Linux.
+gilrs = "0.11"
 
 [dev-dependencies]
 # The example generator encodes its music as Ogg Vorbis.
