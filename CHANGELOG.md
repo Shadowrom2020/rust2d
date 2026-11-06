@@ -26,6 +26,16 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   pond and goes home into the elder's house at night; his lines depend on the time of day.
   Editor script `scheduleedit`, `stop K hour|facing|inside V`, `status` prints `schedule=`; game
   `status` prints `schedule=`.
+- **Companions**: the **Companion** action and `follow(target)` / `stop_following(target)`
+  (plus `is_companion(name)`, `companion_count()`) let a placed, friendly character follow the
+  player from map to map (`WorldState.companions`: where it is placed and its HP). Companions
+  walk behind the player, fight hostile characters nearby with their weapon, are hunted and hurt
+  by enemies, regain HP when it is calm, and run their own triggers when talked to. Knocked out
+  they go home; dismissed they stay (own map) or go home. Example: the town guard comes along to
+  Whisperwood once the elder's quest is accepted. Game `status` prints `companions=`.
+- **Changed:** the player's attacks (melee, arrows, spells, clicking to attack) only hit hostile
+  characters. Friendly characters with HP (companions, the guard) can't be hurt by the player;
+  make a huntable animal hostile with 0 damage.
 
 ### Fixes
 - Patrolling (and scheduled) characters plan their way around solid props such as the village

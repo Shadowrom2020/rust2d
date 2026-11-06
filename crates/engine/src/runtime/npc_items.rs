@@ -47,7 +47,12 @@ impl Game {
             return;
         }
         let items = NpcItems { equipment: e.equipment.clone(), inventory: e.inventory.clone() };
-        self.world.npc_items.entry(self.loaded.map.name.clone()).or_default().insert(e.uid, items);
+        // A companion's items are kept where it is placed.
+        let (map, uid) = match &e.companion {
+            Some(l) => (l.map.clone(), l.uid),
+            None => (self.loaded.map.name.clone(), e.uid),
+        };
+        self.world.npc_items.entry(map).or_default().insert(uid, items);
     }
 
     /// Puts `item` into its slot on NPC `i`; what it wore there goes to its carried items.

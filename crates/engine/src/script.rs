@@ -421,6 +421,10 @@ fn register_api(engine: &mut Engine, ctx: &Rc<RefCell<Ctx>>) {
         c.actions.push(Action::Patrol { target: t.into(), active: true, points })
     }));
     engine.register_fn("stop_patrol", with!(ctx, |c, t: &str| c.actions.push(Action::Patrol { target: t.into(), active: false, points: Vec::new() })));
+    engine.register_fn("follow", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: true })));
+    engine.register_fn("stop_following", with!(ctx, |c, t: &str| c.actions.push(Action::Companion { target: t.into(), join: false })));
+    engine.register_fn("is_companion", with!(ctx, |c, name: &str| c.world.companions.iter().any(|m| m.name == name)));
+    engine.register_fn("companion_count", with!(ctx, |c| c.world.companions.len() as i64));
     engine.register_fn("follow_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: true })));
     engine.register_fn("stop_schedule", with!(ctx, |c, t: &str| c.actions.push(Action::Schedule { target: t.into(), active: false })));
     engine.register_fn("open_shop", with!(ctx, |c, t: &str| c.actions.push(Action::OpenShop { target: t.into() })));
@@ -808,6 +812,17 @@ mod tests {
         host.load_source(r#"fn day() { stop_schedule("mira"); follow_schedule("mira"); }"#).unwrap();
         let actions = host.call(&mut WorldState::default(), "day", None);
         assert_eq!(actions, vec![Action::Schedule { target: "mira".into(), active: false }, Action::Schedule { target: "mira".into(), active: true }]);
+    }
+
+    #[test]
+    fn companion_api() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn party() { if !is_companion("guard") && companion_count() == 0 { follow("guard"); } stop_following("self"); }"#).unwrap();
+        let actions = host.call(&mut WorldState::default(), "party", None);
+        assert_eq!(actions, vec![Action::Companion { target: "guard".into(), join: true }, Action::Companion { target: "self".into(), join: false }]);
+        let mut w = WorldState::default();
+        w.companions.push(crate::state::Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: None });
+        assert!(host.call(&mut w, "party", None).len() == 1, "already following: only stop_following");
     }
 
     #[test]

@@ -198,6 +198,23 @@ pub struct WorldState {
     /// Weather set by actions / scripts, by map name (overrides the map's own weather).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub weather: BTreeMap<String, crate::map::Weather>,
+    /// Characters following the player, in the order they joined.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub companions: Vec<Companion>,
+}
+
+/// A placed character that follows the player from map to map. Its look, items and triggers
+/// come from where it is placed (`map`, `uid`); dismissed, it goes back there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Companion {
+    pub map: String,
+    pub uid: u32,
+    /// Its name (scripts address it by name on every map).
+    #[serde(default)]
+    pub name: String,
+    /// Its HP (None = full).
+    #[serde(default)]
+    pub hp: Option<i32>,
 }
 
 /// How many dialog lines the journal keeps.
@@ -263,6 +280,11 @@ impl Sex {
 }
 
 impl WorldState {
+    /// The placed character `uid` of `map` follows the player.
+    pub fn is_companion(&self, map: &str, uid: u32) -> bool {
+        self.companions.iter().any(|c| c.uid == uid && c.map == map)
+    }
+
     /// Adds a line to the dialog log (dropping the oldest beyond [`DIALOG_LOG_MAX`]).
     pub fn log_dialog(&mut self, speaker: &str, text: &str, answer: bool) {
         if text.trim().is_empty() {
@@ -546,5 +568,18 @@ mod tests {
         let text = ron::to_string(&off).unwrap();
         assert_eq!(ron::from_str::<EntityState>(&text).unwrap(), off);
         assert!(!ron::to_string(&old).unwrap().contains("schedule_off"), "only written when stopped");
+    }
+
+    #[test]
+    fn companions_in_saves() {
+        // A save without companions (all older ones) loads with none.
+        let old = WorldState::default().to_ron().unwrap();
+        assert!(!old.contains("companions"));
+        assert!(WorldState::from_ron(&old).unwrap().companions.is_empty());
+        let mut w = WorldState::default();
+        w.companions.push(Companion { map: "village".into(), uid: 22, name: "guard".into(), hp: Some(5) });
+        let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
+        assert_eq!(back.companions, w.companions);
+        assert!(back.is_companion("village", 22) && !back.is_companion("forest", 22));
     }
 }

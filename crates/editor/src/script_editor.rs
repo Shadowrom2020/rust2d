@@ -159,6 +159,10 @@ pub const API: &[ApiFn] = api! {
     "patrol"(target: Target) "Starts a character's own patrol route (queued)";
     "patrol"(target: Target, points: List) "Patrols [[x, y], ...] tile waypoints (queued)";
     "stop_patrol"(target: Target) "Stops a character's patrol (queued)";
+    "follow"(target: Target) "The character joins the player as a companion (queued, saved)";
+    "stop_following"(target: Target) "The companion leaves: stays on its own map, else goes back home (queued)";
+    "is_companion"(name: Text) "Whether the character with that name follows the player";
+    "companion_count"() "How many companions follow the player";
     "stop_schedule"(target: Target) "The character stops following its daily schedule and stays where it is (queued, saved)";
     "follow_schedule"(target: Target) "The character follows its daily schedule again (queued)";
     "start_quest"(quest: Quest) "Starts a quest (queued)";

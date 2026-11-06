@@ -191,7 +191,7 @@ impl Game {
             return;
         }
         let goal = match self.entity_under(w) {
-            Some(i) if self.loaded.entities[i].max_hp > 0 => Goal::Attack(self.loaded.entities[i].uid),
+            Some(i) if self.loaded.entities[i].hostile && self.loaded.entities[i].max_hp > 0 => Goal::Attack(self.loaded.entities[i].uid),
             Some(i) if right => Goal::Interact(self.loaded.entities[i].uid),
             None if right => Goal::InteractTile(tile),
             _ => Goal::Walk(tile),
@@ -356,7 +356,7 @@ impl Game {
             Some(i) => {
                 let e = &self.loaded.entities[i];
                 let r = self.entity_click_rect(e);
-                let c = if e.max_hp > 0 { Color::new(1.0, 0.3, 0.3, 0.9) } else { Color::new(1.0, 1.0, 0.4, 0.9) };
+                let c = if e.hostile && e.max_hp > 0 { Color::new(1.0, 0.3, 0.3, 0.9) } else { Color::new(1.0, 1.0, 0.4, 0.9) };
                 draw_rectangle_lines(r.x, r.y, r.w, r.h, u, c);
             }
             None => {

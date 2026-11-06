@@ -499,6 +499,9 @@ pub enum Action {
     SetWeather { map: String, weather: Option<crate::map::Weather> },
     /// Makes a character follow its daily schedule again (`active`) or stop following it.
     Schedule { target: TargetName, active: bool },
+    /// A placed character joins the player as a companion (`join`) or leaves (goes back to
+    /// where it is placed).
+    Companion { target: TargetName, join: bool },
 }
 
 /// Default color of spell lights (a cool white-blue).
@@ -600,6 +603,7 @@ impl Action {
             Action::Shake { .. } => "Shake the screen",
             Action::SetWeather { .. } => "Set weather",
             Action::Schedule { .. } => "Schedule",
+            Action::Companion { .. } => "Companion",
         }
     }
 
@@ -661,6 +665,7 @@ impl Action {
             Action::Shake { seconds: 0.5, strength: 1.5 },
             Action::SetWeather { map: s(), weather: Some(crate::map::Weather::new(crate::map::WeatherKind::Rain, 0.6)) },
             Action::Schedule { target: "self".into(), active: false },
+            Action::Companion { target: "self".into(), join: true },
         ]
     }
 }
