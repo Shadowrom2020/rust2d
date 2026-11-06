@@ -267,6 +267,34 @@ impl MapDoc {
     pub fn place_structure(&mut self, def: &rust2d_engine::defs::StructureDef, x: i32, y: i32, assets: &Assets) -> Vec<u32> {
         self.end_stroke();
         let before = Objects::of(&self.map);
+        self.place_recorded(def, x, y, before, "structure", assets)
+    }
+
+    /// Empties a rectangle of tiles `(x, y, w, h)` as one undo step: every layer's tiles, the
+    /// collision overrides (back to the tileset's) and the entities whose feet are inside
+    /// (the same ones `StructureDef::capture` copies). Zones stay.
+    pub fn clear_region(&mut self, rect: (u32, u32, u32, u32), assets: &Assets) {
+        use rust2d_engine::defs::StructureDef;
+        self.end_stroke();
+        let before = Objects::of(&self.map);
+        let (x, y, w, h) = rect;
+        let ts = rust2d_engine::project::TILE_SIZE as f32;
+        let r = macroquad::math::Rect::new(x as f32 * ts, y as f32 * ts, w as f32 * ts, h as f32 * ts);
+        self.map.entities.retain(|e| !(e.x >= r.x && e.x < r.right() && e.y >= r.y && e.y < r.bottom()));
+        let n = (w * h) as usize;
+        let blank = StructureDef {
+            w,
+            h,
+            layers: vec![vec![StructureDef::CLEAR; n]; self.map.layers.len()],
+            collision: vec![StructureDef::COLLISION_AUTO; n],
+            ..Default::default()
+        };
+        self.place_recorded(&blank, x as i32, y as i32, before, "clear", assets);
+    }
+
+    /// Places `def` and records the tile, collision and object changes since `before` as one
+    /// `Edit::Group`.
+    fn place_recorded(&mut self, def: &rust2d_engine::defs::StructureDef, x: i32, y: i32, before: Objects, tag: &'static str, assets: &Assets) -> Vec<u32> {
         let p = def.place(&mut self.map, x, y);
         let mut group: Vec<Edit> = Vec::new();
         for (layer, changes) in p.tiles.into_iter().enumerate().filter(|(_, c)| !c.is_empty()) {
@@ -282,7 +310,7 @@ impl MapDoc {
         if after != before {
             // (Registering tilesets on the map is part of this too: `tilesets` isn't undone,
             // an unused tileset slot is harmless.)
-            group.push(Edit::Objects { before: Box::new(before), after: Box::new(after), tag: "structure", time: Instant::now() });
+            group.push(Edit::Objects { before: Box::new(before), after: Box::new(after), tag, time: Instant::now() });
         }
         if !group.is_empty() {
             self.push(Edit::Group(group));
@@ -497,6 +525,50 @@ mod tests {
         d.redo(&a);
         assert_eq!(d.map.entities.len(), 1);
         assert_eq!(d.map.collision_at(3, 4), rust2d_engine::map::CollisionOverride::Walkable);
+    }
+
+    #[test]
+    fn cut_and_paste_a_region() {
+        use rust2d_engine::defs::StructureDef;
+        use rust2d_engine::map::CollisionOverride;
+        let a = assets();
+        let mut d = MapDoc::new(Map::new("t", 10, 10), &a);
+        let slot = d.map.tileset_slot("terrain");
+        for y in 0..10 {
+            for x in 0..10 {
+                d.map.layers[0].set(x, y, Tile::new(slot, 1));
+            }
+        }
+        d.map.layers[0].set(2, 2, Tile::new(slot, 5));
+        d.map.layers[1].set(3, 2, Tile::new(slot, 9));
+        d.map.set_collision(2, 3, CollisionOverride::Solid);
+        let (inside, outside) = (d.map.alloc_uid(), d.map.alloc_uid());
+        d.map.entities.push(EntityInstance::new(inside, EntityKind::Prop, "barrel", 3.5 * 32.0, 4.0 * 32.0 - 1.0));
+        d.map.entities.push(EntityInstance::new(outside, EntityKind::Prop, "barrel", 8.5 * 32.0, 9.0 * 32.0 - 1.0));
+        d.mark_saved();
+
+        // Cut (2, 2, 2x2): copy, then one undo step empties it.
+        let clip = StructureDef::capture(&d.map, "clip", "clip", (2, 2, 2, 2), true);
+        d.clear_region((2, 2, 2, 2), &a);
+        assert_eq!((d.map.layers[0].get(2, 2), d.map.layers[1].get(3, 2)), (Tile::EMPTY, Tile::EMPTY));
+        assert_eq!(d.map.collision_at(2, 3), CollisionOverride::Auto);
+        assert_eq!(d.map.entities.iter().map(|e| e.uid).collect::<Vec<_>>(), vec![outside]);
+        assert_eq!(d.map.layers[0].get(4, 2), Tile::new(slot, 1), "outside the region");
+
+        // Paste at (6, 0): an exact copy, the cut is still undoable separately.
+        let added = d.place_structure(&clip, 6, 0, &a);
+        assert_eq!(added.len(), 1);
+        assert_eq!((d.map.layers[0].get(6, 0), d.map.layers[1].get(7, 0)), (Tile::new(slot, 5), Tile::new(slot, 9)));
+        assert_eq!(d.map.layers[1].get(6, 0), Tile::EMPTY);
+        assert_eq!(d.map.collision_at(6, 1), CollisionOverride::Solid);
+        let e = d.map.entity(added[0]).unwrap();
+        assert_eq!((e.x, e.y), (7.5 * 32.0, 2.0 * 32.0 - 1.0));
+        d.undo(&a);
+        d.undo(&a);
+        assert_eq!((d.map.layers[0].get(2, 2), d.map.layers[1].get(3, 2)), (Tile::new(slot, 5), Tile::new(slot, 9)));
+        assert_eq!(d.map.collision_at(2, 3), CollisionOverride::Solid);
+        assert_eq!(d.map.entities.len(), 2);
+        assert!(!d.is_dirty());
     }
 
     #[test]

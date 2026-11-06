@@ -59,6 +59,8 @@ pub enum Drag {
     LinkRect { start: (i32, i32) },
     /// Structures tool: the area of a new structure ("New from map area").
     Capture { start: (i32, i32) },
+    /// Select tool on empty space (or with Shift): a region of tiles to copy / cut.
+    Region { start: (i32, i32) },
 }
 
 fn modifier_ctrl() -> bool {
@@ -160,7 +162,7 @@ impl Editor {
         self.drag = match self.sel {
             Selection::Entity(uid) => doc.map.entity(uid).map(|e| Drag::MoveEntity { uid, grab: world - vec2(e.x, e.y), before }),
             Selection::Zone(uid) => doc.map.zones.iter().find(|z| z.uid == uid).map(|z| Drag::MoveZone { uid, grab: tile, orig: (z.x, z.y), before }),
-            Selection::None => None,
+            Selection::Region(_) | Selection::None => None,
         };
     }
 
@@ -199,6 +201,9 @@ impl Editor {
             return;
         }
         self.shortcuts();
+        if self.pasting && self.tool != Tool::Select {
+            self.pasting = false;
+        }
         let Some(_) = &self.doc else { return };
         let cam = self.camera();
         let ms = mouse();
@@ -306,6 +311,15 @@ impl Editor {
             if is_key_pressed(KeyCode::D) {
                 self.duplicate_selection();
             }
+            if is_key_pressed(KeyCode::C) {
+                self.copy_selection();
+            }
+            if is_key_pressed(KeyCode::X) {
+                self.cut_selection();
+            }
+            if is_key_pressed(KeyCode::V) {
+                self.start_paste();
+            }
             if is_key_pressed(KeyCode::M) {
                 self.quick.open = true;
                 self.quick.query.clear();
@@ -355,6 +369,10 @@ impl Editor {
             self.route_edit = None;
             self.route_drag = None;
             self.set_status("Patrol route done");
+            return;
+        }
+        if is_key_pressed(KeyCode::Escape) && self.pasting {
+            self.stop_paste();
             return;
         }
         if is_key_pressed(KeyCode::Escape) && self.link.is_some() {
@@ -432,6 +450,10 @@ impl Editor {
     }
 
     fn right_click(&mut self, tile: (i32, i32)) {
+        if self.pasting {
+            self.stop_paste();
+            return;
+        }
         match self.tool {
             t if t.paints_tiles() => self.pick(tile),
             // Right-click clears the placing cursor (and the selection).
@@ -452,6 +474,12 @@ impl Editor {
         self.press_world = world;
         self.click_stack = None;
         let layer_ok = self.doc.as_ref().is_some_and(|d| self.layer < d.map.layers.len());
+        if self.pasting && self.tool == Tool::Select {
+            if let Some(o) = self.paste_origin(tile) {
+                self.paste_at(o);
+            }
+            return;
+        }
         match self.tool {
             Tool::Brush | Tool::Erase if layer_ok => {
                 if let Some(doc) = &mut self.doc {
@@ -484,8 +512,10 @@ impl Editor {
             Tool::Pick => self.pick(tile),
             Tool::Select => {
                 let stack = self.objects_at(world);
-                let Some(&first) = stack.first() else {
+                // Empty space (or Shift anywhere): drag a region of tiles; a plain click deselects.
+                let Some(&first) = stack.first().filter(|_| !modifier_shift()) else {
                     self.sel = Selection::None;
+                    self.drag = Some(Drag::Region { start: tile });
                     return;
                 };
                 // Double-click on a portal: go to the other side.
@@ -638,6 +668,14 @@ impl Editor {
                         let i = stack.iter().position(|s| *s == self.sel).map_or(0, |i| (i + 1) % stack.len());
                         self.sel = stack[i];
                         self.on_map_scroll = true;
+                    }
+                }
+            }
+            Some(Drag::Region { start }) => {
+                if start != tile || self.dragged(self.hover_world) {
+                    if let Some(r) = self.doc.as_ref().and_then(|d| crate::clipboard::clip_rect(&d.map, start, tile)) {
+                        self.sel = Selection::Region(r);
+                        self.set_status(format!("Region {}×{} · Ctrl+C copy · Ctrl+X cut · Del clear", r.2, r.3));
                     }
                 }
             }
@@ -879,6 +917,10 @@ impl Editor {
             }
         }
 
+        if let Selection::Region(r) = self.sel {
+            self.draw_region(r);
+        }
+
         // Tool previews.
         if let Some((tx, ty)) = self.hover_tile {
             let (fx, fy) = (tx as f32 * ts, ty as f32 * ts);
@@ -887,6 +929,11 @@ impl Editor {
                     let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
                     draw_rectangle(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, Color::new(1.0, 1.0, 0.3, 0.2));
                     draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, YELLOW);
+                }
+                (Some(Drag::Region { start }), _) => {
+                    let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
+                    draw_rectangle(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, Color::new(0.35, 0.75, 1.0, 0.15));
+                    draw_rectangle_lines(rx as f32 * ts, ry as f32 * ts, rw as f32 * ts, rh as f32 * ts, 2.0 * px, SKYBLUE);
                 }
                 (Some(Drag::NewZone { start }), _) => {
                     let (rx, ry, rw, rh) = rect_of(*start, (tx, ty));
@@ -936,6 +983,7 @@ impl Editor {
                     }
                     draw_circle_lines(p.x, p.y, 3.0 * px, 1.5 * px, YELLOW);
                 }
+                (None, Tool::Select) if self.pasting => self.draw_paste_ghost((tx, ty)),
                 (None, Tool::Select) => {
                     // Outline what a click would select.
                     let hover = self.objects_at(self.hover_world).into_iter().next();

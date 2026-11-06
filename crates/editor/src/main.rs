@@ -6,6 +6,7 @@
 mod app;
 mod builder;
 mod canvas;
+mod clipboard;
 mod database;
 mod doc;
 mod export;
@@ -212,6 +213,27 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 _ => app::ZoneTemplate::Spawn,
             }
         }
+        // Clipboard: region X Y W H (select tiles) · copy · cut · paste X Y (top-left corner)
+        // · paste (arm it: the ghost follows `hover`, clicks paste) · unpaste
+        "region" => {
+            if let Some(r) = ed.doc.as_ref().and_then(|d| clipboard::clip_rect(&d.map, (num(1) as i32, num(2) as i32), (num(1) as i32 + num(3) as i32 - 1, num(2) as i32 + num(4) as i32 - 1))) {
+                ed.sel = Selection::Region(r);
+            }
+        }
+        "copy" => {
+            ed.copy_selection();
+            println!("[script] {}", ed.status.0);
+        }
+        "cut" => {
+            ed.cut_selection();
+            println!("[script] {}", ed.status.0);
+        }
+        "paste" if cmd.len() >= 3 => {
+            ed.paste_at((num(1) as i32, num(2) as i32));
+            println!("[script] {}", ed.status.0);
+        }
+        "paste" => ed.start_paste(),
+        "unpaste" => ed.stop_paste(),
         "undo" => {
             if let Some(d) = &mut ed.doc {
                 d.undo(&ed.assets);
@@ -368,7 +390,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} clipboard={} pasting={} msg={}",
             ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
@@ -382,6 +404,9 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.builder_status(),
             ed.audio.previewing(),
             ed.audio.current_music(),
+            ed.sel,
+            ed.clipboard.as_ref().map_or("empty".to_string(), |c| format!("{}x{},{}ents", c.w, c.h, c.entities.len())),
+            ed.pasting,
             ed.status.0
         ),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),

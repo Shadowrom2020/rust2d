@@ -94,7 +94,7 @@ impl Tool {
     /// One line on how to use the tool (tooltips and the status bar).
     pub fn help(self) -> &'static str {
         match self {
-            Tool::Select => "Click selects an entity or zone, drag moves it, click again cycles through stacked objects; empty space or right-click deselects",
+            Tool::Select => "Click selects an entity or zone, drag moves it, click again cycles through stacked objects; drag on empty space (or Shift+drag) selects a region to copy (Ctrl+C), cut (Ctrl+X) and paste (Ctrl+V); right-click deselects",
             Tool::Brush => "Click or drag paints the stamp on the active layer; right-click picks the tile under the cursor",
             Tool::Rect => "Drag a rectangle to fill it with the stamp; Shift+drag erases",
             Tool::Fill => "Click fills the connected area of identical tiles with the stamp",
@@ -124,6 +124,8 @@ pub enum Selection {
     None,
     Entity(u32),
     Zone(u32),
+    /// A rectangle of tiles `(x, y, w, h)` dragged with the Select tool (copy / cut / delete).
+    Region((u32, u32, u32, u32)),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -235,6 +237,10 @@ pub struct Editor {
     pub place_structure: String,
     pub structure_filter: String,
     pub capture: crate::structures::CaptureState,
+    /// Copied region / entity (Ctrl+C / Ctrl+X), pasted with Ctrl+V; kept across maps.
+    pub clipboard: Option<rust2d_engine::defs::StructureDef>,
+    /// Ctrl+V armed the clipboard: the Select tool shows it at the mouse, clicks paste it.
+    pub pasting: bool,
     /// Recently placed / picked definitions, newest first.
     pub place_recent: Vec<(EntityKind, String)>,
     pub zone_template: ZoneTemplate,
@@ -355,6 +361,8 @@ impl Editor {
             place_tab: None,
             place_filter: String::new(),
             place_structure: String::new(),
+            clipboard: None,
+            pasting: false,
             structure_filter: String::new(),
             capture: Default::default(),
             place_recent: Vec::new(),
@@ -1118,6 +1126,8 @@ impl Editor {
         match self.sel {
             Selection::Entity(uid) => doc.map.entities.retain(|e| e.uid != uid),
             Selection::Zone(uid) => doc.map.zones.retain(|z| z.uid != uid),
+            // A region is emptied and stays selected (its own undo step).
+            Selection::Region(r) => return doc.clear_region(r, &self.assets),
             Selection::None => return,
         }
         doc.record_objects(before, "delete");
@@ -1147,7 +1157,7 @@ impl Editor {
                 self.sel = Selection::Zone(z.uid);
                 doc.map.zones.push(z);
             }
-            Selection::None => return,
+            Selection::Region(_) | Selection::None => return,
         }
         doc.record_objects(before, "duplicate");
     }
@@ -1353,7 +1363,22 @@ impl Editor {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.add_enabled(self.sel != Selection::None, egui::Button::new(ui::t(ph::COPY, "Duplicate   Ctrl+D"))).clicked() {
+                    let copyable = matches!(self.sel, Selection::Region(_) | Selection::Entity(_));
+                    if ui.add_enabled(copyable, egui::Button::new(ui::t(ph::SCISSORS, "Cut   Ctrl+X"))).on_hover_text("A region dragged with the Select tool, or the selected entity").clicked() {
+                        self.cut_selection();
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(copyable, egui::Button::new(ui::t(ph::COPY, "Copy   Ctrl+C"))).on_hover_text("A region dragged with the Select tool, or the selected entity").clicked() {
+                        self.copy_selection();
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(self.clipboard.is_some() && self.doc.is_some(), egui::Button::new(ui::t(ph::CLIPBOARD_TEXT, "Paste   Ctrl+V"))).clicked() {
+                        self.start_paste();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    let dup = matches!(self.sel, Selection::Entity(_) | Selection::Zone(_));
+                    if ui.add_enabled(dup, egui::Button::new(ui::t(ph::COPY_SIMPLE, "Duplicate   Ctrl+D"))).clicked() {
                         self.duplicate_selection();
                         ui.close_menu();
                     }
@@ -1833,6 +1858,7 @@ impl Editor {
             Tool::Select => {
                 ui.heading("Select");
                 ui.label("Click an entity or zone to select it, drag to move it. Click again to cycle through objects on the same spot. Clicking empty space or right-click deselects.");
+                ui.label("Drag on empty space (Shift+drag anywhere) to select a region of tiles: Ctrl+C copies it (all layers, collision, entities), Ctrl+X cuts it, Del clears it. Ctrl+V pastes: the copy follows the mouse, each click places it, Esc stops. The clipboard is kept when you open another map.");
                 ui.weak("Nothing is painted with this tool. Pick a tile below (or press B / R / F) to paint; Esc returns here.");
                 ui.separator();
                 self.palette(ui);
@@ -2091,6 +2117,7 @@ impl Editor {
         let mut customize: Option<u32> = None;
         let mut arm: Option<(EntityKind, String)> = None;
         let mut rename_map: Option<(String, String)> = None;
+        let mut region_req: Option<crate::clipboard::RegionReq> = None;
         match self.sel {
             Selection::Entity(uid) => {
                 let db = &self.project.db;
@@ -2453,6 +2480,7 @@ impl Editor {
                 ui.weak("Zones react to Enter, Leave and Interact (pressing E while inside).");
                 widgets::triggers_ui(ui, &format!("z{uid}"), &mut z.triggers, refs, rust2d_engine::events::TriggerOwner::Zone);
             }
+            Selection::Region(r) => region_req = crate::clipboard::region_inspector(ui, &doc.map, r, self.clipboard.as_ref()),
             Selection::None => {
                 let map = &mut doc.map;
                 ui.heading(format!("Map: {}", map.name));
@@ -2579,6 +2607,9 @@ impl Editor {
                 self.save_map();
             }
             self.rename_id(RefKind::Map, &old, &new);
+        }
+        if let Some(req) = region_req {
+            self.region_request(req);
         }
         if duplicate {
             self.duplicate_selection();
