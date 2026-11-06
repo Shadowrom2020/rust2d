@@ -1811,7 +1811,7 @@ fn {name}() {{
 }
 
 /// `fn name(` definitions in a script, with the character index where each starts.
-fn script_functions(text: &str) -> Vec<(String, usize)> {
+pub(crate) fn script_functions(text: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
     let mut chars = 0;
     for line in text.split_inclusive('\n') {

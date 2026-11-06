@@ -15,6 +15,15 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   Cut, Copy and Paste. Editor script commands `region`, `copy`, `cut`, `paste`, `unpaste`;
   `status` prints `sel=`, `clipboard=` and `pasting=`.
 - Structure ghosts (Structures tool and paste preview) draw characters with all their layers.
+- **Events graph**: the new *Events* tab shows the open map's triggers as a graph with their
+  owners, readable conditions and actions (dialog lines, choices with options), the script
+  functions they run (with their dialog lines, choices, events and flags) and the maps they
+  lead to; edges for script calls, custom events, flags / variables tested elsewhere, and
+  teleports / portals. Nodes can be dragged; the pencil edits a trigger with the inspector's
+  editors (undoable); function nodes open the script editor at the function. Scope: whole map
+  or the selected object; optionally all script functions. Engine: `script_refs::list_args`
+  (string arrays such as `choice()` options). Editor script `mode events`, `graph`,
+  `graphnode`, `graphedit`, `graphtext`, `graphview`, `graphdump`; `status` prints `graph=`.
 - **Auto-tiling terrains**: the new Terrain tool (A) paints a terrain and picks each cell's
   edge tile from its four neighbours, also re-tiling the neighbours; Shift erases to the
   terrain's base tile, right-click picks a terrain, each stroke is one undo step. Terrains are

@@ -192,20 +192,18 @@ fn tokenize(src: &str) -> Vec<(Tok, usize)> {
     out
 }
 
-/// Every string literal that is a whole argument of a function call.
-pub fn string_args(src: &str) -> Vec<StrArg> {
-    let toks = tokenize(src);
-    let line_of = |pos: usize| src[..pos].bytes().filter(|&b| b == b'\n').count() + 1;
+/// The calls in a token stream: function name, its arguments (tokens at nesting depth 1,
+/// split by commas) and the byte offset of the name.
+fn calls(toks: &[(Tok, usize)]) -> Vec<(String, Vec<Vec<&Tok>>, usize)> {
     let mut out = Vec::new();
     for k in 0..toks.len() {
-        let (Tok::Ident(name), _) = &toks[k] else { continue };
+        let (Tok::Ident(name), pos) = &toks[k] else { continue };
         if toks.get(k + 1).map(|t| &t.0) != Some(&Tok::Punct('(')) {
             continue;
         }
         if k > 0 && toks[k - 1].0 == Tok::Ident("fn".into()) {
             continue; // a definition, not a call
         }
-        // Collect the call's arguments (tokens at nesting depth 1, split by commas).
         let mut args: Vec<Vec<&Tok>> = vec![Vec::new()];
         let mut depth = 0;
         for (t, _) in &toks[k + 1..] {
@@ -230,6 +228,17 @@ pub fn string_args(src: &str) -> Vec<StrArg> {
             }
             args.last_mut().unwrap().push(t);
         }
+        out.push((name.clone(), args, *pos));
+    }
+    out
+}
+
+/// Every string literal that is a whole argument of a function call.
+pub fn string_args(src: &str) -> Vec<StrArg> {
+    let toks = tokenize(src);
+    let line_of = |pos: usize| src[..pos].bytes().filter(|&b| b == b'\n').count() + 1;
+    let mut out = Vec::new();
+    for (name, args, _) in calls(&toks) {
         let literal = |a: &Vec<&Tok>| match a.as_slice() {
             [Tok::Str(v, s, e)] => Some((v.clone(), *s, *e)),
             _ => None,
@@ -238,6 +247,35 @@ pub fn string_args(src: &str) -> Vec<StrArg> {
         for (n, a) in args.iter().enumerate() {
             if let Some((value, s, e)) = literal(a) {
                 out.push(StrArg { func: name.clone(), arg: n, value, span: (s, e), line: line_of(s), siblings: siblings.clone() });
+            }
+        }
+    }
+    out
+}
+
+/// An array of string literals passed as an argument (`choice("…", ["Yes", "No"], "var")`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListArg {
+    pub func: String,
+    pub arg: usize,
+    pub values: Vec<String>,
+    /// 1-based line of the call.
+    pub line: usize,
+}
+
+/// Every argument that is an array of string literals only.
+pub fn list_args(src: &str) -> Vec<ListArg> {
+    let toks = tokenize(src);
+    let line_of = |pos: usize| src[..pos].bytes().filter(|&b| b == b'\n').count() + 1;
+    let mut out = Vec::new();
+    for (name, args, pos) in calls(&toks) {
+        for (n, a) in args.iter().enumerate() {
+            let (Some(Tok::Punct('[')), Some(Tok::Punct(']'))) = (a.first().copied(), a.last().copied()) else { continue };
+            let inner = &a[1..a.len() - 1];
+            let values: Vec<String> = inner.iter().filter_map(|t| if let Tok::Str(v, _, _) = t { Some(v.clone()) } else { None }).collect();
+            let only_strings = inner.iter().all(|t| matches!(t, Tok::Str(..) | Tok::Punct(',')));
+            if only_strings && a.len() >= 2 {
+                out.push(ListArg { func: name.clone(), arg: n, values, line: line_of(pos) });
             }
         }
     }
@@ -434,6 +472,15 @@ pub fn check_script(src: &str, db: &Database, maps: &[String], spawns: &HashMap<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_arguments() {
+        let src = "fn talk() {\n    choice(\"Walk?\", [\"Sure\", \"No thanks\"], \"walk\");\n    f([1, 2]); g([]);\n}";
+        let l = list_args(src);
+        assert_eq!(l, vec![ListArg { func: "choice".into(), arg: 1, values: vec!["Sure".into(), "No thanks".into()], line: 2 }, ListArg { func: "g".into(), arg: 0, values: vec![], line: 3 }]);
+        let s = string_args(src);
+        assert_eq!(s.iter().map(|a| (a.arg, a.value.as_str())).collect::<Vec<_>>(), vec![(0, "Walk?"), (2, "walk")]);
+    }
 
     const SRC: &str = r#"
 // give_item("key", 1) in a comment stays

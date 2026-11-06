@@ -12,6 +12,7 @@ mod doc;
 mod export;
 mod package;
 mod files;
+mod graph;
 mod library_ui;
 mod library_window;
 mod maps;
@@ -253,6 +254,32 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         }
         // terrainedit K [block]: Database › Tilesets: edit terrain K of the selected tileset
         "terrainedit" => ed.db.terrain_pick = Some(terrain::TerrainPick { terrain: num(1) as usize, slot: 0, block: arg(2) == "block" }),
+        // Events mode: graph scope map|selection · graph functions map|all · graphnode N
+        // (select node N, -1 = none) · graphedit N (toggle its editors) · graphtext N K TEXT
+        // (text of action K of trigger node N) · graphdump (nodes with summaries)
+        "graph" => match (arg(1), arg(2)) {
+            ("scope", s) => ed.graph.focus_selection = s == "selection",
+            ("functions", f) => ed.graph.all_functions = f == "all",
+            _ => println!("[script] graph scope map|selection · graph functions map|all"),
+        },
+        "graphview" => ed.graph_view_node(num(1) as usize),
+        "graphnode" => ed.graph.selected = arg(1).parse::<usize>().ok().and_then(|i| ed.graph.order.get(i).cloned()),
+        "graphedit" => {
+            if let Some(k) = arg(1).parse::<usize>().ok().and_then(|i| ed.graph.order.get(i).cloned()) {
+                if !ed.graph.editing.remove(&k) {
+                    ed.graph.editing.insert(k);
+                }
+            }
+        }
+        "graphtext" => {
+            let ok = ed.graph_set_text(num(1) as usize, num(2) as usize, &cmd[3..].join(" "));
+            println!("[script] graphtext: {ok}");
+        }
+        "graphdump" => {
+            for l in ed.graph_dump() {
+                println!("[graph] {l}");
+            }
+        }
         "undo" => {
             if let Some(d) = &mut ed.doc {
                 d.undo(&ed.assets);
@@ -412,7 +439,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             }
         }
         "status" => println!(
-            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} clipboard={} pasting={} msg={}",
+            "[status] script_pick={} open={} project={} pending={} map={:?} fog={} dirty={} library_mode={} defs_dirty={} lib_dialog={} builder={} preview={:?} music={:?} sel={:?} clipboard={} pasting={} graph={},{} msg={}",
             ed.lib.script_pick.as_ref().map_or("closed".to_string(), |p| format!("{:?} needed={:?} picked={:?} missing={:?}", p.to, p.needed.keys().collect::<Vec<_>>(), p.picked, p.missing)),
             ed.project_open,
             ed.project.root.display(),
@@ -429,6 +456,8 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
             ed.sel,
             ed.clipboard.as_ref().map_or("empty".to_string(), |c| format!("{}x{},{}ents", c.w, c.h, c.entities.len())),
             ed.pasting,
+            ed.graph.counts.0,
+            ed.graph.counts.1,
             ed.status.0
         ),
         "filedialog" => ed.open_file_dialog(files::Purpose::OpenProject),
@@ -478,6 +507,7 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "db" => Mode::Database,
                 "library" | "browse" => Mode::Library,
                 "pixel" => Mode::Pixel,
+                "events" => Mode::Events,
                 _ => Mode::Map,
             }
         }
