@@ -13,6 +13,7 @@ mod export;
 mod package;
 mod files;
 mod graph;
+mod import;
 mod library_ui;
 mod library_window;
 mod maps;
@@ -295,6 +296,30 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
         // inherits the environment, so RUST2D_AUTOPLAY can drive the play-test
         "play" => ed.play(arg(1) != "start"),
         // Same code paths as the file dialogs, without the dialog.
+        // import tiled FILE [NAME] · import lpc FILE [ID] [body|hair|beard|outfit|armor|held] ·
+        // import aseprite FILE [ID]: the File › Import… imports (result printed and shown)
+        "import" if matches!(arg(1), "tiled" | "lpc" | "aseprite") => {
+            use import::ImportKind;
+            use rust2d_engine::defs::SheetKind;
+            let kind = match arg(1) {
+                "tiled" => ImportKind::Tiled,
+                "lpc" => ImportKind::Lpc,
+                _ => ImportKind::Aseprite,
+            };
+            let sheet_kind = match arg(4) {
+                "hair" => SheetKind::Hair,
+                "beard" => SheetKind::Beard,
+                "outfit" => SheetKind::Outfit,
+                "armor" => SheetKind::Armor,
+                "held" => SheetKind::Held,
+                _ => SheetKind::Body,
+            };
+            ed.import = Some(import::ImportDialog { kind, id: arg(3).to_string(), sheet_kind, female: false });
+            ed.import_and_report(kind, std::path::Path::new(arg(2)));
+            println!("[import] {}", ed.import_report.as_ref().map_or(String::new(), |r| r.1.clone()));
+        }
+        // importdialog: opens File › Import…
+        "importdialog" => ed.import = Some(Default::default()),
         "import" => {
             let purpose = match arg(1) {
                 "tileset" => files::Purpose::TilesetImage(arg(2).into()),
@@ -796,7 +821,17 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "spells" => Tab::Spells,
                 _ => Tab::Items,
             };
-            ed.db.sel = num(2) as usize;
+            // tab KIND N, or tab KIND ID (sheets, tilesets, items, props, characters).
+            let db = &ed.project.db;
+            let by_id = match ed.db.tab {
+                Tab::Sheets => db.sheets.iter().position(|d| d.id == arg(2)),
+                Tab::Tilesets => db.tilesets.iter().position(|d| d.id == arg(2)),
+                Tab::Items => db.items.iter().position(|d| d.id == arg(2)),
+                Tab::Props => db.props.iter().position(|d| d.id == arg(2)),
+                Tab::Characters => db.characters.iter().position(|d| d.id == arg(2)),
+                _ => None,
+            };
+            ed.db.sel = by_id.unwrap_or(num(2) as usize);
         }
         // sndplay / sndstop [ID]: the Sounds form's Play / Stop (default: the selected sound).
         "sndplay" | "sndstop" => {
@@ -844,6 +879,24 @@ fn run_script_cmd(ed: &mut Editor, cmd: &[String], wait: &mut f32, shot: &mut Op
                 "grid" => ed.view.grid = on,
                 "collision" => ed.view.collision = on,
                 _ => println!("[script] viewopt: zones|grid|collision on|off"),
+            }
+        }
+        // actionsheet SHEET: the sprite sheet of the last Effect / Fly action of the selected
+        // entity's first trigger (with addaction, to test the action's animation picker)
+        "actionsheet" => {
+            if let (Selection::Entity(uid), Some(doc)) = (ed.sel, ed.doc.as_mut()) {
+                let before = doc::Objects::of(&doc.map);
+                use rust2d_engine::events::Action as A;
+                let sprite = doc.map.entities.iter_mut().find(|e| e.uid == uid).and_then(|e| e.triggers.first_mut()).and_then(|t| {
+                    t.actions.iter_mut().rev().find_map(|a| match a {
+                        A::Effect { sprite, .. } | A::Fly { sprite, .. } => Some(sprite),
+                        _ => None,
+                    })
+                });
+                if let Some(sprite) = sprite {
+                    sprite.sheet = arg(1).to_string();
+                }
+                doc.record_objects(before, "script");
             }
         }
         // addaction LABEL...: appends the action template with that label (e.g. "Play effect") to

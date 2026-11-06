@@ -1480,6 +1480,30 @@ fn sheet_form(ui: &mut egui::Ui, d: &mut SheetDef, cx: &mut Cx) {
         });
         ui.end_row();
     });
+    // Named animations (from Aseprite tags, or added here): Effect / Fly actions and
+    // effect(…, #{ tag }) play them by name.
+    egui::CollapsingHeader::new(format!("Animations ({})", d.tags.len())).id_salt(("sheet_tags", &d.id)).default_open(!d.tags.is_empty()).show(ui, |ui| {
+        let mut remove = None;
+        for (k, t) in d.tags.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut t.name).desired_width(110.0).hint_text("name"));
+                ui.label("frames");
+                ui.add(egui::DragValue::new(&mut t.first).range(0..=9999));
+                ui.label("to");
+                ui.add(egui::DragValue::new(&mut t.last).range(t.first..=9999));
+                ui.add(egui::DragValue::new(&mut t.fps).range(0.1..=60.0).speed(0.2).suffix(" fps"));
+                if ui.small_button(ui::ph::TRASH).clicked() {
+                    remove = Some(k);
+                }
+            });
+        }
+        if let Some(k) = remove {
+            d.tags.remove(k);
+        }
+        if ui.button(ui::t(ui::ph::PLUS, "Animation")).on_hover_text("A named frame range, offered by the Effect / Fly actions and effect(…, #{ tag: \"name\" })").clicked() {
+            d.tags.push(rust2d_engine::defs::SheetTag { name: format!("anim_{}", d.tags.len() + 1), first: 0, last: 0, fps: 10.0 });
+        }
+    });
     // Who uses this sheet.
     let db = cx.db;
     let mut users: Vec<String> = Vec::new();

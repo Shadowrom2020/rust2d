@@ -283,7 +283,7 @@ forest's shrine functions with the slimes' definition triggers. Compile-checked 
 dragging of nodes and the *Show on map*, *Open in Database*, *Edit in …* and *Open* buttons
 (egui clicks).
 
-### [ ] Imports: Tiled, LPC, Aseprite — `feature/imports`
+### [x] Imports: Tiled, LPC, Aseprite — `feature/imports`
 
 **Goal.** Bring existing assets in without rebuilding them: a Tiled map becomes a rust2d map
 with its tilesets, an LPC character sheet becomes a body sheet, an Aseprite export becomes a
@@ -322,6 +322,25 @@ sprite sheet with named animations.
 - Imports never overwrite: `files::import_asset` already suffixes `_2`, `_3`; ids are made
   unique like the wizard's.
 
+**Decided while building.** Tilesets are always repacked into a plain 32 px grid (same
+columns; margin and spacing removed, any tile size scaled nearest-neighbour), which also covers
+the 16 px case; tiles of class / type `solid` block too. Tile data as XML `<tile>` elements and
+zstd are refused with a hint; infinite and non-orthogonal maps too. Group layers are flattened,
+polygons / polylines / ellipses become trigger zones by their bounding box, points of class
+`spawn` count like `spawn:NAME`; other points, tile objects and image layers are counted and
+dropped. The imported definitions are saved right away (the saved map refers to them), the map
+is saved under a free name and opened. LPC: both the full Universal sheet (walk rows 8–11) and a
+4-row walk cycle are accepted; frames 0, 2, 4, 6 (0 = standing, the idle frame). The importer
+creates the sheet only (no character definition; `CharacterDef` has no defaults), with a
+*female body* option for bodies. Aseprite: hash frames are ordered by the number in their name,
+trimmed frames are placed at their offset, rotated frames are refused, non-forward tags are
+noted; frames are packed 8 per row. Scripts name an animation with `FxSprite.tag` (a new
+`#[serde(default)]` field), resolved by the game when the effect starts (unknown tags are
+logged); the editor's *animation* list writes first / last / fps directly. Sheets' animations
+are editable in *Database › Sprite sheets › Animations*. Report in an *Import done / failed*
+window. JSON goes through `rhai::Engine::parse_json` (editor depends on `rhai` now), XML through
+`quick-xml` 0.41, zlib / gzip through `flate2` with the zlib-rs backend `zip` already uses.
+
 **Touch points.** `editor/src/import/` (new), `files.rs` (Purpose, filters), `app.rs`
 (menu, handle_file), `main.rs` (commands), `engine/src/defs.rs` (`SheetDef.tags`, literals in
 gen_example / library tests), `script.rs` (`tag` option), `widgets.rs` (tag picker),
@@ -332,10 +351,20 @@ section), CHANGELOG.
 LPC-layout sheet, an Aseprite JSON) under `crates/editor/tests/fixtures/`; the example project
 stays generated.
 
-**Verify.** Unit tests for each parser on the fixtures (layer count, tile ids, zones, dropped
-flips; LPC row order; tag ranges). Editor script: `import tiled FIXTURE` then `open <name>`,
-screenshot shows the map; `import lpc FIXTURE body_lpc`, `tab sheets`, screenshot of the sheet;
-`import aseprite FIXTURE`, an *Effect* action offers the tag.
+**Verify.** Done: unit tests on the fixtures (`crates/editor/tests/fixtures`: `tiny.tmx` with an
+external `.tsx`, an embedded tileset with margin / spacing, base64 + zlib data in a group, a
+flipped tile, a collision layer, a rectangle, a `spawn:` point, a polygon and a tile object;
+`tiny.tmj` with `.tsj` must parse alike; a 4-row LPC walk cycle; an Aseprite array export) and
+on in-memory data (base64, zlib vector, zstd refusal, a 21-row LPC sheet, hash / trimmed
+Aseprite frames). Editor script on a scratch copy: `import tiled tiny.tmx` opens map `tiny`
+(report: 2 layers, ground scaled from 16 px, 2 zones, 1 spawn, 2 collision cells, 1 flip, 1
+dropped object; screenshot with the result window); `import tiled tiny.tmj` gets `tiny_2` and
+`ground_2`; `import lpc … body_lpc` and the Sheets form shows the reordered 4×4 sheet; `import
+aseprite boom.json` shows *Animations (2)*; an *Effect* action on Mira with sheet `boom` offers
+the *animation* list. Game (`--dev` console): `effect("boom", …, #{ tag: "explode" })` plays
+frames 0–2 at 10 fps, `smoke` frame 3 at 5 fps, an unknown tag is logged. Compile-checked only:
+the File › Import… window's buttons and the native file dialog (egui clicks), real third-party
+files (only the fixtures were imported).
 
 ## 0.5.0 — Living world and adventure
 

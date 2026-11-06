@@ -15,6 +15,15 @@ All notable changes to rust2d (engine, game runner and editor). Versions follow
   Cut, Copy and Paste. Editor script commands `region`, `copy`, `cut`, `paste`, `unpaste`;
   `status` prints `sel=`, `clipboard=` and `pasting=`.
 - Structure ghosts (Structures tool and paste preview) draw characters with all their layers.
+- **Import** (*File › Import…*): Tiled maps (`.tmx` / `.tmj` with their tilesets, repacked to
+  32 px; layers, collision layer, solid tiles, tile animations, trigger zones and `spawn:` points
+  from object layers), LPC character sheets (the walk cycle in the character layout, as a body,
+  hair, outfit… sheet) and Aseprite sprite sheets (frames in a grid, tags as named animations).
+  A window reports what was imported and left out; nothing is overwritten. Sprite sheets have
+  **animations** (*Database › Sprite sheets*), offered by the *Effect* / *Fly* actions and
+  played by `effect()` / `fly()` with `#{ tag: "name" }`. Editor script `import tiled|lpc|aseprite`,
+  `importdialog`, `actionsheet`; `tab KIND ID` selects by id. New editor dependencies:
+  `quick-xml`, `flate2` (both pure Rust, already in the lock file), `rhai` (JSON).
 - **Events graph**: the new *Events* tab shows the open map's triggers as a graph with their
   owners, readable conditions and actions (dialog lines, choices with options), the script
   functions they run (with their dialog lines, choices, events and flags) and the maps they

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" orientation="orthogonal" renderorder="right-down" width="6" height="4" tilewidth="16" tileheight="16" infinite="0">
+ <tileset firstgid="1" source="ground.tsx"/>
+ <tileset firstgid="5" name="decorations" tilewidth="32" tileheight="32" spacing="2" margin="1" tilecount="2" columns="2">
+  <image source="deco.png" width="68" height="34"/>
+ </tileset>
+ <layer id="1" name="Ground" width="6" height="4">
+  <data encoding="csv">
+1,1,1,1,1,1,
+1,2,3,1,1,1,
+1,1,1,1,1,1,
+1,1,1,1,1,4
+</data>
+ </layer>
+ <group id="5" name="Upper">
+  <layer id="2" name="Overhead trees" width="6" height="4">
+   <data encoding="base64" compression="zlib">
+   eJxjYEAFrAwMDch8NjR5UgEAKfAAjA==
+   </data>
+  </layer>
+ </group>
+ <layer id="3" name="collision" width="6" height="4">
+  <data encoding="csv">
+0,0,0,0,0,0,
+0,0,0,0,0,0,
+0,0,0,0,0,0,
+1,1,0,0,0,0
+</data>
+ </layer>
+ <objectgroup id="4" name="Objects">
+  <object id="1" name="door" x="16" y="16" width="32" height="16"/>
+  <object id="2" name="spawn:start" x="50" y="40">
+   <point/>
+  </object>
+  <object id="3" name="pond" x="48" y="0">
+   <polygon points="0,0 30,0 30,20"/>
+  </object>
+  <object id="4" gid="2" x="0" y="64" width="16" height="16"/>
+ </objectgroup>
+</map>

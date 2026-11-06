@@ -491,8 +491,9 @@ fn num(d: &Dynamic) -> f32 {
     d.as_float().map(|f| f as f32).or_else(|_| d.as_int().map(|i| i as f32)).unwrap_or(0.0)
 }
 
-/// The sprite of `fly` / `effect` from the sheet and the options map: `frames: [first, last]`,
-/// `fps`, `scale`, `light`, `color: [r, g, b]` (of the light).
+/// The sprite of `fly` / `effect` from the sheet and the options map: `frames: [first, last]`
+/// or `tag: "name"` (a named animation of the sheet), `fps`, `scale`, `light`, `color: [r, g, b]`
+/// (of the light).
 fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
     let opt = |k: &str| o.get(k).map(num);
     let mut s = FxSprite { sheet: sheet.into(), ..Default::default() };
@@ -501,6 +502,9 @@ fn fx_sprite(sheet: &str, o: &Map) -> FxSprite {
         s.last = f.get(1).map_or(s.first as f32, num).max(s.first as f32) as u32;
     } else if let Some(f) = opt("frame") {
         (s.first, s.last) = (f.max(0.0) as u32, f.max(0.0) as u32);
+    }
+    if let Some(t) = o.get("tag").and_then(|t| t.clone().into_string().ok()) {
+        s.tag = t;
     }
     s.fps = opt("fps").unwrap_or(s.fps).max(0.1);
     s.scale = opt("scale").unwrap_or(s.scale).max(0.05);
@@ -541,6 +545,16 @@ fn fly(sheet: &str, x: &Dynamic, y: &Dynamic, function: &str, o: &Map) -> Action
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_tag_option() {
+        let mut host = ScriptHost::new();
+        host.load_source(r#"fn boom() { effect("boom", 2, 3, #{ tag: "explode", scale: 2 }); }"#).unwrap();
+        let mut w = WorldState::default();
+        let a = host.call(&mut w, "boom", None);
+        let Some(Action::Effect { sprite, .. }) = a.first() else { panic!("{a:?}") };
+        assert_eq!((sprite.sheet.as_str(), sprite.tag.as_str(), sprite.scale), ("boom", "explode", 2.0));
+    }
 
     #[test]
     fn hot_reload_keeps_working_scripts_on_errors() {

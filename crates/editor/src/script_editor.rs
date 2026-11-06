@@ -114,9 +114,9 @@ pub const API: &[ApiFn] = api! {
     "player_facing"() "Where the player looks: \"up\", \"down\", \"left\" or \"right\"";
     "aim"(function: Func) "Magic targeting: the player's next click calls function(x, y) with the target in tiles; in a spell's script the spell is paid then (queued)";
     "fly"(sheet: Sheet, x: Num, y: Num, function: Func) "An animated sprite flies from the player to tile x, y, then calls function(x, y) (queued)";
-    "fly"(sheet: Sheet, x: Num, y: Num, function: Func, options: Opts) "Like fly(); options #{ speed: tiles/s, frames: [first, last], fps, scale, light: radius, color: [r, g, b] } (queued)";
+    "fly"(sheet: Sheet, x: Num, y: Num, function: Func, options: Opts) "Like fly(); options #{ speed: tiles/s, frames: [first, last] or tag: \"animation\", fps, scale, light: radius, color: [r, g, b] } (queued)";
     "effect"(sheet: Sheet, x: Num, y: Num) "Plays a sprite sheet's frames once, centered on tile x, y (explosions) (queued)";
-    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last], fps, scale, light: radius, color: [r, g, b], shake: seconds } (queued)";
+    "effect"(sheet: Sheet, x: Num, y: Num, options: Opts) "Like effect(); options #{ frames: [first, last] or tag: \"animation\", fps, scale, light: radius, color: [r, g, b], shake: seconds } (queued)";
     "damage_area"(x: Num, y: Num, radius: Num, damage: Num) "Damages every character within radius tiles of tile x, y (spell damage skills apply) (queued)";
     "text"(text: Text) "Fills in {player}, {sir|madam} and {variable} placeholders";
     "random"(n: Num) "Random integer from 0 to n-1";
