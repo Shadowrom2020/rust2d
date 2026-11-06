@@ -207,6 +207,11 @@ fn light(mut d: ItemDef, l: LightSpec) -> ItemDef {
     d
 }
 
+/// A healing item the player can also use on a companion (they choose whom to heal).
+fn for_allies(d: ItemDef) -> ItemDef {
+    ItemDef { use_on: rustpg2d_engine::defs::UseTarget::Choose, ..d }
+}
+
 /// A scroll or book that teaches a spell when used.
 fn teach(mut d: ItemDef, spell: &str) -> ItemDef {
     d.teaches = spell.into();
@@ -626,6 +631,7 @@ fn shop() -> Map {
             ShopEntry { unlimited: true, ..ShopEntry::new("torch", 0, 0) },
             ShopEntry::new("wooden_shield", 1, 0),
             ShopEntry::new("scroll_heal", 2, 0),
+            ShopEntry::new("bandage", 6, 0),
             ShopEntry::new("antidote", 5, 0),
             ShopEntry::new("elixir_strength", 2, 0),
             ShopEntry::new("swiftness", 2, 0),
@@ -1153,6 +1159,7 @@ fn database() -> Database {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -1270,22 +1277,14 @@ fn database() -> Database {
         items: vec![
             stack(item("key", "Gate Key", "An old iron key. Opens the east gate.", it::KEY, false, vec![]), 1),
             stack(item("bronze_key", "Bronze Key", "Opens a chest somewhere in Whisperwood.", it::BRONZE_KEY, false, vec![]), 5),
-            stack(item(
+            stack(for_allies(item(
                 "potion",
                 "Red Potion",
                 "Restores 3 hearts.",
                 it::POTION,
                 true,
-                use_trig(vec![
-                    Action::If {
-                        conditions: vec![cond(Cond::PlayerHp { op: CmpOp::Ge, value: 12 })],
-                        then: vec![dialog("", "You're already at full health. You drink it anyway.")],
-                        otherwise: vec![],
-                    },
-                    Action::Heal { amount: 6 },
-                    Action::SetVar { name: "potions_drunk".into(), op: VarOp::Add, value: 1 },
-                ]),
-            ), 10),
+                use_trig(vec![Action::Heal { amount: 6 }, Action::SetVar { name: "potions_drunk".into(), op: VarOp::Add, value: 1 }]),
+            )), 10),
             item("coin", "Coin", "Shiny gold coins.", it::COIN, false, use_trig(vec![Action::RunScript { function: "count_coins".into() }])),
             stack(item("apple", "Apple", "Crunchy and sweet. Restores 1 heart.", it::APPLE, true, use_trig(vec![Action::Heal { amount: 2 }])), 20),
             weapon(
@@ -1296,6 +1295,8 @@ fn database() -> Database {
                 stack(item("crossbow", "Crossbow", "Slow but powerful, uses bolts.", it::CROSSBOW, false, vec![]), 1),
                 Weapon::ranged(3, 1.1, Ranged { projectile: sprite("items", it::BOLT_SHOT), speed: 320.0 * R, range: 10.0, ammo: "bolts".into() }),
             ),
+            // Healing items set to "Player or companion": with a companion along the player chooses.
+            stack(for_allies(item("bandage", "Bandage", "Linen for wounds: restores 1 heart. Use it on yourself or a companion.", it::BANDAGE, true, use_trig(vec![Action::Heal { amount: 2 }]))), 10),
             stack(item("arrows", "Arrows", "Ammunition for the bow.", it::ARROWS, false, vec![]), 50),
             stack(item("bolts", "Bolts", "Ammunition for the crossbow.", it::BOLTS, false, vec![]), 30),
             // Melee weapons: balanced sword, long narrow spear, slow heavy axe.
@@ -1481,6 +1482,7 @@ fn database() -> Database {
     // Trade values (merchants use them unless their stock sets a price).
     for (id, v) in [
         ("potion", 15),
+        ("bandage", 4),
         ("apple", 3),
         ("bow", 40),
         ("crossbow", 70),

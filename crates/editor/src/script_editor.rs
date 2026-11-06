@@ -157,6 +157,7 @@ pub const API: &[ApiFn] = api! {
     "autosave"() "Saves to the Autosave slot once the running event (dialogs, cut-scene) has finished (queued)";
     "enable_spawners"(map: Map, zone: Text) "Switches one spawner zone switched off by name on again (queued)";
     "heal"(amount: Num) "Heals the player (queued)";
+    "heal_npc"(target: Target, amount: Num) "Heals a character by name (a companion, \"player\"); a negative amount hurts it (queued)";
     "play_sound"(sound: Sound) "Plays a sound (queued)";
     "play_music"(sound: Sound) "Plays music (queued)";
     "set_locked"(target: Target, locked: Bool) "Locks / unlocks a prop (queued)";

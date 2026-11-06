@@ -94,6 +94,19 @@ impl Game {
         }
     }
 
+    /// Head and shoulders of a character, scaled into `r` (bottom-aligned, centered).
+    pub(super) fn draw_bust(&self, a: &Appearance, eq: &Equipment, r: Rect) {
+        let (fw, fh) = self.character_frame_size(a);
+        let part = if (fw, fh) == (32.0, 48.0) { BUST } else { Rect::new(0.0, 0.0, 1.0, 0.6) };
+        let (pw, ph) = (fw * part.w, fh * part.h);
+        let scale = (r.w / pw).min(r.h / ph);
+        let (w, h) = (pw * scale, ph * scale);
+        let dest = Rect::new(r.x + (r.w - w) / 2.0, r.bottom() - h, w, h);
+        for l in self.character_layers(a, eq, Facing::Down, 0, false) {
+            self.assets.draw_frame_part_in(&l.sheet, l.frame, part, dest, l.skin, l.hair);
+        }
+    }
+
     /// Draws the open dialog's portrait (after the dialog box).
     pub(super) fn draw_dialog_portrait(&self) {
         let (Some(r), Some(s)) = (self.ui.portrait_rect, &self.portrait) else { return };
@@ -101,15 +114,7 @@ impl Game {
         if let Some((a, eq)) = self.speaker_look(s) {
             // Head and shoulders, scaled to the square (weapons are left out: they'd poke in).
             let eq = Equipment { weapon: None, offhand: None, tool: None, ..eq };
-            let (fw, fh) = self.character_frame_size(&a);
-            let part = if (fw, fh) == (32.0, 48.0) { BUST } else { Rect::new(0.0, 0.0, 1.0, 0.6) };
-            let (pw, ph) = (fw * part.w, fh * part.h);
-            let scale = (r.w - 8.0) / pw.max(ph);
-            let (w, h) = (pw * scale, ph * scale);
-            let dest = Rect::new(r.x + (r.w - w) / 2.0, r.bottom() - h, w, h);
-            for l in self.character_layers(&a, &eq, Facing::Down, 0, false) {
-                self.assets.draw_frame_part_in(&l.sheet, l.frame, part, dest, l.skin, l.hair);
-            }
+            self.draw_bust(&a, &eq, Rect::new(r.x + 4.0, r.y + 4.0, r.w - 8.0, r.h - 4.0));
         }
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, Color::new(0.85, 0.72, 0.38, 1.0));
     }

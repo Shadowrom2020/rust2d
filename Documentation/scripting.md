@@ -286,6 +286,7 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `player_x()` / `player_y()` | Position in tiles (fractional; the feet). |
 | `player_facing()` | `"up"`, `"down"`, `"left"` or `"right"`. |
 | `heal(amount)` | Restores hit points; a negative amount hurts the player. *(queued)* |
+| `heal_npc(name, amount)` | Restores a character's hit points (a companion, any character with HP; `"player"` = the player); a negative amount hurts it. *(queued)* |
 | `current_map()` | Name of the current map. |
 
 ### Dialogs and flow

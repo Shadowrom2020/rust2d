@@ -10,6 +10,7 @@ mod dev;
 mod effects;
 mod equipment;
 mod furniture;
+mod healing;
 mod fx;
 mod inventory_ui;
 mod journal;
@@ -236,6 +237,10 @@ pub struct Game {
     portrait: Option<portraits::Speaker>,
     /// The furniture the player uses, the sleep sequence, and the bed a Sleep action lies in.
     seat: Option<furniture::Seat>,
+    /// The open "Heal whom?" choice.
+    heal_pick: Option<healing::HealPick>,
+    /// Bottom of the player's HUD panel as last drawn (the companions' rows go below it).
+    hud_bottom: std::cell::Cell<f32>,
     sleeping: Option<furniture::Sleeping>,
     bed: Option<u32>,
     journal: journal::Journal,
@@ -337,6 +342,8 @@ impl Game {
             minigame: None,
             portrait: None,
             seat: None,
+            heal_pick: None,
+            hud_bottom: std::cell::Cell::new(80.0),
             sleeping: None,
             bed: None,
             journal: Default::default(),
@@ -969,6 +976,10 @@ impl Game {
         if self.update_sleep(dt) {
             return;
         }
+        // Choosing whom to heal pauses the world (Esc cancels it instead of opening the menu).
+        if self.update_heal_pick() {
+            return;
+        }
         if self.update_menu(can_open) {
             return;
         }
@@ -1397,6 +1408,15 @@ impl Game {
                 return;
             }
         }
+        // A healing item asks whom to heal while companions are around.
+        if self.start_heal_pick(healing::HealSource::Item(item.to_string())) {
+            return;
+        }
+        self.use_item_now(item);
+    }
+
+    /// Uses an item on the player / the prop in front (its *UseItem* triggers).
+    fn use_item_now(&mut self, item: &str) {
         let ev = GameEvent::UseItem { item: item.to_string() };
         let mut fired = false;
         if let Some(i) = self.facing_entity() {
@@ -1510,7 +1530,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} aim={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1547,6 +1567,7 @@ impl Game {
             self.achievements_status(),
             self.minigame_status(),
             self.pose_status(),
+            self.heal_pick_status(),
             self.shop_status(),
             self.crafting_status(),
             self.loaded.map.name,
@@ -1780,6 +1801,7 @@ impl Game {
         if !self.on_title() {
             if !self.ui_hidden {
                 self.draw_hud();
+                self.draw_companion_rows();
                 self.draw_clock();
             }
             self.draw_minigame();
@@ -1790,7 +1812,8 @@ impl Game {
                 self.draw_shop_ui();
             } else if self.journal_open() {
                 self.draw_journal();
-            } else {
+            } else if !self.heal_picking() {
+                // (While choosing whom to heal, the window steps aside for the map.)
                 self.draw_window_frame();
                 if self.skills_open() {
                     self.draw_skills_ui();
@@ -1799,6 +1822,7 @@ impl Game {
                 }
             }
             self.draw_world_map();
+            self.draw_heal_pick();
         }
         if !self.on_title() {
             self.draw_aim_cursor();
@@ -1933,6 +1957,10 @@ impl ActionHost for Game {
             }
             Action::Heal { amount } => {
                 self.heal(*amount);
+                Step::Continue
+            }
+            Action::HealCharacter { target, amount } => {
+                self.heal_character(target, *amount, ctx.owner);
                 Step::Continue
             }
             Action::SetLocked { target, locked } => {

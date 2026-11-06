@@ -1472,7 +1472,14 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             labeled(ui, "hit points", |ui| {
                 ui.add(egui::DragValue::new(amount).range(-99..=99));
             });
-            ui.weak("(negative = damage)");
+            ui.weak("(negative = damage; on a healing item set to 'Use on: Player or companion' it heals whom the player chooses)");
+        }
+        Action::HealCharacter { target, amount } => {
+            target_field(ui, id, target, refs);
+            labeled(ui, "hit points", |ui| {
+                ui.add(egui::DragValue::new(amount).range(-99..=99));
+            });
+            ui.weak("(\"player\", \"self\" or a character's name; negative = damage)");
         }
         Action::If { conditions, then, otherwise } => {
             ui.label("If all of:");

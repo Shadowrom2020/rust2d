@@ -484,6 +484,7 @@ mod tests {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),

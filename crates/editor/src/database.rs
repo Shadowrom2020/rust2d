@@ -315,6 +315,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         teaches: String::new(),
         held: String::new(),
         tool: String::new(),
+        use_on: Default::default(),
                     },
                     |d| &mut d.id,
                 ),
@@ -743,6 +744,15 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         ui.label("Value");
         ui.add(egui::DragValue::new(&mut d.value).range(0..=999_999))
             .on_hover_text("Base trade price; merchants use it when their stock has no own price (0 = worthless, can't be sold)");
+    });
+    ui.horizontal(|ui| {
+        ui.label("Use on");
+        egui::ComboBox::from_id_salt("item_use_on").selected_text(d.use_on.label()).show_ui(ui, |ui| {
+            for t in rustpg2d_engine::defs::UseTarget::ALL {
+                ui.selectable_value(&mut d.use_on, t, t.label());
+            }
+        });
+        ui.weak("(healing items, whose 'On use' heals: with companions around the player chooses whom to heal)");
     });
     ui.separator();
     ui.heading("Equipment");
