@@ -3,6 +3,7 @@
 mod ai;
 mod charwin;
 mod combat;
+mod companions;
 mod cutscene;
 mod dev;
 mod effects;
@@ -149,6 +150,8 @@ struct RtEntity {
     schedule: Option<schedule::Schedule>,
     /// Gone indoors at a schedule stop: inactive until the next stop (saved as active).
     away: bool,
+    /// It follows the player (where it is placed, its triggers, its way).
+    companion: Option<Box<companions::Link>>,
     /// What the character drops when defeated.
     loot: Vec<crate::defs::LootEntry>,
     /// Light of this placed entity instead of its definition's.
@@ -433,6 +436,7 @@ impl Game {
             patrol: None,
             schedule: None,
             away: false,
+            companion: None,
             loot: match (kind, self.project.db.character(def)) {
                 (EntityKind::Character, Some(d)) => d.loot.clone(),
                 _ => Vec::new(),
@@ -467,6 +471,7 @@ impl Game {
 
     fn build_entities(&self, map: &Map) -> Vec<RtEntity> {
         let mut out = self.build_map_entities(map);
+        out.extend(self.build_companions());
         // Items the player dropped here earlier.
         for p in self.world.dropped.get(&map.name).into_iter().flatten() {
             let mut rt = self.new_rt_entity(EntityKind::Item, &p.item, p.uid, "", vec2(p.x, p.y), Facing::Down, true, 0);
@@ -477,75 +482,76 @@ impl Game {
     }
 
     fn build_map_entities(&self, map: &Map) -> Vec<RtEntity> {
-        map.entities
-            .iter()
-            .map(|e| {
-                let st = self.world.entity_state(&map.name, e.uid);
-                let pos = st.map_or(vec2(e.x, e.y), |s| vec2(s.x, s.y));
-                let count = st.and_then(|s| s.count).unwrap_or(e.count);
-                let mut rt = self.new_rt_entity(
-                    e.kind,
-                    &e.def,
-                    e.uid,
-                    &e.name,
-                    pos,
-                    st.map_or(e.facing, |s| s.facing),
-                    st.map_or(e.active, |s| s.active),
-                    st.map_or(e.frame, |s| s.frame),
-                );
-                rt.count = count;
-                rt.light = e.light.clone();
-                if e.kind == EntityKind::Character {
-                    if let Some(loot) = &e.loot {
-                        rt.loot = loot.clone();
-                    }
-                    rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
-                    // Look and items: the placed NPC's own, then what changed in this game.
-                    if let Some(a) = &e.appearance {
-                        rt.appearance = a.clone();
-                    }
-                    if let Some(eq) = &e.equipment {
-                        rt.equipment = eq.clone();
-                    }
-                    if let Some(inv) = &e.inventory {
-                        rt.inventory = inv.clone();
-                    }
-                    if let Some(saved) = self.world.npc_items.get(&map.name).and_then(|m| m.get(&e.uid)) {
-                        rt.equipment = saved.equipment.clone();
-                        rt.inventory = saved.inventory.clone();
-                    }
-                    npc_items::apply_gear(&self.project.db, &mut rt);
-                    if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
-                        let p = rt.patrol.get_or_insert_with(Default::default);
-                        p.restore(ps);
-                    }
-                    if !e.schedule.is_empty() {
-                        let mut s = schedule::Schedule::new(e.schedule.clone());
-                        s.on = !st.is_some_and(|s| s.schedule_off);
-                        rt.schedule = Some(s);
-                    }
+        // Recruited companions are built apart (they follow the player).
+        map.entities.iter().filter(|e| !self.world.is_companion(&map.name, e.uid)).map(|e| self.build_placed(&map.name, e)).collect()
+    }
+
+    /// The runtime entity of placed entity `e` of map `map`, with what changed in this game.
+    fn build_placed(&self, map: &str, e: &crate::entity::EntityInstance) -> RtEntity {
+        let st = self.world.entity_state(map, e.uid);
+        let pos = st.map_or(vec2(e.x, e.y), |s| vec2(s.x, s.y));
+        let count = st.and_then(|s| s.count).unwrap_or(e.count);
+        let mut rt = self.new_rt_entity(
+            e.kind,
+            &e.def,
+            e.uid,
+            &e.name,
+            pos,
+            st.map_or(e.facing, |s| s.facing),
+            st.map_or(e.active, |s| s.active),
+            st.map_or(e.frame, |s| s.frame),
+        );
+        rt.count = count;
+        rt.light = e.light.clone();
+        if e.kind == EntityKind::Character {
+            if let Some(loot) = &e.loot {
+                rt.loot = loot.clone();
+            }
+            rt.patrol = e.patrol.clone().map(patrol::Patrol::new);
+            // Look and items: the placed NPC's own, then what changed in this game.
+            if let Some(a) = &e.appearance {
+                rt.appearance = a.clone();
+            }
+            if let Some(eq) = &e.equipment {
+                rt.equipment = eq.clone();
+            }
+            if let Some(inv) = &e.inventory {
+                rt.inventory = inv.clone();
+            }
+            if let Some(saved) = self.world.npc_items.get(map).and_then(|m| m.get(&e.uid)) {
+                rt.equipment = saved.equipment.clone();
+                rt.inventory = saved.inventory.clone();
+            }
+            npc_items::apply_gear(&self.project.db, &mut rt);
+            if let Some(ps) = st.and_then(|s| s.patrol.as_ref()) {
+                let p = rt.patrol.get_or_insert_with(Default::default);
+                p.restore(ps);
+            }
+            if !e.schedule.is_empty() {
+                let mut s = schedule::Schedule::new(e.schedule.clone());
+                s.on = !st.is_some_and(|s| s.schedule_off);
+                rt.schedule = Some(s);
+            }
+        }
+        rt.unlocked = st.is_some_and(|s| s.unlocked);
+        if let Some(d) = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten() {
+            // Saved state; saves from before named states store a frame offset.
+            let name = match st {
+                Some(s) => match &s.state {
+                    Some(n) => Some(n.clone()),
+                    None => d.state_of_offset(s.frame),
+                },
+                None => Some(e.state.clone()),
+            };
+            if let Some(idx) = name.and_then(|n| d.state_index(&n)) {
+                rt.state = idx;
+                if st.is_none_or(|s| s.state.is_some() || d.state_of_offset(s.frame).is_some()) {
+                    rt.frame = 0;
                 }
-                rt.unlocked = st.is_some_and(|s| s.unlocked);
-                if let Some(d) = (e.kind == EntityKind::Prop).then(|| self.project.db.prop(&e.def)).flatten() {
-                    // Saved state; saves from before named states store a frame offset.
-                    let name = match st {
-                        Some(s) => match &s.state {
-                            Some(n) => Some(n.clone()),
-                            None => d.state_of_offset(s.frame),
-                        },
-                        None => Some(e.state.clone()),
-                    };
-                    if let Some(idx) = name.and_then(|n| d.state_index(&n)) {
-                        rt.state = idx;
-                        if st.is_none_or(|s| s.state.is_some() || d.state_of_offset(s.frame).is_some()) {
-                            rt.frame = 0;
-                        }
-                        rt.solid = d.state_look(idx).1;
-                    }
-                }
-                rt
-            })
-            .collect()
+                rt.solid = d.state_look(idx).1;
+            }
+        }
+        rt
     }
 
     fn enter_map(&mut self, map: Map, arrival: Arrival) {
@@ -591,6 +597,7 @@ impl Game {
         };
         // Never inside something solid (a gate post at a map edge, a prop placed on a spawn).
         self.player.pos = self.free_spot(pos);
+        self.place_companions();
         self.player.move_target = None;
         self.world.current_map = self.loaded.map.name.clone();
         // Zones we arrive in don't fire Enter (avoids bouncing back through portals).
@@ -754,7 +761,8 @@ impl Game {
     fn entity_index(&self, target: &str, owner: Option<u32>) -> Option<usize> {
         let uid = match target {
             "" | "self" => owner?,
-            name => return self.loaded.entities.iter().position(|e| e.name == name),
+            // Active ones first (a companion that left this map stays behind, inactive).
+            name => return self.loaded.entities.iter().position(|e| e.name == name && e.active).or_else(|| self.loaded.entities.iter().position(|e| e.name == name)),
         };
         self.loaded.entities.iter().position(|e| e.uid == uid)
     }
@@ -778,6 +786,10 @@ impl Game {
             }
             if let Some(e) = map.entities.iter().find(|e| e.uid == uid) {
                 add(format!("{}/e:{}", map.name, e.uid), &e.triggers, Some(uid));
+            }
+            // A companion's own triggers come along from where it is placed.
+            if let Some(l) = rt.iter().find(|e| e.uid == uid).and_then(|e| e.companion.as_ref()) {
+                add(format!("{}/e:{}", l.map, l.uid), &l.triggers, Some(uid));
             }
         };
         match source {
@@ -861,8 +873,8 @@ impl Game {
 
     fn persist(&mut self, idx: usize) {
         let e = &self.loaded.entities[idx];
-        if e.spawned_by.is_some() {
-            return; // spawner characters are not saved individually
+        if e.spawned_by.is_some() || e.companion.is_some() {
+            return; // spawner characters are not saved individually, companions in `companions`
         }
         if e.uid >= crate::state::DROPPED_UID_BASE {
             // Dropped items live in the world state's list of piles.
@@ -1388,7 +1400,7 @@ impl Game {
                 continue;
             }
             let dt = dt * f;
-            if self.chase(i, dt) {
+            if self.companion_step(i, dt) || self.chase(i, dt) {
                 continue;
             }
             match self.schedule_step(i, dt) {
@@ -1445,7 +1457,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} shop={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1470,6 +1482,7 @@ impl Game {
             self.lights().len(),
             self.patrol_status(),
             self.schedule_status(),
+            self.companions_status(),
             {
                 let ts = self.ts();
                 let here = self.loaded.entities.iter().filter(|e| e.active && e.uid >= crate::state::DROPPED_UID_BASE);
@@ -1884,6 +1897,14 @@ impl ActionHost for Game {
             }
             Action::Quest { quest, op, stage } => {
                 self.quest_changed(quest, *op, *stage);
+                Step::Continue
+            }
+            Action::Companion { target, join } => {
+                match self.entity_index(target, ctx.owner) {
+                    Some(i) if *join => self.recruit(i),
+                    Some(i) => self.dismiss(i, false),
+                    None => eprintln!("Companion: '{target}' is not a character on this map"),
+                }
                 Step::Continue
             }
             Action::Schedule { target, active } => {

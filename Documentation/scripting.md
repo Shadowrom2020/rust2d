@@ -317,6 +317,10 @@ or only read something. Names in `code` are parameters; overloads are listed sep
 | `patrol(target, points)` | Patrols the given waypoints `[[x, y], [x, y], …]` (whole tiles). *(queued)* |
 | `stop_patrol(target)` | Stops a patrol. *(queued)* |
 | `stop_schedule(target)` | The character stops following its daily schedule (set in the editor) and stays where it is. Saved. *(queued)* |
+| `follow(target)` | The character joins the player as a companion: it follows from map to map and fights hostile characters near the player. Only placed, friendly characters can. Saved. *(queued)* |
+| `stop_following(target)` | The companion leaves: on its own map it stays where it is, elsewhere it goes back to where it is placed. *(queued)* |
+| `is_companion(name)` | Whether the character with that name follows the player. |
+| `companion_count()` | How many companions follow the player. |
 | `follow_schedule(target)` | The character follows its daily schedule again: it heads for the stop of the current hour. *(queued)* |
 | `open_shop(target)` | Opens a merchant's trade window. *(queued)* |
 | `defeated_count(character)` | How many characters of a definition the player has defeated (the bestiary's count), e.g. `defeated_count("slime")`. |

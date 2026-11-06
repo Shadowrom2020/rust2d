@@ -200,6 +200,10 @@ impl Game {
         if self.loaded.map.name.is_empty() {
             return;
         }
+        // Companions' HP goes into the world state too (saved, carried to the next map).
+        for i in 0..self.loaded.entities.len() {
+            self.sync_companion_hp(i);
+        }
         for i in 0..self.loaded.entities.len() {
             if self.loaded.entities[i].patrol.is_some() && self.loaded.entities[i].spawned_by.is_none() {
                 self.persist(i);

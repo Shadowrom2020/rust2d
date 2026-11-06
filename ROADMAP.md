@@ -164,7 +164,7 @@ right-click removes it, `undo`; screenshots of the inspector rows and the dashed
 labels. Not checked by script: typing a time into the egui field and the facing combo (the
 `stop` command sets the same fields).
 
-### [ ] Companions — `feature/companions`
+### [x] Companions — `feature/companions`
 
 **Design.** `Behavior::Follow` for placed NPCs plus script `follow("name")` /
 `stop_following("name")` and the matching actions; followers path to the tile behind the player,
@@ -173,8 +173,29 @@ reach with their weapon (reuse `attack_at` with an attacker parameter) and are e
 player's melee targeting (`attack_at` filters on `hostile`, which also stops hitting friendly
 NPCs today). Enemies target the nearest of player and companions.
 
-**Verify.** `call` a function that recruits the guard, walk through a transition, `status` lists
-the companion on the new map; combat screenshot; save / load.
+**Decided while building.** No `Behavior::Follow`: joining is the **Companion** action
+(`Action::Companion { target, join }`, appended) and `follow` / `stop_following`, plus
+`is_companion(name)` / `companion_count()`. `WorldState.companions: Vec<Companion { map, uid,
+name, hp }>` points at where the character is placed: its look, items (`npc_items`, keyed by the
+home map / uid) and triggers come from there, and the placed instance isn't built while it is
+recruited. `runtime/companions.rs`: runtime uids `COMPANION_UID_BASE + k`, a `Link` on the
+`RtEntity` (home, triggers, walker); companions aren't solid (the player walks through them),
+follow to a tile behind the player (`walk_to_tile`, at the player's speed, faster when behind),
+catch up beyond 14 tiles, fight the nearest hostile within 5 tiles of them and of the player
+(own melee / ranged code rather than `attack_at`, which is the player's swing, ammo and
+cooldown), regain 1 HP per 4 s when no enemy hunts. Enemies (`chase`, shooting, contact,
+projectiles) go for the nearest of player and hurtable companions (max HP > 0). Knocked out
+(`defeat` of a companion) = dismissed and gone home with full HP, no XP or loot. Player attacks
+filter on `hostile` as planned (melee, projectiles, `damage_at` spells, mouse attack / aim).
+
+**Verify (done).** Autoplay on a scratch copy: `call guard_talk` with the quest flag, choosing
+"Come with me" → `companions=["guard:8/8@…"]`; walking left, he follows (screenshot);
+`teleport` to the forest → he arrives beside the player; near the slime den he kills a slime
+(`bestiary=["slimex1"]`, screenshot); poisoned to 5 HP, F5, back to the village (HP carried),
+F9 → in the forest with 5/8; poisoned to 0 → `companions=[]`, no bestiary entry, and back in the
+village he patrols again from his post; `call guard_talk` as companion, "Yes, thank you" →
+dismissed on his own map, patrol resumes. Not checked by script: a companion with a ranged
+weapon (the example has none), the editor's Companion action fields (compile-checked).
 
 ### [ ] Crafting — `feature/crafting`
 
@@ -471,6 +492,55 @@ Options row *Language*; the editor exports a translation template. Large but mec
   - *Verify*: autoplay at 20:30 follows Tomas through the door (`status` on the house map
     shows him walking in, then `pose=lie`), save / load at night keeps him in bed, entering the
     house at noon shows nobody; screenshots of sitting and sleeping.
+- **Healing companions** (improves *Companions* of 0.5.0): spells, scrolls and potions can heal
+  a companion, not only the player.
+  - *Target choice*: a *Heal* spell (`SpellEffect::Heal`) and consumable items whose *on use*
+    heals (`Action::Heal`) ask whom to heal while companions are around: the aiming mode of
+    bolts (`update_aim`) with friendly targets: click / select the player or a companion
+    (keyboard: Left / Right cycles, Confirm heals, Cancel aborts; with no companion on the map
+    it heals the player at once, as today). Items get `ItemDef.use_on: UseTarget { Player, Ally,
+    Choose }` (serde default `Player`) so a potion can be drunk by the player only or offered to
+    a companion; scrolls are consumable items with a spell-like use (`Action::Heal` + `Choose`).
+  - *Actions and scripts*: `Action::Heal` gains `target: TargetName` (serde default "player";
+    old maps keep healing the player), so `heal_npc("guard", 4)` and *Heal* actions on a named
+    character work; `heal_area` already heals friendly characters (companions included) and
+    stays. Companion HP is written back with `sync_companion_hp`.
+  - *HUD*: small companion portraits with HP bars under the player's (head of the paperdoll,
+    like the save thumbnails' heads), so it is clear who needs healing; clicking one targets it
+    while healing.
+  - *Verify*: a potion used with the guard at 3/8 offers both targets, choosing him → 7/8, the
+    player's HP unchanged; the Heal spell the same; screenshot of the HUD portraits.
+- **Knocked-down companions stay down until healed** (changes the knock-out rule of
+  *Companions*; builds on *Healing companions*): at 0 HP a companion falls (drawn lying, the
+  *Lie* pose of the furniture idea or a 90° rotation, greyed), stays where it fell, isn't hunted
+  or hit, and doesn't follow. Healing it (potion, spell, scroll, `heal_npc`) gets it up with the
+  healed HP; a project setting decides what happens otherwise: *stays down* (default), *gets up
+  after N seconds with 1 HP*, or *goes home* (today's rule). Leaving the map with a downed
+  companion asks "Leave the guard behind?" (yes = it goes home, as dismissed); a save keeps it
+  down (`Companion.down: bool`, serde default). When the player is defeated, downed companions
+  don't matter (the defeat menu as today). `status` prints `down` per companion.
+  - *Verify*: poison the guard to 0 → `down`, enemies ignore him, he stays when the player walks
+    away; a potion on him → up with its HP and following; save / load while down.
+- **Commands for companions** (improves *Companions*): the player tells companions how to
+  behave.
+  - *Orders*: *Attack* (today's behaviour: fight hostiles near the player), *Defend* (only fight
+    what attacks the player or the companion, stay close), *Passive* (never fight, keep out of
+    reach of enemies: flee behind the player), *Stay* (wait here, fight what comes close; *Follow*
+    ends it). Stored per companion (`Companion.order: Order`, serde default `Attack`), saved.
+  - *Giving them*: a small command wheel / menu on a key (e.g. `G`, pad `RB`; `Act::Command`),
+    with the companion to address when there are several (or *All*); talking to a companion can
+    offer the same choices in its dialog via script: `order("guard", "stay")`,
+    `order_of("guard")`, and `Action::CompanionOrder { target, order }` (appended).
+  - *Behaviour*: `companion_fight` filters targets by the order (Defend: hostiles hunting the
+    player or this companion, `ai.aggro` and its target; Passive: none, and `step_towards_dir`
+    away from the nearest hostile within 3 tiles), *Stay* skips following and keeps a `post`
+    position (not carried to other maps: leaving the map with a staying companion asks like a
+    downed one, or it follows automatically: a project setting). HUD portraits show the order
+    as an icon (ASCII letter in game UI: A / D / P / S).
+  - *Verify*: autoplay `press g` + choices → `status` `companions=["guard:8/8:stay@…"]`; with
+    *Passive* the guard doesn't attack a slime next to him; *Defend* ignores a slime that hasn't
+    noticed the player; *Stay* keeps him put while the player walks off; save / load keeps the
+    orders.
 - **The player uses furniture** (builds on the `UseSpot` of the idea above; either can come
   first): sit on chairs and benches, sleep in beds.
   - *Using*: interacting with a prop that has a use spot (E / right-click, nothing else on the

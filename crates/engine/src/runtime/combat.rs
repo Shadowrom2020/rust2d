@@ -167,6 +167,7 @@ impl Game {
             self.attack_at(None);
         }
         self.enemy_shooting(dt);
+        self.companion_contact_damage();
         // Contact damage from hostile characters.
         if self.combat.invuln <= 0.0 {
             let me = inflate(self.player.rect(), 1.0);
@@ -239,7 +240,8 @@ impl Game {
         let targets: Vec<usize> = (0..self.loaded.entities.len())
             .filter(|&i| {
                 let e = &self.loaded.entities[i];
-                if !(e.active && e.max_hp > 0 && e.invuln <= 0.0) {
+                // Only hostile characters (never companions or other friendly characters).
+                if !(e.active && e.hostile && e.max_hp > 0 && e.invuln <= 0.0) {
                     return false;
                 }
                 let to = (e.body.pos - vec2(0.0, e.body.hitbox.y / 2.0)) - center;
@@ -286,7 +288,10 @@ impl Game {
     /// Hostile characters with a ranged weapon shoot when the player is in range and in sight.
     fn enemy_shooting(&mut self, dt: f32) {
         let ts = self.ts();
-        let target = self.player.pos - vec2(0.0, self.player.hitbox.y / 2.0);
+        let player = self.player.pos - vec2(0.0, self.player.hitbox.y / 2.0);
+        // The player and companions that can be hurt: each shooter aims at the nearest in sight.
+        let mut aims = vec![player];
+        aims.extend(self.companion_targets().into_iter().map(|(_, p)| p));
         let mut shots = Vec::new();
         for i in 0..self.loaded.entities.len() {
             let e = &mut self.loaded.entities[i];
@@ -300,13 +305,11 @@ impl Game {
                 continue;
             }
             let origin = e.body.pos - vec2(0.0, e.body.hitbox.y / 2.0 + 2.0);
-            if origin.distance(target) > r.range * ts {
-                continue;
-            }
+            let range = r.range * ts;
             let (r, dmg, uid, cd, fx) = (r.clone(), crate::effects::scale_damage(&e.effects, w.damage), e.uid, w.cooldown, w.effect);
-            if !self.line_clear(origin, target) {
-                continue;
-            }
+            let mut near: Vec<Vec2> = aims.iter().copied().filter(|a| origin.distance(*a) <= range).collect();
+            near.sort_by(|a, b| origin.distance(*a).total_cmp(&origin.distance(*b)));
+            let Some(target) = near.into_iter().find(|a| self.line_clear(origin, *a)) else { continue };
             let e = &mut self.loaded.entities[i];
             e.attack_cd = cd.max(0.3) + rand::gen_range(0.0, 0.6);
             let dir = (target - origin).normalize_or_zero();
@@ -343,7 +346,7 @@ impl Game {
                 let p = &self.projectiles[i];
                 if p.from_player {
                     let target = self.loaded.entities.iter().position(|e| {
-                        e.active && e.max_hp > 0 && e.invuln <= 0.0 && Some(e.uid) != p.shooter && {
+                        e.active && e.hostile && e.max_hp > 0 && e.invuln <= 0.0 && Some(e.uid) != p.shooter && {
                             // Characters are hit anywhere on their body, not just the feet.
                             let r = e.body.rect();
                             Rect::new(r.x, r.y - ts * 0.6, r.w, r.h + ts * 0.6).overlaps(&hit_box)
@@ -359,6 +362,20 @@ impl Game {
                         break;
                     }
                 } else {
+                    // Companions are hit like the player.
+                    let companion = self.companion_targets().into_iter().map(|(c, _)| c).find(|&c| {
+                        let r = self.loaded.entities[c].body.rect();
+                        self.loaded.entities[c].invuln <= 0.0 && Rect::new(r.x, r.y - ts * 0.8, r.w, r.h + ts * 0.8).overlaps(&hit_box)
+                    });
+                    if let Some(c) = companion {
+                        let (dmg, from, fx) = (p.damage, pos - p.vel.normalize_or_zero() * 8.0, p.effect);
+                        if let Some(fx) = fx {
+                            crate::effects::apply(&mut self.loaded.entities[c].effects, &fx);
+                        }
+                        self.damage_entity(c, dmg, from, 1.0);
+                        alive = false;
+                        break;
+                    }
                     let r = self.player.rect();
                     let body = Rect::new(r.x, r.y - ts * 0.8, r.w, r.h + ts * 0.8);
                     if body.overlaps(&hit_box) {
@@ -439,6 +456,11 @@ impl Game {
 
     /// Defeats character `i`; `xp`: the player gains its experience.
     fn defeat_with(&mut self, i: usize, xp: bool) {
+        if self.loaded.entities[i].companion.is_some() {
+            // Companions aren't defeated: knocked out, they go home.
+            self.dismiss(i, true);
+            return;
+        }
         if xp {
             let n = self.xp_of(&self.loaded.entities[i].def);
             self.give_xp(n as i64);

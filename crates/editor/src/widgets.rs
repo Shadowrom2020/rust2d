@@ -1353,6 +1353,18 @@ fn action_fields(ui: &mut Ui, id: &str, a: &mut Action, refs: &Refs) {
             });
             ui.weak("Kept in the save game: the map keeps this weather until it is set again.");
         }
+        Action::Companion { target, join } => {
+            target_field(ui, id, target, refs);
+            ui.horizontal(|ui| {
+                ui.radio_value(join, true, "joins");
+                ui.radio_value(join, false, "leaves");
+            });
+            ui.weak(if *join {
+                "a placed, friendly character follows the player from map to map and fights hostile characters near them (saved)"
+            } else {
+                "the companion stays where it is on its own map, or goes back to where it is placed"
+            });
+        }
         Action::Schedule { target, active } => {
             target_field(ui, id, target, refs);
             ui.horizontal(|ui| {
