@@ -202,6 +202,7 @@ impl Game {
     /// regrowing props catch up at once.
     pub fn advance_time(&mut self, hours: f32) {
         self.world.advance_hours(hours);
+        self.water_crops(hours);
         self.update_regrow();
     }
 }

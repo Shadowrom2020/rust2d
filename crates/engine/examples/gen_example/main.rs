@@ -207,6 +207,14 @@ fn light(mut d: ItemDef, l: LightSpec) -> ItemDef {
     d
 }
 
+/// A seed item: its crop grows through three stages (frames `stage0`, +1, +2 of the props
+/// sheet; `hours` for the first two) and is harvested for `harvest`.
+fn seed(d: ItemDef, stage0: u32, hours: [f32; 2], harvest: Vec<LootEntry>) -> ItemDef {
+    use rustpg2d_engine::defs::{Crop, CropStage};
+    let st = |k: u32, h: f32| CropStage { sprite: SpriteRef::new("props", stage0 + k), hours: h };
+    ItemDef { max_stack: 20, crop: Some(Crop { stages: vec![st(0, hours[0]), st(1, hours[1]), st(2, 0.0)], harvest }), ..d }
+}
+
 /// A healing item the player can also use on a companion (they choose whom to heal).
 fn for_allies(d: ItemDef) -> ItemDef {
     ItemDef { use_on: rustpg2d_engine::defs::UseTarget::Choose, ..d }
@@ -682,6 +690,9 @@ fn shop() -> Map {
             ShopEntry::new("mortar", 2, 0),
             ShopEntry::new("tongs", 1, 0),
             ShopEntry::new("hammer", 1, 0),
+            ShopEntry { unlimited: true, ..ShopEntry::new("wheat_seeds", 0, 3) },
+            ShopEntry { unlimited: true, ..ShopEntry::new("carrot_seeds", 0, 4) },
+            ShopEntry { unlimited: true, ..ShopEntry::new("pumpkin_seeds", 0, 6) },
             ShopEntry::new("pickaxe", 1, 30),
             ShopEntry::new("antidote", 5, 0),
             ShopEntry::new("elixir_strength", 2, 0),
@@ -1088,6 +1099,13 @@ fn workshop() -> Map {
     b.entity(EntityKind::Prop, "smelter", 23, 10);
     sign(&mut b, 31, 15, "FORGE. Forge ingots at the anvil with a smith's hammer and tongs: swords, helmets, chainmail, arrows, pickaxes. Smithing unlocks more, and from Smithing 2 swords come out fine.");
     b.entity(EntityKind::Prop, "anvil", 26, 10);
+    // The field (south-west): six soil plots and seeds in a sack beside them.
+    sign(&mut b, 3, 15, "FIELD. Plant seeds on the soil plots (E plants the first seed you carry). Wheat is ripe after a day, carrots after a day and a half, pumpkins after two; rain makes them grow faster. E on a ripe crop harvests it.");
+    for (x, y) in [(5, 16), (7, 16), (9, 16), (5, 18), (7, 18), (9, 18)] {
+        b.entity(EntityKind::Prop, "soil_plot", x, y);
+    }
+    let sack = b.entity(EntityKind::Prop, "chest", 11, 17);
+    sack.container = Some(ContainerSpec { size: 4, items: vec![ItemStack::new("wheat_seeds", 4), ItemStack::new("carrot_seeds", 4), ItemStack::new("pumpkin_seeds", 2)], open_state: "open".into(), ..Default::default() });
     // A bed in the open to let a night pass (regrowing needs in-game time).
     b.entity(EntityKind::Prop, "bed", 20, 17);
     b.m.background = [20, 40, 20];
@@ -1262,6 +1280,7 @@ fn database() -> Database {
         use_spot: None,
         gather: None,
         regrow: None,
+        plot: false,
     };
     let state = |name: &str, sprite: SpriteRef, solid: bool| PropState { name: name.into(), sprite, solid, light: None };
     let vein = |id: &str, name: &str, frame: u32, loot: Vec<LootEntry>| PropDef {
@@ -1313,6 +1332,7 @@ fn database() -> Database {
         held: String::new(),
         tool: String::new(),
         use_on: Default::default(),
+        crop: None,
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -1499,6 +1519,14 @@ fn database() -> Database {
             stack(ItemDef { tool: "mortar".into(), ..item("mortar", "Mortar and Pestle", "An alchemist's tool: needed to brew at an alchemy table.", it::MORTAR, false, vec![]) }, 1),
             stack(ItemDef { tool: "tongs".into(), ..item("tongs", "Smith's Tongs", "Needed to work a smelter (and, one day, an anvil).", it::TONGS, false, vec![]) }, 1),
             stack(ItemDef { tool: "hammer".into(), ..item("hammer", "Smith's Hammer", "Needed (with the tongs) to forge at an anvil.", it::HAMMER, false, vec![]) }, 1),
+            // Farming: seeds grow on a soil plot (E plants the first seed you carry), crops over
+            // in-game hours (faster in rain); E on a ripe crop harvests it.
+            seed(item("wheat_seeds", "Wheat Seeds", "Plant them on a soil plot: wheat is ripe after a day.", it::WHEAT_SEEDS, false, vec![]), p::WHEAT, [8.0, 16.0], vec![LootEntry::new("wheat", 100.0, 2, 3), LootEntry::new("wheat_seeds", 50.0, 1, 1)]),
+            seed(item("carrot_seeds", "Carrot Seeds", "Plant them on a soil plot: carrots are ripe after a day and a half.", it::CARROT_SEEDS, false, vec![]), p::CARROT, [12.0, 24.0], vec![LootEntry::new("carrot", 100.0, 2, 4), LootEntry::new("carrot_seeds", 40.0, 1, 1)]),
+            seed(item("pumpkin_seeds", "Pumpkin Seeds", "Plant them on a soil plot: a pumpkin takes two days.", it::PUMPKIN_SEEDS, false, vec![]), p::PUMPKIN, [18.0, 30.0], vec![LootEntry::new("pumpkin", 100.0, 1, 1), LootEntry::new("pumpkin_seeds", 60.0, 1, 2)]),
+            stack(item("wheat", "Wheat", "Golden wheat. Millers and bakers buy it.", it::WHEAT, false, vec![]), 30),
+            stack(item("carrot", "Carrot", "Fresh and crunchy. Restores 1 heart.", it::CARROT, true, use_trig(vec![Action::Heal { amount: 2 }])), 20),
+            stack(item("pumpkin", "Pumpkin", "A big orange pumpkin. Tilda pays well for it.", it::PUMPKIN, false, vec![]), 5),
             stack(item("coal", "Coal", "Fuel for the smelter. Mined from coal veins.", it::COAL, false, vec![]), 30),
             stack(item("copper_ingot", "Copper Ingot", "Smelted copper.", it::COPPER_INGOT, false, vec![]), 20),
             stack(item("iron_ingot", "Iron Ingot", "Smelted iron, the smith's daily bread.", it::IRON_INGOT, false, vec![]), 20),
@@ -1602,6 +1630,8 @@ fn database() -> Database {
                 regrow: Some(rustpg2d_engine::defs::Regrow { from: "picked".into(), to: "default".into(), hours: 12.0 }),
                 ..prop("mushroom_patch", "Mushroom Patch", p::MUSHROOMS, false, [20.0, 8.0])
             },
+            // A farm plot: seeds are planted on it.
+            PropDef { plot: true, ..prop("soil_plot", "Soil Plot", p::SOIL, false, [26.0, 12.0]) },
             // The anvil: ingots into weapons, armor and tools (with the hammer and the tongs).
             PropDef {
                 triggers: vec![trig(TriggerOn::Interact, vec![], vec![Action::OpenCrafting { station: "anvil".into(), title: "Anvil".into() }])],
@@ -1700,6 +1730,12 @@ fn database() -> Database {
         ("mortar", 15),
         ("tongs", 20),
         ("hammer", 20),
+        ("wheat_seeds", 1),
+        ("carrot_seeds", 2),
+        ("pumpkin_seeds", 3),
+        ("wheat", 3),
+        ("carrot", 4),
+        ("pumpkin", 12),
         ("iron_sword", 45),
         ("fine_iron_sword", 80),
         ("coal", 2),

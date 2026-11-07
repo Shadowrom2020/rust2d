@@ -854,6 +854,226 @@
         tool: "hammer",
     ),
     (
+        id: "wheat_seeds",
+        name: "Wheat Seeds",
+        description: "Plant them on a soil plot: wheat is ripe after a day.",
+        icon: (
+            sheet: "items",
+            frame: 55,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 20,
+        value: 1,
+        crop: Some((
+            stages: [
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 101,
+                    ),
+                    hours: 8.0,
+                ),
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 102,
+                    ),
+                    hours: 16.0,
+                ),
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 103,
+                    ),
+                    hours: 0.0,
+                ),
+            ],
+            harvest: [
+                (
+                    item: "wheat",
+                    chance: 100.0,
+                    min: 2,
+                    max: 3,
+                ),
+                (
+                    item: "wheat_seeds",
+                    chance: 50.0,
+                    min: 1,
+                    max: 1,
+                ),
+            ],
+        )),
+    ),
+    (
+        id: "carrot_seeds",
+        name: "Carrot Seeds",
+        description: "Plant them on a soil plot: carrots are ripe after a day and a half.",
+        icon: (
+            sheet: "items",
+            frame: 56,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 20,
+        value: 2,
+        crop: Some((
+            stages: [
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 112,
+                    ),
+                    hours: 12.0,
+                ),
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 113,
+                    ),
+                    hours: 24.0,
+                ),
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 114,
+                    ),
+                    hours: 0.0,
+                ),
+            ],
+            harvest: [
+                (
+                    item: "carrot",
+                    chance: 100.0,
+                    min: 2,
+                    max: 4,
+                ),
+                (
+                    item: "carrot_seeds",
+                    chance: 40.0,
+                    min: 1,
+                    max: 1,
+                ),
+            ],
+        )),
+    ),
+    (
+        id: "pumpkin_seeds",
+        name: "Pumpkin Seeds",
+        description: "Plant them on a soil plot: a pumpkin takes two days.",
+        icon: (
+            sheet: "items",
+            frame: 57,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 20,
+        value: 3,
+        crop: Some((
+            stages: [
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 115,
+                    ),
+                    hours: 18.0,
+                ),
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 116,
+                    ),
+                    hours: 30.0,
+                ),
+                (
+                    sprite: (
+                        sheet: "props",
+                        frame: 117,
+                    ),
+                    hours: 0.0,
+                ),
+            ],
+            harvest: [
+                (
+                    item: "pumpkin",
+                    chance: 100.0,
+                    min: 1,
+                    max: 1,
+                ),
+                (
+                    item: "pumpkin_seeds",
+                    chance: 60.0,
+                    min: 1,
+                    max: 2,
+                ),
+            ],
+        )),
+    ),
+    (
+        id: "wheat",
+        name: "Wheat",
+        description: "Golden wheat. Millers and bakers buy it.",
+        icon: (
+            sheet: "items",
+            frame: 58,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 30,
+        value: 3,
+    ),
+    (
+        id: "carrot",
+        name: "Carrot",
+        description: "Fresh and crunchy. Restores 1 heart.",
+        icon: (
+            sheet: "items",
+            frame: 59,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 2,
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 20,
+        value: 4,
+    ),
+    (
+        id: "pumpkin",
+        name: "Pumpkin",
+        description: "A big orange pumpkin. Tilda pays well for it.",
+        icon: (
+            sheet: "items",
+            frame: 60,
+        ),
+        consumable: false,
+        on_use: [],
+        weapon: None,
+        armor: None,
+        max_stack: 5,
+        value: 12,
+    ),
+    (
         id: "coal",
         name: "Coal",
         description: "Fuel for the smelter. Mined from coal veins.",

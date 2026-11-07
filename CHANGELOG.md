@@ -21,6 +21,10 @@ All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and edi
   ingredients (upgrades). Example: an **anvil** in the Workshop with a Smith's Hammer and the
   tongs: Iron Sword (a Fine Iron Sword from Smithing 2), Iron Helmet, Chainmail, arrows,
   pickaxe and a Short Sword upgrade; the **Smithing** skill; Tilda sells the hammer.
+- **Farming**: props can be **farm plots** and items **seeds** (a crop with growth stages and a
+  harvest). E plants, tells the time left or harvests; crops grow over in-game hours, also
+  while the player is away, half again as fast in rain (`EntityState.planted`). Example: wheat,
+  carrot and pumpkin seeds at Tilda's and a field with a sack of seeds in the Workshop.
 - Example: **the Workshop**, a new map north of the village (a road through the tree line): a
   crafting testing ground with a supply chest of tools, a herb garden with an alchemy table, a
   quarry with every vein and a smelter, a bed to pass the night, and signs.

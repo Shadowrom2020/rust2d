@@ -316,6 +316,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         held: String::new(),
         tool: String::new(),
         use_on: Default::default(),
+        crop: None,
                     },
                     |d| &mut d.id,
                 ),
@@ -339,6 +340,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
                         use_spot: None,
                         gather: None,
                         regrow: None,
+                        plot: false,
                     },
                     |d| &mut d.id,
                 ),
@@ -758,6 +760,8 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
         ui.weak("(healing items, whose 'On use' heals: with companions around the player chooses whom to heal)");
     });
     ui.separator();
+    crop_ui(ui, d, cx);
+    ui.separator();
     ui.heading("Equipment");
     ui.weak("Equipment goes into a character-sheet slot when used from the inventory (weapons also with Q) instead of running 'On use' triggers.");
     let mut kind = match (&d.weapon, &d.armor) {
@@ -936,6 +940,42 @@ fn portrait_ui(ui: &mut egui::Ui, d: &mut CharacterDef, cx: &mut Cx) {
     });
 }
 
+/// A seed's crop: its growth stages and the harvest.
+fn crop_ui(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
+    use rustpg2d_engine::defs::{Crop, CropStage};
+    ui.heading("Seed");
+    let mut on = d.crop.is_some();
+    if ui.checkbox(&mut on, "A seed: grows a crop on a farm plot").changed() {
+        d.crop = on.then(|| Crop { stages: vec![CropStage { sprite: SpriteRef::default(), hours: 12.0 }, CropStage { sprite: SpriteRef::default(), hours: 0.0 }], harvest: Vec::new() });
+    }
+    let Some(c) = &mut d.crop else { return };
+    ui.weak(format!("Stages one after another (in-game hours each); the last one is the ripe crop. Ripe after {:.0} hours ({:.1} days), faster in rain.", c.grow_hours(), c.grow_hours() / 24.0));
+    let n = c.stages.len();
+    let mut remove = None;
+    for (k, s) in c.stages.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(if k + 1 == n { "Ripe".to_string() } else { format!("Stage {}", k + 1) });
+            if k + 1 < n {
+                ui.add(egui::DragValue::new(&mut s.hours).range(0.1..=10_000.0).speed(0.5).suffix(" h"));
+            }
+            if n > 1 && ui.small_button("x").clicked() {
+                remove = Some(k);
+            }
+        });
+        widgets::sprite_field(ui, &format!("crop_stage{k}"), &mut s.sprite, cx.tex, cx.assets, cx.db, true);
+    }
+    if let Some(k) = remove {
+        c.stages.remove(k);
+    }
+    if ui.small_button("+ Stage").on_hover_text("Adds a growing stage before the ripe one").clicked() {
+        let at = c.stages.len().saturating_sub(1);
+        let sprite = c.stages.get(at.saturating_sub(1)).map(|s| s.sprite.clone()).unwrap_or_default();
+        c.stages.insert(at, CropStage { sprite, hours: 12.0 });
+    }
+    ui.label("Harvest");
+    widgets::loot_ui(ui, "crop_harvest", &mut c.harvest, cx.refs, cx.tex, cx.assets, cx.db);
+}
+
 /// Gathering (hits with a tool give items) and regrowing (a state changes back after a while).
 fn gather_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
     use rustpg2d_engine::defs::{Gather, Regrow};
@@ -970,6 +1010,8 @@ fn gather_ui(ui: &mut egui::Ui, d: &mut PropDef, cx: &mut Cx) {
         ui.label("Gives");
         widgets::loot_ui(ui, "gather_loot", &mut g.loot, cx.refs, cx.tex, cx.assets, cx.db);
     }
+    ui.heading("Farm plot");
+    ui.checkbox(&mut d.plot, "Seeds are planted here (soil, a planter)").on_hover_text("E on it plants the first seed the player carries (an item with a Crop), shows how long the crop still needs, or harvests it when ripe. Crops grow over in-game hours, faster in rain.");
     ui.heading("Regrows");
     let mut on = d.regrow.is_some();
     if ui.checkbox(&mut on, "A state changes back after some in-game time").changed() {

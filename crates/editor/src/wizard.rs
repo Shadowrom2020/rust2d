@@ -198,6 +198,7 @@ impl Editor {
                 use_spot: None,
                 gather: None,
                 regrow: None,
+                plot: false,
             }),
             WKind::Item => db.items.push(ItemDef {
                 id: id.clone(),
@@ -215,6 +216,7 @@ impl Editor {
         held: String::new(),
         tool: String::new(),
         use_on: Default::default(),
+        crop: None,
             }),
             WKind::Tileset | WKind::Sheet | WKind::Structure => {}
         }

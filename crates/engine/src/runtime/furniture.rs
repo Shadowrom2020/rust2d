@@ -220,6 +220,7 @@ impl Game {
     /// run out, enemies due to respawn are back, scheduled characters are where the hour wants.
     fn pass_time(&mut self, hours: f32) {
         self.world.advance_hours(hours);
+        self.water_crops(hours);
         if self.combat.enabled() {
             self.world.player_hp = Some(self.player_max_hp());
         }

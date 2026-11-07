@@ -646,6 +646,22 @@
         )),
     ),
     (
+        id: "soil_plot",
+        name: "Soil Plot",
+        sprite: (
+            sheet: "props",
+            frame: 100,
+        ),
+        solid: false,
+        default_state: "default",
+        states: [],
+        hitbox: (52.0, 24.0),
+        triggers: [],
+        container: None,
+        lock: None,
+        plot: true,
+    ),
+    (
         id: "anvil",
         name: "Anvil",
         sprite: (

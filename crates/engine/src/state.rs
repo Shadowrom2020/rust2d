@@ -89,6 +89,21 @@ pub struct EntityState {
     /// When its prop state last changed (`WorldState::total_hours`; regrowing states).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changed_at: Option<f64>,
+    /// What grows on a farm plot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planted: Option<Planted>,
+}
+
+/// A seed planted on a farm plot (`EntityState::planted`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Planted {
+    /// The seed item (its `crop`).
+    pub seed: String,
+    /// When it was planted (`WorldState::total_hours`).
+    pub at: f64,
+    /// Extra growing hours from rain.
+    #[serde(default)]
+    pub bonus: f64,
 }
 
 /// Progress of a patrolling character (saved, so a loaded game continues the route).
@@ -625,7 +640,7 @@ mod tests {
         w.set_entity_state(
             "village",
             7,
-            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None, schedule_off: false, changed_at: Some(30.0) },
+            EntityState { active: false, frame: 1, x: 1.0, y: 2.0, facing: Facing::Up, count: None, unlocked: true, state: Some("open".into()), patrol: None, schedule_off: false, changed_at: Some(30.0), planted: None },
         );
         let back = WorldState::from_ron(&w.to_ron().unwrap()).unwrap();
         assert!(back.flag("a"));
