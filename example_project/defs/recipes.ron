@@ -243,6 +243,97 @@
         ],
     ),
     (
+        id: "grill_trout",
+        result: "grilled_trout",
+        count: 1,
+        ingredients: [
+            (
+                item: "trout",
+                count: 1,
+            ),
+        ],
+        station: "cooking",
+        skill: "",
+        level: 0,
+        station_state: "lit",
+    ),
+    (
+        id: "bake_bread",
+        result: "bread",
+        count: 1,
+        ingredients: [
+            (
+                item: "wheat",
+                count: 2,
+            ),
+        ],
+        station: "cooking",
+        skill: "",
+        level: 0,
+        station_state: "lit",
+    ),
+    (
+        id: "carrot_soup",
+        result: "carrot_soup",
+        count: 1,
+        ingredients: [
+            (
+                item: "carrot",
+                count: 2,
+            ),
+            (
+                item: "mushroom",
+                count: 1,
+            ),
+        ],
+        station: "cooking",
+        skill: "cooking",
+        level: 1,
+        station_state: "lit",
+    ),
+    (
+        id: "pumpkin_stew",
+        result: "pumpkin_stew",
+        count: 1,
+        ingredients: [
+            (
+                item: "pumpkin",
+                count: 1,
+            ),
+            (
+                item: "carrot",
+                count: 1,
+            ),
+            (
+                item: "wheat",
+                count: 1,
+            ),
+        ],
+        station: "cooking",
+        skill: "cooking",
+        level: 1,
+        station_state: "lit",
+    ),
+    (
+        id: "apple_pie",
+        result: "apple_pie",
+        count: 1,
+        ingredients: [
+            (
+                item: "apple",
+                count: 2,
+            ),
+            (
+                item: "wheat",
+                count: 2,
+            ),
+        ],
+        station: "cooking",
+        skill: "cooking",
+        level: 2,
+        station_state: "lit",
+    ),
+    (
         id: "upgrade_sword",
         result: "iron_sword",
         count: 1,

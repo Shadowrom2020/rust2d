@@ -878,6 +878,7 @@ mod tests {
         tool: String::new(),
         use_on: Default::default(),
         crop: None,
+        food: false,
         };
         let mut bow = item("bow");
         bow.weapon = Some(Weapon::ranged(1, 0.5, Ranged { projectile: SpriteRef::new("items", 1), speed: 100.0, range: 6.0, ammo: "arrows".into() }));

@@ -76,7 +76,7 @@ crates/engine/src/      library: everything shared by game and editor
   runtime/              Game: mod.rs (loop, actions, drawing), charwin (the tabbed character window:
                         Character = inventory_ui, Skills / Spells = skills; C/I, K, L, Tab), cutscene (Play
                         cutscene: HUD off, bars, walk_to / approach / place), combat, equipment, locks,
-                        inventory_ui, shop_ui, crafting_ui (Open crafting window), achievements (checks, toasts), minigame (lockpicking, fishing), furniture (sitting, sleeping: PropDef.use_spot), gather (gathering props with a tool, regrowing prop states), farm (farm plots: planting seeds, crops growing, harvest), orders (companion orders menu, G / pad LB), companion_ui (a companion's window: gear, bag, the player's inventory), npc_use (characters use the items they carry: potions when critical, cures, buffs; companion ammo), healing ("heal whom?" choice for heal spells / items with ItemDef.use_on, companions' HUD rows, Action::HealCharacter), journal, creator, patrol (routes; walk_to_tile = A* walking shared with schedule = daily routines), companions (follow, fight, carried across maps via WorldState.companions), lights (light sources,
+                        inventory_ui, shop_ui, crafting_ui (Open crafting window), achievements (checks, toasts), minigame (lockpicking, fishing), furniture (sitting, sleeping: PropDef.use_spot), gather (gathering props with a tool, regrowing prop states), farm (farm plots: planting seeds, crops growing, harvest), crafting_ui also checks RecipeDef.station_state against the station prop (cooking fires), orders (companion orders menu, G / pad LB), companion_ui (a companion's window: gear, bag, the player's inventory), npc_use (characters use the items they carry: potions when critical, cures, buffs; companion ammo), healing ("heal whom?" choice for heal spells / items with ItemDef.use_on, companions' HUD rows, Action::HealCharacter), journal, creator, patrol (routes; walk_to_tile = A* walking shared with schedule = daily routines), companions (follow, fight, carried across maps via WorldState.companions), lights (light sources,
                         clock), skills (skill bonuses, mana, spells, aiming, K screen), fx (Fly /
                         Effect actions: scripted flying sprites and one-shot animations), menu (title/pause/options),
                         worldmap (M map screen), paperdoll (drawing layered characters, player model),
@@ -231,6 +231,9 @@ there and test on the copy. Set `RUSTPG2D_MUTE=1` and `RUSTPG2D_SETTINGS_DIR=<sc
 
 ## Pitfalls seen before
 
+- egui refuses textures wider or taller than 2048 px (the editor shrinks them with
+  `widgets::color_image`): keep generated sheets under that, e.g. `items.png` is full at 61
+  icons; new icons go on their own sheet (`food.png`).
 - The project was called **rust2d** until 0.5.0 (technical name now `rustpg2d`; the local checkout
   may still be `~/Projects/rust2d`). The user's old folders under that name
   (`~/.config/rust2d`, `~/.local/share/rust2d`, `~/rust2d/releases`) are their data: never

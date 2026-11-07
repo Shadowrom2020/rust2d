@@ -21,10 +21,32 @@ pub struct Textures {
     colored: std::cell::RefCell<HashMap<rustpg2d_engine::render::ColorKey, TextureHandle>>,
 }
 
+/// An egui image of RGBA pixels, shrunk by a whole factor (nearest neighbour) when a side is
+/// larger than the GPU allows (egui panics on such textures). Callers compute UVs from the
+/// original image size, so a shrunk texture still maps right, just less sharp.
+pub fn color_image(ctx: &egui::Context, w: usize, h: usize, px: &[u8]) -> egui::ColorImage {
+    let max = ctx.input(|i| i.max_texture_side).max(256);
+    let k = w.max(h).div_ceil(max).max(1);
+    if k == 1 {
+        return egui::ColorImage::from_rgba_unmultiplied([w, h], px);
+    }
+    let (nw, nh) = (w.div_ceil(k), h.div_ceil(k));
+    let mut out = vec![0u8; nw * nh * 4];
+    for y in 0..nh {
+        for x in 0..nw {
+            let (sx, sy) = ((x * k).min(w - 1), (y * k).min(h - 1));
+            let (s, d) = ((sy * w + sx) * 4, (y * nw + x) * 4);
+            out[d..d + 4].copy_from_slice(&px[s..s + 4]);
+        }
+    }
+    eprintln!("[editor] an image of {w}x{h} pixels is larger than the graphics card allows; shown at 1/{k} size");
+    egui::ColorImage::from_rgba_unmultiplied([nw, nh], &out)
+}
+
 impl Textures {
     pub fn build(ctx: &egui::Context, assets: &Assets) -> Self {
         let load = |name: &str, img: &macroquad::texture::Image| {
-            let ci = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.bytes);
+            let ci = color_image(ctx, img.width as usize, img.height as usize, &img.bytes);
             ctx.load_texture(name, ci, egui::TextureOptions::NEAREST)
         };
         Textures {
@@ -55,7 +77,7 @@ impl Textures {
         let t = cache.entry((sheet.to_string(), skin, hair)).or_insert_with(|| {
             let mut px = img.bytes.clone();
             rustpg2d_engine::render::recolor::recolor(&mut px, skin, hair);
-            let ci = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &px);
+            let ci = color_image(ctx, img.width as usize, img.height as usize, &px);
             ctx.load_texture(format!("shc:{sheet}:{skin:?}:{hair:?}"), ci, egui::TextureOptions::NEAREST)
         });
         Some(t.id())

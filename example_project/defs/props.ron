@@ -646,6 +646,74 @@
         )),
     ),
     (
+        id: "campfire",
+        name: "Campfire",
+        sprite: (
+            sheet: "props",
+            frame: 118,
+        ),
+        solid: true,
+        default_state: "out",
+        states: [
+            (
+                name: "lit",
+                sprite: (
+                    sheet: "props",
+                    frame: 119,
+                ),
+                solid: true,
+                light: Some((
+                    radius: 3.0,
+                    color: (255, 160, 80),
+                    intensity: 0.9,
+                    flicker: true,
+                )),
+            ),
+        ],
+        hitbox: (48.0, 20.0),
+        triggers: [
+            (
+                on: Interact,
+                conditions: [],
+                actions: [
+                    OpenCrafting(
+                        station: "cooking",
+                        title: "Campfire",
+                    ),
+                ],
+                once: false,
+            ),
+            (
+                on: UseItem(
+                    item: "coal",
+                ),
+                conditions: [],
+                actions: [
+                    TakeItem(
+                        item: "coal",
+                        count: 1,
+                    ),
+                    SetState(
+                        target: "self",
+                        state: "lit",
+                    ),
+                    Dialog(
+                        speaker: "",
+                        text: "The coal catches and the fire crackles to life.",
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        container: None,
+        lock: None,
+        regrow: Some((
+            from: "lit",
+            to: "out",
+            hours: 8.0,
+        )),
+    ),
+    (
         id: "soil_plot",
         name: "Soil Plot",
         sprite: (

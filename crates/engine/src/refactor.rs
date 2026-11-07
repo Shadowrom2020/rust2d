@@ -519,6 +519,7 @@ mod tests {
         tool: String::new(),
         use_on: Default::default(),
         crop: None,
+        food: false,
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),

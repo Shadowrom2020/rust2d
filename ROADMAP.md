@@ -238,7 +238,7 @@ dry → 2/3, 18 h in rain → ripe; all three crops planted and grown (screensho
 growing and ripe). Editor: the item's Seed section (screenshot). Unit tests: stage timing,
 old items / props / plot states.
 
-### [ ] Cooking — `feature/cooking` (follows *Farming*)
+### [x] Cooking — `feature/cooking` (follows *Farming*)
 
 **Goal.** Raw food becomes cooked food that heals more and gives timed buffs.
 
@@ -251,14 +251,30 @@ old items / props / plot states.
   healing from items tagged `ItemDef.food: bool`.
 - No hunger system (left out on purpose; a game can script one).
 
+**Decided while building.** The station's prop is the *Open crafting* trigger's owner
+(`open_crafting(station, title, owner)`; `CraftingUi.prop`); `recipe_missing` checks
+`station_state` against that prop's state first (`Missing::StationState`, "Needs it lit"), so
+a crafting window opened by a script without an owner can't make such recipes. Food: the
+player's own *on use* triggers of a food item run through `fire_item_use`, which scales
+positive *Heal* actions by the *Food* skills (`food_bonus`); companions eating food get no
+bonus. The example's campfire starts "out", using coal on it (its UseItem trigger) lights it,
+and `regrow` puts it out after 8 hours; no stove in the elder's house and no meat (there are no
+animals yet). Dish icons live on a new `food.png` sheet: `items.png` reached 1952 px and egui
+refuses textures over 2048 px, which crashed the editor (now any oversized image is shown
+shrunk instead: `widgets::color_image`).
+
 **Touch points.** `crafting.rs`, `runtime/crafting_ui.rs`, `skills.rs`, `runtime/combat.rs`
 (heal bonus), `defs.rs` (`food`), gen_example, README.
 
 **Example.** A campfire in the Wilds and the elder's stove; four recipes (roast fish, stew,
 carrot soup, apple pie); raw meat from the Wilds' animals.
 
-**Verify.** Autoplay: cook a stew at the lit campfire, eat it → `effects=` shows Regen; an unlit
-fire refuses the recipe; the Cooking bonus raises the healed HP (two statuses).
+**Verify (done).** Autoplay in the Workshop kitchen: E on the cold campfire opens the window with
+every dish "Needs it lit"; coal used on it → `props=["campfire:lit@17,7"]`, a trout → Grilled
+Trout; +9 h → the fire is out again; Grilled Trout heals +4 at Cooking 0 and +6 at Cooking 2;
+Pumpkin Stew heals and starts Regen (`effects=["regen:1:14.5"]`); at Cooking 2 stew and pie are
+made (screenshots of both windows). Editor: the recipe's Station state field; the editor opens a
+project with a 4096 px image. Unit test: the food bonus, old recipes / items.
 
 ### [ ] Schedules across maps and with furniture — `feature/schedule-maps`
 

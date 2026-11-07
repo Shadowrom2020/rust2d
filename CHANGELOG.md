@@ -25,9 +25,17 @@ All notable changes to R(ust)PG2D (formerly rust2d) (engine, game runner and edi
   harvest). E plants, tells the time left or harvests; crops grow over in-game hours, also
   while the player is away, half again as fast in rain (`EntityState.planted`). Example: wheat,
   carrot and pumpkin seeds at Tilda's and a field with a sack of seeds in the Workshop.
+- **Cooking**: recipes can need their station prop in a state (`RecipeDef.station_state`, e.g. a
+  "lit" campfire), items can be **food**, and the new skill effect **Food** makes food heal more.
+  Example: a campfire in the Workshop (lit with coal, burns 8 hours), five dishes (Grilled
+  Trout, Bread, Carrot Soup, Pumpkin Stew, Apple Pie), a pantry chest and the Cooking skill.
 - Example: **the Workshop**, a new map north of the village (a road through the tree line): a
   crafting testing ground with a supply chest of tools, a herb garden with an alchemy table, a
   quarry with every vein and a smelter, a bed to pass the night, and signs.
+
+### Fixes
+- The editor no longer crashes on images wider or taller than the graphics card allows (2048 px
+  in egui): they are shown at a reduced size instead.
 
 ## 0.6.0 — 2026-11-06
 

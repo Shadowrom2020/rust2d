@@ -118,6 +118,7 @@
         armor: None,
         max_stack: 20,
         value: 3,
+        food: true,
     ),
     (
         id: "bow",
@@ -719,7 +720,7 @@
     (
         id: "trout",
         name: "Trout",
-        description: "A fresh trout. Eating it restores a heart.",
+        description: "A fresh trout. Eating it restores a heart (grilled: two).",
         icon: (
             sheet: "items",
             frame: 38,
@@ -743,6 +744,7 @@
         armor: None,
         max_stack: 10,
         value: 0,
+        food: true,
     ),
     (
         id: "pickaxe",
@@ -1057,6 +1059,7 @@
         armor: None,
         max_stack: 20,
         value: 4,
+        food: true,
     ),
     (
         id: "pumpkin",
@@ -1072,6 +1075,175 @@
         armor: None,
         max_stack: 5,
         value: 12,
+    ),
+    (
+        id: "grilled_trout",
+        name: "Grilled Trout",
+        description: "Crispy skin, tender inside. Restores 2 hearts.",
+        icon: (
+            sheet: "food",
+            frame: 0,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 4,
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 8,
+        food: true,
+    ),
+    (
+        id: "bread",
+        name: "Bread",
+        description: "A warm loaf. Restores 1.5 hearts.",
+        icon: (
+            sheet: "food",
+            frame: 1,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 3,
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 6,
+        food: true,
+    ),
+    (
+        id: "carrot_soup",
+        name: "Carrot Soup",
+        description: "Restores 2 hearts and keeps healing a little for a while.",
+        icon: (
+            sheet: "food",
+            frame: 2,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 4,
+                    ),
+                    ApplyEffect(
+                        target: "player",
+                        effect: (
+                            kind: Regen,
+                            strength: 1.0,
+                            seconds: 8.0,
+                        ),
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 10,
+        food: true,
+    ),
+    (
+        id: "pumpkin_stew",
+        name: "Pumpkin Stew",
+        description: "Hearty: restores 3 hearts, then heals on for a while.",
+        icon: (
+            sheet: "food",
+            frame: 3,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 6,
+                    ),
+                    ApplyEffect(
+                        target: "player",
+                        effect: (
+                            kind: Regen,
+                            strength: 1.0,
+                            seconds: 15.0,
+                        ),
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 18,
+        food: true,
+    ),
+    (
+        id: "apple_pie",
+        name: "Apple Pie",
+        description: "Restores 2 hearts, and you hit 25% harder for a minute.",
+        icon: (
+            sheet: "food",
+            frame: 4,
+        ),
+        consumable: true,
+        on_use: [
+            (
+                on: UseItem(
+                    item: "",
+                ),
+                conditions: [],
+                actions: [
+                    Heal(
+                        amount: 4,
+                    ),
+                    ApplyEffect(
+                        target: "player",
+                        effect: (
+                            kind: Strength,
+                            strength: 25.0,
+                            seconds: 60.0,
+                        ),
+                    ),
+                ],
+                once: false,
+            ),
+        ],
+        weapon: None,
+        armor: None,
+        max_stack: 10,
+        value: 16,
+        food: true,
     ),
     (
         id: "coal",
