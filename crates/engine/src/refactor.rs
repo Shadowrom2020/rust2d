@@ -36,6 +36,15 @@ struct Renamer<'a> {
 
 impl Renamer<'_> {
     /// A placed entity (on a map or inside a structure).
+    fn crop(&mut self, c: &mut Option<crate::defs::Crop>) {
+        if let Some(c) = c {
+            for s in &mut c.stages {
+                self.fix(RefKind::Sheet, &mut s.sprite.sheet);
+            }
+            self.loot(&mut c.harvest);
+        }
+    }
+
     fn portraits(&mut self, p: &mut SpriteRef, moods: &mut std::collections::BTreeMap<String, SpriteRef>) {
         self.fix(RefKind::Sheet, &mut p.sheet);
         for s in moods.values_mut() {
@@ -233,6 +242,7 @@ pub fn rename_in_db(db: &mut Database, config: &mut ProjectConfig, kind: RefKind
         }
         r.triggers(&mut d.on_use);
         r.weapon(&mut d.weapon);
+        r.crop(&mut d.crop);
     }
     for d in &mut db.props {
         r.fix(RefKind::Sheet, &mut d.sprite.sheet);
@@ -336,6 +346,7 @@ pub fn refs_of_item(d: &crate::defs::ItemDef) -> Vec<(RefKind, String)> {
     r.triggers(&mut d.on_use);
     r.weapon(&mut d.weapon);
     r.fix(RefKind::Spell, &mut d.teaches);
+    r.crop(&mut d.crop);
     r.found.unwrap_or_default()
 }
 
@@ -507,6 +518,7 @@ mod tests {
         held: String::new(),
         tool: String::new(),
         use_on: Default::default(),
+        crop: None,
         });
         let mut cfg = ProjectConfig {
             name: "p".into(),

@@ -1796,6 +1796,7 @@ pub fn clothing_item(id: &str, name: &str, description: &str, icon_sheet: &str, 
         held: String::new(),
         tool: String::new(),
         use_on: Default::default(),
+        crop: None,
     }
 }
 
@@ -2094,6 +2095,87 @@ pub mod p {
     pub const SMELTER: u32 = 98;
     /// An anvil on a tree-stump block (crafting station: ingots into weapons, armor, tools).
     pub const ANVIL: u32 = 99;
+    /// Farming: a tilled soil plot (row 12) and three crops in three stages each - a sprout,
+    /// growing, ripe (wheat on row 12, carrots and pumpkins on row 14).
+    pub const SOIL: u32 = 100;
+    pub const WHEAT: u32 = 101;
+    pub const CARROT: u32 = 112;
+    pub const PUMPKIN: u32 = 115;
+}
+
+/// The soil plot and the crop stages (drawn over the plot, standing in its furrows).
+fn farming(c: &mut Canvas) {
+    let n = TS as i32;
+    let soil = [0x3a2414, 0x553620, 0x6e4a2c, 0x8a6240];
+    let (x, y) = cell(p::SOIL);
+    c.at(x, y);
+    c.shade_box(2, 14, 28, 16, soil);
+    for fy in [17, 22, 27] {
+        c.hline(3, fy, 26, hex(soil[0]));
+        c.hline(3, fy - 1, 26, hex(soil[3]));
+    }
+    c.auto_outline(n, n, OUTLINE);
+    let green = LEAF;
+    for stage in 0..3u32 {
+        // Wheat: sprouts, green stalks, golden ears.
+        let (x, y) = cell(p::WHEAT + stage);
+        c.at(x, y);
+        for (k, sx) in [6, 11, 16, 21, 26].into_iter().enumerate() {
+            let h = [4, 11, 16][stage as usize] + (k % 2) as i32;
+            let col = if stage == 2 { hex(0xc8a040) } else { hex(green[2]) };
+            c.vline(sx, 27 - h, h, col);
+            if stage == 2 {
+                c.shade_box(sx - 1, 27 - h - 4, 3, 5, [0x8a6a20, 0xc8a040, 0xe8c860, 0xfff0a0]);
+            } else if stage == 1 {
+                c.line(sx, 27 - h / 2, sx + 2, 27 - h / 2 - 3, hex(green[1]));
+            }
+        }
+        // Carrots: leaf tufts that grow, orange shoulders when ripe.
+        let (x, y) = cell(p::CARROT + stage);
+        c.at(x, y);
+        for sx in [8, 16, 24] {
+            let r = [2.0, 3.5, 4.5][stage as usize];
+            c.shade_disc(sx as f32, 24.0 - r, r, green);
+            c.shade_disc(sx as f32 - r * 0.6, 25.0 - r * 0.5, r * 0.6, green);
+            if stage == 2 {
+                c.shade_box(sx - 2, 24, 5, 3, [0x8a3a0a, 0xd86a1a, 0xf08a30, 0xffb870]);
+            }
+        }
+        // Pumpkins: a sprout, a vine with a small green fruit, a big orange one.
+        let (x, y) = cell(p::PUMPKIN + stage);
+        c.at(x, y);
+        match stage {
+            0 => {
+                c.vline(16, 21, 6, hex(green[2]));
+                c.shade_disc(14.0, 21.0, 2.5, green);
+                c.shade_disc(18.5, 20.0, 2.5, green);
+            }
+            1 => {
+                c.stroke(4.0, 25.0, 28.0, 23.0, 1.0, hex(green[1]));
+                for lx in [7.0, 15.0, 24.0] {
+                    c.shade_disc(lx, 21.0, 3.5, green);
+                }
+                c.shade_ellipse(17.0, 25.0, 4.0, 3.0, [0x2e5a24, 0x4a8a34, 0x6aaa4a, 0x9ad070]);
+            }
+            _ => {
+                c.stroke(3.0, 26.0, 29.0, 24.0, 1.0, hex(green[1]));
+                c.shade_disc(6.0, 21.0, 3.5, green);
+                c.shade_disc(27.0, 20.0, 3.5, green);
+                c.shade_ellipse(16.0, 22.0, 9.0, 7.0, [0x8a3a06, 0xd8661a, 0xf08a2a, 0xffbc6a]);
+                for rx in [12, 16, 20] {
+                    c.vline(rx, 16, 12, hex(0xb85010));
+                }
+                c.shade_box(15, 13, 3, 3, WOOD);
+            }
+        }
+    }
+    for k in 0..3 {
+        for id in [p::WHEAT, p::CARROT, p::PUMPKIN] {
+            let (x, y) = cell(id + k);
+            c.at(x, y);
+            c.auto_outline(n, n, OUTLINE);
+        }
+    }
 }
 
 /// The coal vein, the herb bush and the mushroom patch (full and picked), the smelter.
@@ -2573,7 +2655,7 @@ fn big_props(c: &mut Canvas) {
 pub fn props(out: &Path) {
     // 11 rows: rows 7-8 (the grand shrine), 9 (the alchemy table, furniture) and 10 (the bed's
     // foot) were added later, below the older cells.
-    let mut c = Canvas::new(TS * 8, TS * 14);
+    let mut c = Canvas::new(TS * 8, TS * 15);
     let n = TS as i32;
     for i in 0..8u32 {
         let (x, y) = cell(i);
@@ -2738,6 +2820,7 @@ pub fn props(out: &Path) {
     furniture(&mut c);
     veins(&mut c);
     gathering_props(&mut c);
+    farming(&mut c);
     big_props(&mut c);
     c.save(&out.join("sprites/props.png"));
 }
@@ -2813,8 +2896,15 @@ pub mod it {
     pub const HAMMER: u32 = 52;
     pub const IRON_SWORD: u32 = 53;
     pub const FINE_SWORD: u32 = 54;
+    /// Farming: seed pouches and what they grow.
+    pub const WHEAT_SEEDS: u32 = 55;
+    pub const CARROT_SEEDS: u32 = 56;
+    pub const PUMPKIN_SEEDS: u32 = 57;
+    pub const WHEAT: u32 = 58;
+    pub const CARROT: u32 = 59;
+    pub const PUMPKIN: u32 = 60;
     /// Number of icons in the strip.
-    pub const COUNT: u32 = 55;
+    pub const COUNT: u32 = 61;
 }
 
 /// An arrow pointing right along row `y`, from `x0`, `len` pixels long.
@@ -3183,6 +3273,42 @@ pub fn items(out: &Path) {
                 for (fx, fy, r) in [(12.0, 17.0, 2.6), (18.0, 13.0, 2.2), (19.0, 20.0, 2.0), (10.0, 21.0, 1.6)] {
                     c.shade_disc(fx, fy, r, ore);
                 }
+            }
+            it::WHEAT_SEEDS | it::CARROT_SEEDS | it::PUMPKIN_SEEDS => {
+                // A tied paper pouch with a picture of its crop.
+                let mark = match i {
+                    it::WHEAT_SEEDS => 0xe8c860,
+                    it::CARROT_SEEDS => 0xf08a30,
+                    _ => 0xd8661a,
+                };
+                c.shade_box(8, 10, 16, 18, [0x8a7a5a, 0xc8b48a, 0xe2d2aa, 0xf6ecd0]);
+                c.shade_box(10, 6, 12, 5, [0x8a7a5a, 0xc8b48a, 0xe2d2aa, 0xf6ecd0]);
+                c.hline(9, 10, 14, hex(0x6a4a2a));
+                c.disc(16.0, 19.0, 4.0, hex(mark));
+                c.vline(16, 13, 3, hex(LEAF[2]));
+            }
+            it::WHEAT => {
+                // A sheaf of golden stalks, tied in the middle.
+                for k in -2..=2 {
+                    c.stroke(16.0 + k as f32 * 1.2, 28.0, 16.0 + k as f32 * 3.0, 9.0, 0.7, hex(0xc8a040));
+                    c.shade_box(15 + k * 3, 4, 3, 6, [0x8a6a20, 0xc8a040, 0xe8c860, 0xfff0a0]);
+                }
+                c.hline(12, 20, 9, hex(0x8a4a20));
+            }
+            it::CARROT => {
+                c.stroke(10.0, 26.0, 21.0, 11.0, 3.2, hex(0xd86a1a));
+                c.stroke(10.5, 25.0, 20.0, 12.0, 1.2, hex(0xffb870));
+                c.shade_disc(23.0, 8.0, 3.0, LEAF);
+                c.shade_disc(20.0, 6.5, 2.5, LEAF);
+                c.shade_disc(25.5, 10.5, 2.5, LEAF);
+            }
+            it::PUMPKIN => {
+                c.shade_ellipse(16.0, 19.0, 12.0, 9.0, [0x8a3a06, 0xd8661a, 0xf08a2a, 0xffbc6a]);
+                for rx in [10, 16, 22] {
+                    c.vline(rx, 12, 15, hex(0xb85010));
+                }
+                c.shade_box(15, 7, 3, 4, WOOD);
+                c.shade_disc(20.0, 8.0, 2.5, LEAF);
             }
             it::HAMMER => {
                 // A heavy iron head on a short haft.

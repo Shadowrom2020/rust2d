@@ -466,6 +466,55 @@ pub struct ItemDef {
     /// between them while companions are around.
     #[serde(default, skip_serializing_if = "UseTarget::is_player")]
     pub use_on: UseTarget,
+    /// A seed: what grows from it on a farm plot (`PropDef::plot`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
+}
+
+/// What grows from a seed (`ItemDef::crop`): its stages one after another, the last one is the
+/// ripe crop, harvested with E for `harvest` (the plot is then empty again).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Crop {
+    #[serde(default)]
+    pub stages: Vec<CropStage>,
+    #[serde(default)]
+    pub harvest: Vec<LootEntry>,
+}
+
+/// One look of a growing crop and how many in-game hours it lasts (the last, ripe stage's
+/// hours don't count).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CropStage {
+    pub sprite: SpriteRef,
+    #[serde(default)]
+    pub hours: f32,
+}
+
+impl Crop {
+    /// In-game hours from planting to ripe.
+    pub fn grow_hours(&self) -> f32 {
+        let n = self.stages.len().saturating_sub(1);
+        self.stages[..n].iter().map(|s| s.hours.max(0.0)).sum()
+    }
+
+    /// The stage shown `hours` after planting (the last one = ripe); None without stages.
+    pub fn stage_at(&self, hours: f64) -> Option<usize> {
+        if self.stages.is_empty() {
+            return None;
+        }
+        let mut t = 0.0f64;
+        for (k, s) in self.stages.iter().enumerate().take(self.stages.len() - 1) {
+            t += s.hours.max(0.0) as f64;
+            if hours < t {
+                return Some(k);
+            }
+        }
+        Some(self.stages.len() - 1)
+    }
+
+    pub fn is_ripe(&self, hours: f64) -> bool {
+        self.stage_at(hours) == Some(self.stages.len().saturating_sub(1)) && !self.stages.is_empty()
+    }
 }
 
 /// Whom a healing item is used on (`ItemDef::use_on`).
@@ -637,6 +686,9 @@ pub struct PropDef {
     /// A state that changes back after some in-game time (a depleted vein refills).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regrow: Option<Regrow>,
+    /// A farm plot: seeds (items with a crop) are planted on it and grow over in-game time.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub plot: bool,
 }
 
 /// A prop the player gathers from (`PropDef::gather`): `hits` hits with a tool of kind `tool`
@@ -1313,6 +1365,7 @@ mod tests {
         held: String::new(),
         tool: String::new(),
         use_on: Default::default(),
+        crop: None,
             });
         }
         let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };
@@ -1466,5 +1519,27 @@ mod gather_tests {
         let g = p.gather.unwrap();
         assert_eq!((g.hits, g.tool.as_str(), g.then_state.as_str()), (3, "pickaxe", "mined out"));
         assert_eq!(p.regrow.unwrap().to, "", "\"\" = back to the default state");
+    }
+}
+
+#[cfg(test)]
+mod crop_tests {
+    use super::*;
+
+    #[test]
+    fn crop_stages_over_time() {
+        let st = |h: f32| CropStage { sprite: SpriteRef::new("props", 0), hours: h };
+        let c = Crop { stages: vec![st(8.0), st(16.0), st(99.0)], harvest: vec![] };
+        assert_eq!(c.grow_hours(), 24.0, "the ripe stage's hours don't count");
+        assert_eq!((c.stage_at(0.0), c.stage_at(7.9), c.stage_at(8.0), c.stage_at(23.9)), (Some(0), Some(0), Some(1), Some(1)));
+        assert!(!c.is_ripe(23.9) && c.is_ripe(24.0) && c.is_ripe(500.0));
+        assert_eq!(Crop::default().stage_at(5.0), None);
+        // Old items and props have no crop / plot; a saved plot keeps its planting.
+        let it: ItemDef = ron::from_str(r#"(id: "seed", name: "Seed", icon: (sheet: "items", frame: 0))"#).unwrap();
+        assert!(it.crop.is_none());
+        let p: PropDef = ron::from_str(r#"(id: "soil", name: "Soil", sprite: (sheet: "props", frame: 0))"#).unwrap();
+        assert!(!p.plot);
+        let st: crate::state::EntityState = ron::from_str(r#"(active: true, frame: 0, x: 1.0, y: 2.0, facing: Down, planted: Some((seed: "wheat_seeds", at: 30.5)))"#).unwrap();
+        assert_eq!(st.planted.unwrap().bonus, 0.0);
     }
 }

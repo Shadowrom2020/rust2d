@@ -10,6 +10,7 @@ mod cutscene;
 mod dev;
 mod effects;
 mod equipment;
+mod farm;
 mod furniture;
 mod gather;
 mod healing;
@@ -142,6 +143,8 @@ struct RtEntity {
     damage: i32,
     invuln: f32,
     flash: f32,
+    /// A seed growing on a farm plot.
+    planted: Option<crate::state::Planted>,
     /// When its prop state last changed (in-game hours; regrowing states).
     changed_at: Option<f64>,
     /// Hits a gathering prop has taken (and seconds since the last one).
@@ -498,6 +501,7 @@ impl Game {
             portrait: None,
             changed_at: None,
             gather: None,
+            planted: None,
             item_cd: 0.0,
             flash: 0.0,
             knock: Vec2::ZERO,
@@ -580,6 +584,7 @@ impl Game {
         );
         rt.count = count;
         rt.changed_at = st.and_then(|s| s.changed_at);
+        rt.planted = st.and_then(|s| s.planted.clone());
         rt.light = e.light.clone();
         rt.portrait = e.portrait.clone();
         if e.kind == EntityKind::Character {
@@ -993,6 +998,7 @@ impl Game {
             patrol: e.patrol.as_ref().map(|p| p.state()),
             schedule_off: e.schedule.as_ref().is_some_and(|s| !s.on),
             changed_at: e.changed_at,
+            planted: e.planted.clone(),
         };
         let map = self.loaded.map.name.clone();
         let uid = e.uid;
@@ -1058,7 +1064,9 @@ impl Game {
         self.world.play_time += dt as f64;
         self.update_achievements(dt);
         if !self.on_title() && self.project.config.day_minutes > 0.0 {
-            self.world.advance_hours(dt * 24.0 / (self.project.config.day_minutes * 60.0));
+            let hours = dt * 24.0 / (self.project.config.day_minutes * 60.0);
+            self.world.advance_hours(hours);
+            self.water_crops(hours);
         }
         if input::act_pressed(Act::Debug) {
             self.debug = !self.debug;
@@ -1406,8 +1414,8 @@ impl Game {
                     if !self.loaded.entities[i].active {
                         return; // e.g. a gate that disappeared on unlocking
                     }
-                    // Ore veins, trees...: E is a gathering hit.
-                    if self.gather_hit(i) {
+                    // Ore veins, trees...: E is a gathering hit; farm plots plant / harvest.
+                    if self.gather_hit(i) || self.try_farm(i) {
                         return;
                     }
                 }
@@ -1500,6 +1508,10 @@ impl Game {
             if self.relockable(i).is_some_and(|l| l.key == item) && self.try_relock(i, Some(item)) {
                 return;
             }
+        }
+        // Seeds are planted on the farm plot in front.
+        if self.plant_on_facing(item) {
+            return;
         }
         // A healing item asks whom to heal while companions are around.
         if self.start_heal_pick(healing::HealSource::Item(item.to_string())) {
@@ -1625,7 +1637,7 @@ impl Game {
     pub fn status(&self) -> String {
         let p = self.player.pos / self.ts();
         format!(
-            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} gather={:?} props={:?} day={} aim={} orders={} compwin={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
+            "{} weather={} menu={} autosave={} cutscene={} ui_hidden={} window={} npcs={:?} fx={:?} worldmap={{{}}} skills={{{}}} {} {} ai={:?} bestiary={:?} dialog_log={} pad={:?} attacking={} shake={} time={} light={:?} lights={} patrol={:?} schedule={:?} companions={:?} dropped={:?} player={:?} creator={:?} quests={:?} achievements={:?} minigame={} pose={} gather={:?} props={:?} crops={:?} day={} aim={} orders={} compwin={} shop={:?} crafting={:?} map={} tile=({},{}) hp={:?} vars={:?} quick={:?} equip={:?} enemies={} busy={} dialog={} inv={:?} flags={:?} music={:?}",
             self.dev_status(),
             self.weather_status(),
             self.menu_status(),
@@ -1664,6 +1676,7 @@ impl Game {
             self.pose_status(),
             self.gather_status(),
             self.prop_states_status(),
+            self.crops_status(),
             self.world.day,
             self.heal_pick_status(),
             self.order_menu_status(),
@@ -1961,7 +1974,15 @@ impl Game {
         let db = &self.project.db;
         let tint = if e.flash > 0.0 { Color::new(1.0, 0.35, 0.35, 1.0) } else { Self::effect_tint(&e.effects).unwrap_or(WHITE) };
         let drawn = match e.kind {
-            EntityKind::Prop => db.prop(&e.def).is_some_and(|d| self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE)),
+            EntityKind::Prop => db.prop(&e.def).is_some_and(|d| {
+                let ok = self.assets.draw_sprite(d.state_look(e.state).0, e.frame, e.body.pos, WHITE);
+                if e.planted.is_some() {
+                    if let Some(i) = self.loaded.entities.iter().position(|x| x.uid == e.uid) {
+                        self.draw_crop(i);
+                    }
+                }
+                ok
+            }),
             EntityKind::Character if e.companion.as_ref().is_some_and(|l| l.down.is_some()) => self.draw_downed(e),
             EntityKind::Character => db.character(&e.def).is_some() && {
                 let col = if e.body.moving { (e.body.anim * 8.0) as u32 % paperdoll::LAYOUT_FRAMES } else { 0 };

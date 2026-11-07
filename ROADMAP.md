@@ -195,7 +195,7 @@ of the anvil window (tools, skill needs, "Smithing 2: Fine Iron Sword"), the anv
 and the recipe's Better results in the editor. Unit test: quality steps and an equipped item as
 ingredient.
 
-### [ ] Farming — `feature/farming` (follows *Mining*: days, timed states)
+### [x] Farming — `feature/farming` (follows *Mining*: days, timed states)
 
 **Goal.** The player plants seeds in soil plots, crops grow over in-game days and are harvested.
 
@@ -211,6 +211,19 @@ ingredient.
   and return to empty.
 - Growth is computed from total hours, so it continues while the player is away.
 
+**Decided while building.** No `crops.ron` and no Crops tab: the seed item carries its crop
+(`ItemDef.crop: Option<Crop { stages: Vec<CropStage { sprite, hours }>, harvest }>`; the
+editor's item form has a *Seed* section, renames and library export follow its sprites and
+harvest items), so one plot prop grows any seed. `PropDef.plot: bool`; `EntityState.planted:
+Option<Planted { seed, at, bonus }>` (`RtEntity.planted`, saved by `persist`); growth =
+`total_hours − at + bonus`, where rain on the current map adds 0.5 h per hour (`water_crops`,
+called by the running clock, `advance_time` and sleeping; maps the player isn't on get no rain
+bonus). `runtime/farm.rs`: E on a plot (`try_farm`, after gathering in `interact_entity`)
+plants the first seed carried / tells the hours left / harvests; using a seed item plants it
+on the plot in front (`plant_on_facing`). No watering can and no hoe (left out); the village
+garden stays as it is (the field is in the Workshop). `status()` gains `crops=`
+(seed:stage/stages|ripe@x,y).
+
 **Touch points.** new `crops.rs` (def), `project.rs`, `release.rs`, `library.rs`, `refactor.rs`,
 `state.rs`, `runtime/{mod,gather}.rs`, editor `database.rs` (Crops tab, prop *Plot*), gen_example
 (plots, seeds, crop stages), README.
@@ -218,9 +231,12 @@ ingredient.
 **Example.** The fenced garden behind Tilda's shop becomes six plots; wheat, carrot and pumpkin
 seeds at Tilda's; crops sell to her and feed *Cooking*.
 
-**Verify.** Autoplay: plant carrots, `settime +48`, re-enter → `status` shows the plot ripe,
-harvest → `inv`; a rainy map grows faster; save / load keeps the growth; screenshots of the
-stages.
+**Verify (done).** Autoplay in the Workshop: E on a plot without seeds plants nothing, with seeds
+→ `wheat_seeds:1/3`; +9 h → 2/3, +16 h → ripe, E → 3 wheat and the plot empty; carrot seeds used
+from the inventory plant the plot in front; F5 / F9 keeps the crop, still ripening on time; 18 h
+dry → 2/3, 18 h in rain → ripe; all three crops planted and grown (screenshot of the field
+growing and ripe). Editor: the item's Seed section (screenshot). Unit tests: stage timing,
+old items / props / plot states.
 
 ### [ ] Cooking — `feature/cooking` (follows *Farming*)
 
