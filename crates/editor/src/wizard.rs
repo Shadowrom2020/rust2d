@@ -217,6 +217,7 @@ impl Editor {
         tool: String::new(),
         use_on: Default::default(),
         crop: None,
+        food: false,
             }),
             WKind::Tileset | WKind::Sheet | WKind::Structure => {}
         }

@@ -27,6 +27,9 @@ pub(super) struct CraftingUi {
     open: Option<(String, String)>,
     /// Station to open once the current event sequence has finished.
     pub pending: Option<(String, String)>,
+    /// The station's prop (the trigger's owner; `RecipeDef::station_state` looks at it).
+    prop: Option<u32>,
+    pending_prop: Option<u32>,
     sel: usize,
     scroll: usize,
     last_click: Option<(usize, f64)>,
@@ -78,9 +81,21 @@ impl Game {
     }
 
     /// Queues the crafting window of `station` (opens once the current events have finished).
-    pub(super) fn open_crafting(&mut self, station: &str, title: &str) {
+    pub(super) fn open_crafting(&mut self, station: &str, title: &str, owner: Option<u32>) {
         let title = if title.is_empty() { "Crafting".to_string() } else { title.to_string() };
         self.crafting.pending = Some((station.to_string(), title));
+        self.crafting.pending_prop = owner;
+    }
+
+    /// What is missing to make recipe `r` here: the station's state, then skill, tools, items.
+    fn recipe_missing(&self, r: &RecipeDef) -> Option<Missing> {
+        if !r.station_state.is_empty() {
+            let state = self.crafting.prop.and_then(|uid| self.loaded.entities.iter().find(|e| e.uid == uid)).and_then(|e| self.project.db.prop(&e.def).map(|d| d.state_name(e.state).to_string()));
+            if state.as_deref() != Some(r.station_state.as_str()) {
+                return Some(Missing::StationState(r.station_state.clone()));
+            }
+        }
+        r.missing(&self.world, &self.project.db.tool_kinds())
     }
 
     fn crafting_recipes(&self) -> Vec<RecipeDef> {
@@ -104,6 +119,7 @@ impl Game {
                 format!("Needs {name} {need}")
             }
             Missing::Tools(kinds) => format!("Needs a {}", kinds.join(" and a ")),
+            Missing::StationState(state) => format!("Needs it {state}"),
         }
     }
 
@@ -112,7 +128,7 @@ impl Game {
         let Some(r) = self.crafting_recipes().into_iter().nth(k) else { return 0 };
         let mut made = 0;
         while made < n {
-            if let Some(m) = r.missing(&self.world, &self.project.db.tool_kinds()) {
+            if let Some(m) = self.recipe_missing(&r) {
                 if made == 0 {
                     let text = self.missing_text(&m);
                     self.crafting_msg(text, false);
@@ -155,7 +171,7 @@ impl Game {
     /// The open crafting window (for automated play-throughs): "station [ids] sel=K msg=…".
     pub(super) fn crafting_status(&self) -> Option<String> {
         let (station, _) = self.crafting.open.as_ref()?;
-        let ids: Vec<String> = self.crafting_recipes().iter().map(|r| if r.missing(&self.world, &self.project.db.tool_kinds()).is_none() { r.id.clone() } else { format!("{}(missing)", r.id) }).collect();
+        let ids: Vec<String> = self.crafting_recipes().iter().map(|r| if self.recipe_missing(r).is_none() { r.id.clone() } else { format!("{}(missing)", r.id) }).collect();
         let msg = self.crafting.msg.as_ref().map_or("", |m| m.0.as_str());
         Some(format!("{station} [{}] sel={} msg={msg:?}", ids.join(" "), self.crafting.sel))
     }
@@ -174,6 +190,7 @@ impl Game {
         if let Some(open) = self.crafting.pending.take() {
             self.inv.close();
             self.crafting.open = Some(open);
+            self.crafting.prop = self.crafting.pending_prop.take();
             self.crafting.sel = 0;
             self.crafting.scroll = 0;
             self.crafting.msg = None;
@@ -244,7 +261,7 @@ impl Game {
             let k = self.crafting.scroll + vis;
             let rr = row_rect(list, vis);
             let selected = self.crafting.sel == k;
-            let missing = r.missing(&self.world, &self.project.db.tool_kinds());
+            let missing = self.recipe_missing(r);
             let bg = if selected {
                 Color::new(0.85, 0.7, 0.3, 0.22)
             } else if rr.contains(m) {
@@ -295,7 +312,7 @@ impl Game {
                 draw_text(kind, x + 22.0, rr.y + 44.0, 17.0, c);
                 x += 30.0 + measure_text(kind, None, 17, 1.0).width;
             }
-            if let Some(Missing::Skill(..)) = &missing {
+            if let Some(Missing::Skill(..) | Missing::StationState(..)) = &missing {
                 draw_text(self.missing_text(missing.as_ref().unwrap()), x + 6.0, rr.y + 44.0, 17.0, Color::new(1.0, 0.55, 0.5, 1.0));
             }
             // Make button.

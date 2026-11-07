@@ -317,6 +317,7 @@ pub fn ui(ed: &mut Editor, ui: &mut egui::Ui) {
         tool: String::new(),
         use_on: Default::default(),
         crop: None,
+        food: false,
                     },
                     |d| &mut d.id,
                 ),
@@ -743,6 +744,7 @@ fn item_form(ui: &mut egui::Ui, d: &mut ItemDef, cx: &mut Cx) {
     ui.label("Description");
     text_box(ui, &mut d.description, 2, "");
     ui.checkbox(&mut d.consumable, "Consumed when used (if a trigger ran)");
+    ui.checkbox(&mut d.food, "Food").on_hover_text("Its 'On use' healing is raised by the player's skills with the Food effect (Cooking).");
     ui.horizontal(|ui| {
         ui.label("Stack size");
         ui.add(egui::DragValue::new(&mut d.max_stack).range(1..=9999)).on_hover_text("How many fit into one inventory slot");
@@ -2621,7 +2623,7 @@ fn skill_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::skills::SkillDef, cx: 
     }
     egui::Grid::new("skill_effect").num_columns(2).show(ui, |ui| match &mut d.effect {
         SkillEffect::None | SkillEffect::Lockpick => {}
-        SkillEffect::MeleeDamage { percent } | SkillEffect::RangedDamage { percent } | SkillEffect::SpellDamage { percent } | SkillEffect::Speed { percent } | SkillEffect::Haggle { percent } => {
+        SkillEffect::MeleeDamage { percent } | SkillEffect::RangedDamage { percent } | SkillEffect::SpellDamage { percent } | SkillEffect::Speed { percent } | SkillEffect::Haggle { percent } | SkillEffect::FoodBonus { percent } => {
             ui.label("Per level");
             ui.add(egui::DragValue::new(percent).range(0.0..=100.0).speed(0.5).suffix(" %"));
             ui.end_row();
@@ -2757,6 +2759,12 @@ fn recipe_form(ui: &mut egui::Ui, d: &mut rustpg2d_engine::crafting::RecipeDef, 
             if ui.small_button("+ Tool").on_hover_text("A tool kind (an item's 'Tool kind', e.g. hammer) the player must have: not used up").clicked() {
                 d.tools.push(kinds.first().cloned().unwrap_or_else(|| "hammer".into()));
             }
+        });
+        ui.end_row();
+        ui.label("Station state");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut d.station_state).desired_width(100.0).hint_text("e.g. lit"));
+            ui.weak("(the station's prop must be in this state, e.g. a cooking fire \"lit\"; empty = any)");
         });
         ui.end_row();
         ui.label("Better results");

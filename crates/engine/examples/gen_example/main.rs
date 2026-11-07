@@ -207,6 +207,16 @@ fn light(mut d: ItemDef, l: LightSpec) -> ItemDef {
     d
 }
 
+/// Food: the Cooking skill's bonus applies to its healing.
+fn dish(d: ItemDef) -> ItemDef {
+    ItemDef { food: true, ..d }
+}
+
+/// The *Regen* effect of a dish: 1 HP per second for `seconds`.
+fn regen(seconds: f32) -> Action {
+    Action::ApplyEffect { target: "player".into(), effect: rustpg2d_engine::effects::EffectSpec::new(rustpg2d_engine::effects::EffectKind::Regen, 1.0, seconds) }
+}
+
 /// A seed item: its crop grows through three stages (frames `stage0`, +1, +2 of the props
 /// sheet; `hours` for the first two) and is harvested for `harvest`.
 fn seed(d: ItemDef, stage0: u32, hours: [f32; 2], harvest: Vec<LootEntry>) -> ItemDef {
@@ -240,6 +250,7 @@ fn skills() -> Vec<SkillDef> {
         SkillDef::new("spellcraft", "Spellcraft", "Focus and precision: every level adds 15% to the damage of Spark and Fire Burst.", icon(it::SPELL_SPARK), 4, E::SpellDamage { percent: 15.0 }),
         SkillDef::new("alchemy", "Alchemy", "The craft of brewing: Antidotes need level 1, Swiftness Potions level 2 (at an alchemy table, with a mortar and pestle).", icon(it::MORTAR), 2, E::None),
         SkillDef::new("smithing", "Smithing", "Working iron at the anvil: Iron Helmets at level 1, Chainmail at level 2, and from level 2 your swords come out fine.", icon(it::HAMMER), 3, E::None),
+        SkillDef::new("cooking", "Cooking", "Good food, well made: Carrot Soup and Pumpkin Stew at level 1, Apple Pie at level 2, and all food heals 25% more per level.", icon(food::STEW), 2, E::FoodBonus { percent: 25.0 }),
         SkillDef::new("mining", "Mining", "Strong arms and a sharp eye for the seam: every level takes 20% fewer pickaxe hits to break off ore.", icon(it::PICKAXE), 3, E::Gather { tool: "pickaxe".into(), percent: 20.0 }),
         SkillDef::new("scavenging", "Scavenging", "An eye for what others leave behind: defeated slimes drop an extra coin per level (a scripted skill: see scavenging() in main.rhai).", icon(it::APPLE), 3, E::Script { function: "scavenging".into() }),
     ]
@@ -280,6 +291,12 @@ fn recipes() -> Vec<RecipeDef> {
         quality: quality.into_iter().map(|(level, r)| rustpg2d_engine::crafting::QualityStep { level, result: r.into() }).collect(),
         ..RecipeDef::new(id, result, count, ingredients, "anvil")
     };
+    let cook = |id: &str, result: &str, ingredients: Vec<ItemStack>, level: u32| RecipeDef {
+        station_state: "lit".into(),
+        skill: if level > 0 { "cooking".into() } else { String::new() },
+        level,
+        ..RecipeDef::new(id, result, 1, ingredients, "cooking")
+    };
     let smelt = |id: &str, result: &str, ore: &str| RecipeDef { tools: vec!["tongs".into()], ..RecipeDef::new(id, result, 1, vec![i(ore, 2), i("coal", 1)], "smelter") };
     vec![
         brew("brew_potion", "potion", vec![i("herb", 2)]),
@@ -299,6 +316,13 @@ fn recipes() -> Vec<RecipeDef> {
         forge("forge_chainmail", "chainmail", 1, vec![i("iron_ingot", 4)], 2, vec![]),
         forge("forge_arrows", "arrows", 10, vec![i("iron_ingot", 1)], 0, vec![]),
         forge("forge_pickaxe", "pickaxe", 1, vec![i("iron_ingot", 1), i("copper_ingot", 1)], 0, vec![]),
+        // Cooking at a lit campfire ("cooking" station, station_state "lit"); Cooking unlocks the
+        // harder dishes.
+        cook("grill_trout", "grilled_trout", vec![i("trout", 1)], 0),
+        cook("bake_bread", "bread", vec![i("wheat", 2)], 0),
+        cook("carrot_soup", "carrot_soup", vec![i("carrot", 2), i("mushroom", 1)], 1),
+        cook("pumpkin_stew", "pumpkin_stew", vec![i("pumpkin", 1), i("carrot", 1), i("wheat", 1)], 1),
+        cook("apple_pie", "apple_pie", vec![i("apple", 2), i("wheat", 2)], 2),
         forge("upgrade_sword", "iron_sword", 1, vec![i("sword", 1), i("iron_ingot", 1)], 0, vec![(2, "fine_iron_sword")]),
     ]
 }
@@ -1106,6 +1130,17 @@ fn workshop() -> Map {
     }
     let sack = b.entity(EntityKind::Prop, "chest", 11, 17);
     sack.container = Some(ContainerSpec { size: 4, items: vec![ItemStack::new("wheat_seeds", 4), ItemStack::new("carrot_seeds", 4), ItemStack::new("pumpkin_seeds", 2)], open_state: "open".into(), ..Default::default() });
+    // The kitchen: a campfire between the garden and the quarry, a pantry chest with
+    // ingredients to try every dish.
+    sign(&mut b, 15, 9, "KITCHEN. Use coal on the campfire to light it (it burns for 8 hours), then E to cook. Cooking unlocks soup, stew and pie and makes all food heal more.");
+    b.entity(EntityKind::Prop, "campfire", 17, 7);
+    let pantry = b.entity(EntityKind::Prop, "chest", 18, 9);
+    pantry.container = Some(ContainerSpec {
+        size: 8,
+        items: vec![ItemStack::new("trout", 2), ItemStack::new("wheat", 6), ItemStack::new("carrot", 4), ItemStack::new("mushroom", 2), ItemStack::new("pumpkin", 1), ItemStack::new("apple", 2), ItemStack::new("coal", 2)],
+        open_state: "open".into(),
+        ..Default::default()
+    });
     // A bed in the open to let a night pass (regrowing needs in-game time).
     b.entity(EntityKind::Prop, "bed", 20, 17);
     b.m.background = [20, 40, 20];
@@ -1333,6 +1368,7 @@ fn database() -> Database {
         tool: String::new(),
         use_on: Default::default(),
         crop: None,
+        food: false,
     };
     let stack = |mut i: ItemDef, n: u32| {
         i.max_stack = n;
@@ -1441,6 +1477,8 @@ fn database() -> Database {
             SheetDef { kind: SheetKind::Armor, ..SheetDef::new("ov_chain", "sprites/ov_chain.png", 32, 48) },
             SheetDef::new("props", "sprites/props.png", 32, 32),
             SheetDef::new("items", "sprites/items.png", 32, 32),
+            // Cooked dishes (items.png is near the texture size limit).
+            SheetDef::new("food", "sprites/food.png", 32, 32),
             // Drawn dialog portraits (Database > Characters > Portrait): the elder, Tilda.
             SheetDef::new("portraits", "sprites/portraits.png", 64, 64),
             // Spell effects (the Fireball script).
@@ -1461,7 +1499,7 @@ fn database() -> Database {
                 use_trig(vec![Action::Heal { amount: 6 }, Action::SetVar { name: "potions_drunk".into(), op: VarOp::Add, value: 1 }]),
             )), 10),
             item("coin", "Coin", "Shiny gold coins.", it::COIN, false, use_trig(vec![Action::RunScript { function: "count_coins".into() }])),
-            stack(item("apple", "Apple", "Crunchy and sweet. Restores 1 heart.", it::APPLE, true, use_trig(vec![Action::Heal { amount: 2 }])), 20),
+            stack(dish(item("apple", "Apple", "Crunchy and sweet. Restores 1 heart.", it::APPLE, true, use_trig(vec![Action::Heal { amount: 2 }]))), 20),
             weapon(
                 stack(item("bow", "Hunting Bow", "Fast shots, uses arrows. Use it from the inventory to equip (or press Q).", it::BOW, false, vec![]), 1),
                 Weapon::ranged(1, 0.45, Ranged { projectile: sprite("items", it::ARROW_SHOT), speed: 240.0 * R, range: 8.0, ammo: "arrows".into() }),
@@ -1509,7 +1547,7 @@ fn database() -> Database {
             // Fishing (village pond: a fishing spot zone). The rod is needed to fish there.
             // A tool (Tool slot, tool kind "fishing rod"): in the hand while fishing.
             stack(ItemDef { tool: "fishing rod".into(), ..item("fishing_rod", "Fishing Rod", "A tool: stand at the pond's edge and press E to cast.", it::ROD, false, vec![]) }, 1),
-            stack(item("trout", "Trout", "A fresh trout. Eating it restores a heart.", it::TROUT, true, use_trig(vec![Action::Heal { amount: 2 }])), 10),
+            stack(dish(item("trout", "Trout", "A fresh trout. Eating it restores a heart (grilled: two).", it::TROUT, true, use_trig(vec![Action::Heal { amount: 2 }]))), 10),
             // Mining (veins in the old mine): the pickaxe (a tool, Tool slot) and what veins give.
             stack(ItemDef { tool: "pickaxe".into(), ..item("pickaxe", "Pickaxe", "A miner's tool: press E or swing at an ore vein while you carry it.", it::PICKAXE, false, vec![]) }, 1),
             stack(item("copper_ore", "Copper Ore", "A lump of copper ore. Merchants pay a little for it.", it::COPPER_ORE, false, vec![]), 30),
@@ -1525,8 +1563,17 @@ fn database() -> Database {
             seed(item("carrot_seeds", "Carrot Seeds", "Plant them on a soil plot: carrots are ripe after a day and a half.", it::CARROT_SEEDS, false, vec![]), p::CARROT, [12.0, 24.0], vec![LootEntry::new("carrot", 100.0, 2, 4), LootEntry::new("carrot_seeds", 40.0, 1, 1)]),
             seed(item("pumpkin_seeds", "Pumpkin Seeds", "Plant them on a soil plot: a pumpkin takes two days.", it::PUMPKIN_SEEDS, false, vec![]), p::PUMPKIN, [18.0, 30.0], vec![LootEntry::new("pumpkin", 100.0, 1, 1), LootEntry::new("pumpkin_seeds", 60.0, 1, 2)]),
             stack(item("wheat", "Wheat", "Golden wheat. Millers and bakers buy it.", it::WHEAT, false, vec![]), 30),
-            stack(item("carrot", "Carrot", "Fresh and crunchy. Restores 1 heart.", it::CARROT, true, use_trig(vec![Action::Heal { amount: 2 }])), 20),
+            stack(dish(item("carrot", "Carrot", "Fresh and crunchy. Restores 1 heart.", it::CARROT, true, use_trig(vec![Action::Heal { amount: 2 }]))), 20),
             stack(item("pumpkin", "Pumpkin", "A big orange pumpkin. Tilda pays well for it.", it::PUMPKIN, false, vec![]), 5),
+            // Cooking (at a lit campfire): food heals more with the Cooking skill.
+            dish(item("grilled_trout", "Grilled Trout", "Crispy skin, tender inside. Restores 2 hearts.", food::GRILLED_TROUT, true, use_trig(vec![Action::Heal { amount: 4 }]))),
+            dish(item("bread", "Bread", "A warm loaf. Restores 1.5 hearts.", food::BREAD, true, use_trig(vec![Action::Heal { amount: 3 }]))),
+            dish(item("carrot_soup", "Carrot Soup", "Restores 2 hearts and keeps healing a little for a while.", food::CARROT_SOUP, true, use_trig(vec![Action::Heal { amount: 4 }, regen(8.0)]))),
+            dish(item("pumpkin_stew", "Pumpkin Stew", "Hearty: restores 3 hearts, then heals on for a while.", food::STEW, true, use_trig(vec![Action::Heal { amount: 6 }, regen(15.0)]))),
+            dish(item("apple_pie", "Apple Pie", "Restores 2 hearts, and you hit 25% harder for a minute.", food::PIE, true, use_trig(vec![
+                Action::Heal { amount: 4 },
+                Action::ApplyEffect { target: "player".into(), effect: rustpg2d_engine::effects::EffectSpec::new(rustpg2d_engine::effects::EffectKind::Strength, 25.0, 60.0) },
+            ]))),
             stack(item("coal", "Coal", "Fuel for the smelter. Mined from coal veins.", it::COAL, false, vec![]), 30),
             stack(item("copper_ingot", "Copper Ingot", "Smelted copper.", it::COPPER_INGOT, false, vec![]), 20),
             stack(item("iron_ingot", "Iron Ingot", "Smelted iron, the smith's daily bread.", it::IRON_INGOT, false, vec![]), 20),
@@ -1630,6 +1677,22 @@ fn database() -> Database {
                 regrow: Some(rustpg2d_engine::defs::Regrow { from: "picked".into(), to: "default".into(), hours: 12.0 }),
                 ..prop("mushroom_patch", "Mushroom Patch", p::MUSHROOMS, false, [20.0, 8.0])
             },
+            // A cooking fire: E opens the "cooking" recipes; they need it lit (use coal on it).
+            // It burns out eight in-game hours later.
+            PropDef {
+                default_state: "out".into(),
+                states: vec![PropState { light: Some(LightSpec { intensity: 0.9, ..LightSpec::new(3.0, [255, 160, 80], true) }), ..state("lit", sprite("props", p::CAMPFIRE_LIT), true) }],
+                regrow: Some(rustpg2d_engine::defs::Regrow { from: "lit".into(), to: "out".into(), hours: 8.0 }),
+                triggers: vec![
+                    trig(TriggerOn::Interact, vec![], vec![Action::OpenCrafting { station: "cooking".into(), title: "Campfire".into() }]),
+                    trig(
+                        TriggerOn::UseItem { item: "coal".into() },
+                        vec![],
+                        vec![Action::TakeItem { item: "coal".into(), count: 1 }, Action::SetState { target: "self".into(), state: "lit".into() }, dialog("", "The coal catches and the fire crackles to life.")],
+                    ),
+                ],
+                ..prop("campfire", "Campfire", p::CAMPFIRE, true, [24.0, 10.0])
+            },
             // A farm plot: seeds are planted on it.
             PropDef { plot: true, ..prop("soil_plot", "Soil Plot", p::SOIL, false, [26.0, 12.0]) },
             // The anvil: ingots into weapons, armor and tools (with the hammer and the tongs).
@@ -1718,6 +1781,13 @@ fn database() -> Database {
         achievements: achievements(),
     };
     layered_characters(&mut db);
+    // Cooked dishes: icons on the food sheet, stacks of ten.
+    for (id, f) in [("grilled_trout", food::GRILLED_TROUT), ("bread", food::BREAD), ("carrot_soup", food::CARROT_SOUP), ("pumpkin_stew", food::STEW), ("apple_pie", food::PIE)] {
+        if let Some(d) = db.items.iter_mut().find(|d| d.id == id) {
+            d.icon = SpriteRef::new("food", f);
+            d.max_stack = 10;
+        }
+    }
     // Trade values (merchants use them unless their stock sets a price).
     for (id, v) in [
         ("potion", 15),
@@ -1736,6 +1806,11 @@ fn database() -> Database {
         ("wheat", 3),
         ("carrot", 4),
         ("pumpkin", 12),
+        ("grilled_trout", 8),
+        ("bread", 6),
+        ("carrot_soup", 10),
+        ("pumpkin_stew", 18),
+        ("apple_pie", 16),
         ("iron_sword", 45),
         ("fine_iron_sword", 80),
         ("coal", 2),
@@ -2237,6 +2312,7 @@ fn main() {
     slime(&out);
     props(&out);
     items(&out);
+    food_icons(&out);
     portraits(&out);
     fireball(&out);
     explosion(&out);

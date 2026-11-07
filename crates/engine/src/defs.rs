@@ -469,6 +469,9 @@ pub struct ItemDef {
     /// A seed: what grows from it on a farm plot (`PropDef::plot`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
+    /// Food: its *on use* healing gets the player's *Food* skill bonus.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub food: bool,
 }
 
 /// What grows from a seed (`ItemDef::crop`): its stages one after another, the last one is the
@@ -1366,6 +1369,7 @@ mod tests {
         tool: String::new(),
         use_on: Default::default(),
         crop: None,
+        food: false,
             });
         }
         let spec = ShopSpec { items: vec![ShopEntry::new("apple", 2, 10)], ..Default::default() };

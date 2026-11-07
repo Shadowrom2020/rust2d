@@ -1797,6 +1797,7 @@ pub fn clothing_item(id: &str, name: &str, description: &str, icon_sheet: &str, 
         tool: String::new(),
         use_on: Default::default(),
         crop: None,
+        food: false,
     }
 }
 
@@ -2101,6 +2102,35 @@ pub mod p {
     pub const WHEAT: u32 = 101;
     pub const CARROT: u32 = 112;
     pub const PUMPKIN: u32 = 115;
+    /// A cooking fire (row 14): burnt out, and lit.
+    pub const CAMPFIRE: u32 = 118;
+    pub const CAMPFIRE_LIT: u32 = 119;
+}
+
+/// The campfire: a ring of stones around logs, cold and burning.
+fn campfire(c: &mut Canvas) {
+    let n = TS as i32;
+    for (cell_id, lit) in [(p::CAMPFIRE, false), (p::CAMPFIRE_LIT, true)] {
+        let (x, y) = cell(cell_id);
+        c.at(x, y);
+        for k in 0..9 {
+            let a = k as f32 / 9.0 * std::f32::consts::TAU;
+            c.shade_disc(16.0 + a.cos() * 11.0, 24.0 + a.sin() * 5.0, 2.6, STONE);
+        }
+        c.stroke(9.0, 26.0, 23.0, 21.0, 1.8, hex(if lit { WOOD[1] } else { 0x2a2420 }));
+        c.stroke(9.0, 21.0, 23.0, 26.0, 1.8, hex(if lit { WOOD[2] } else { 0x3a322c }));
+        if lit {
+            for (k, col) in FIRE.iter().enumerate() {
+                let r = 6.5 - k as f32 * 1.2;
+                c.ellipse(16.0, 21.0 - k as f32 * 2.2, r * 0.8, r + 1.0, hex(*col));
+            }
+            c.px(13, 9, hex(FIRE[2]));
+            c.px(19, 7, hex(FIRE[3]));
+        } else {
+            c.rect(14, 22, 4, 2, hex(0x606060));
+        }
+        c.auto_outline(n, n, OUTLINE);
+    }
 }
 
 /// The soil plot and the crop stages (drawn over the plot, standing in its furrows).
@@ -2821,6 +2851,7 @@ pub fn props(out: &Path) {
     veins(&mut c);
     gathering_props(&mut c);
     farming(&mut c);
+    campfire(&mut c);
     big_props(&mut c);
     c.save(&out.join("sprites/props.png"));
 }
@@ -2903,7 +2934,8 @@ pub mod it {
     pub const WHEAT: u32 = 58;
     pub const CARROT: u32 = 59;
     pub const PUMPKIN: u32 = 60;
-    /// Number of icons in the strip.
+    /// Number of icons in the strip (it can't grow much wider: textures are at most 2048 px,
+    /// new icons go on their own sheets such as `food`).
     pub const COUNT: u32 = 61;
 }
 
@@ -3420,6 +3452,67 @@ pub fn items(out: &Path) {
         c.auto_outline(n, n, OUTLINE);
     }
     c.save(&out.join("sprites/items.png"));
+}
+
+/// Frames of `sprites/food.png`: cooked dishes (32 x 32 each).
+pub mod food {
+    pub const GRILLED_TROUT: u32 = 0;
+    pub const BREAD: u32 = 1;
+    pub const CARROT_SOUP: u32 = 2;
+    pub const STEW: u32 = 3;
+    pub const PIE: u32 = 4;
+    pub const COUNT: u32 = 5;
+}
+
+/// The cooked dishes' icons (their own sheet: `items.png` is near the texture size limit).
+pub fn food_icons(out: &Path) {
+    let mut c = Canvas::new(TS * food::COUNT, TS);
+    let n = TS as i32;
+    for i in 0..food::COUNT {
+        c.at(i * TS, 0);
+        match i {
+            food::GRILLED_TROUT => {
+                // A browned fish with grill stripes on a stick.
+                c.stroke(2.0, 28.0, 28.0, 5.0, 1.0, hex(WOOD[2]));
+                c.shade_ellipse(15.0, 16.0, 10.0, 5.0, [0x5a3014, 0x8a5024, 0xb8783a, 0xe0a868]);
+                c.shade_box(23, 12, 4, 8, [0x5a3014, 0x8a5024, 0xb8783a, 0xe0a868]);
+                for gx in [9, 13, 17] {
+                    c.line(gx, 12, gx + 3, 20, hex(0x3a1c0a));
+                }
+                c.px(9, 15, hex(0x111111));
+            }
+            food::BREAD => {
+                c.shade_ellipse(16.0, 19.0, 12.0, 7.0, [0x7a4a18, 0xb87a34, 0xd8a056, 0xf0c888]);
+                for sx in [10, 15, 20] {
+                    c.line(sx, 15, sx + 3, 20, hex(0xf0d8a0));
+                }
+            }
+            food::CARROT_SOUP | food::STEW => {
+                // A wooden bowl with soup and bits in it.
+                let soup = if i == food::CARROT_SOUP { [0xa04a10, 0xd8701e, 0xf0923a, 0xffc078] } else { [0x5a2e14, 0x8a4a22, 0xb06a34, 0xd8945a] };
+                c.shade_ellipse(16.0, 21.0, 12.0, 7.0, WOOD);
+                c.rect(3, 13, 26, 8, CLEAR);
+                c.shade_ellipse(16.0, 17.0, 12.0, 4.0, soup);
+                for (bx, by, col) in [(11, 16, 0xf08a30), (17, 18, 0x7cc56f), (21, 16, 0xffd8a0)] {
+                    c.rect(bx, by, 2, 2, hex(col));
+                }
+                c.shade_box(10, 27, 12, 2, WOOD);
+                c.px(14, 9, hex(0xe0e0e0));
+                c.px(18, 8, hex(0xe0e0e0));
+            }
+            food::PIE => {
+                c.shade_ellipse(16.0, 20.0, 13.0, 7.0, [0x7a4a18, 0xb87a34, 0xd8a056, 0xf0c888]);
+                c.shade_ellipse(16.0, 18.0, 11.0, 4.5, [0x6a1010, 0xa02020, 0xc84040, 0xe87070]);
+                for k in 0..4 {
+                    c.hline(7, 16 + k * 2, 18, hex(0xe8c080));
+                    c.vline(9 + k * 4, 14, 8, hex(0xe8c080));
+                }
+            }
+            _ => {}
+        }
+        c.auto_outline(n, n, OUTLINE);
+    }
+    c.save(&out.join("sprites/food.png"));
 }
 
 // ------------------------------------------------------------------ spell effects

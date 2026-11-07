@@ -1520,6 +1520,24 @@ impl Game {
         self.use_item_now(item);
     }
 
+    /// Runs an item's own *on use* triggers; food heals more with the player's Food skills.
+    fn fire_item_use(&mut self, item: &str) -> bool {
+        let bonus = if self.project.db.item(item).is_some_and(|d| d.food) {
+            self.skill_sum(|e, l| match e {
+                crate::skills::SkillEffect::FoodBonus { percent } => percent * l as f32,
+                _ => 0.0,
+            })
+        } else {
+            0.0
+        };
+        let actions = self.collect(&GameEvent::UseItem { item: item.to_string() }, &Source::Item(item.to_string()));
+        let any = !actions.is_empty();
+        for (a, ctx) in actions {
+            self.runner.push(&[food_bonus(a, bonus)], &ctx);
+        }
+        any
+    }
+
     /// Uses an item on the player / the prop in front (its *UseItem* triggers).
     fn use_item_now(&mut self, item: &str) {
         let ev = GameEvent::UseItem { item: item.to_string() };
@@ -1528,7 +1546,7 @@ impl Game {
             fired = self.fire(ev.clone(), Source::Entity(self.loaded.entities[i].uid));
         }
         if !fired {
-            fired = self.fire(ev, Source::Item(item.to_string()));
+            fired = self.fire_item_use(item);
         }
         if !fired {
             self.ui.toast("Nothing happens.".into());
@@ -2032,6 +2050,22 @@ impl Game {
     }
 }
 
+/// Healing of food raised by `percent` (the Food skill), also inside *If* actions.
+fn food_bonus(a: Action, percent: f32) -> Action {
+    if percent <= 0.0 {
+        return a;
+    }
+    match a {
+        Action::Heal { amount } if amount > 0 => Action::Heal { amount: (amount as f32 * (1.0 + percent / 100.0)).round() as i32 },
+        Action::If { conditions, then, otherwise } => Action::If {
+            conditions,
+            then: then.into_iter().map(|a| food_bonus(a, percent)).collect(),
+            otherwise: otherwise.into_iter().map(|a| food_bonus(a, percent)).collect(),
+        },
+        a => a,
+    }
+}
+
 fn step_towards(pos: Vec2, target: Vec2, step: f32) -> (Vec2, bool) {
     let d = target - pos;
     if d.length() <= step {
@@ -2340,7 +2374,7 @@ impl ActionHost for Game {
                 Step::Continue
             }
             Action::OpenCrafting { station, title } => {
-                self.open_crafting(station, title);
+                self.open_crafting(station, title, ctx.owner);
                 Step::Continue
             }
             Action::OpenShop { target } => {
@@ -2420,5 +2454,24 @@ impl ActionHost for Game {
         if lost > 0 {
             self.ui.toast(format!("Inventory full: {name} x{lost} lost"));
         }
+    }
+}
+
+#[cfg(test)]
+mod food_tests {
+    use super::*;
+
+    #[test]
+    fn food_heals_more_with_the_skill() {
+        assert_eq!(food_bonus(Action::Heal { amount: 4 }, 50.0), Action::Heal { amount: 6 });
+        assert_eq!(food_bonus(Action::Heal { amount: 4 }, 0.0), Action::Heal { amount: 4 });
+        assert_eq!(food_bonus(Action::Heal { amount: -2 }, 50.0), Action::Heal { amount: -2 }, "damage stays");
+        let Action::If { then, .. } = food_bonus(Action::If { conditions: vec![], then: vec![Action::Heal { amount: 2 }], otherwise: vec![] }, 100.0) else { panic!() };
+        assert_eq!(then, vec![Action::Heal { amount: 4 }]);
+        // Recipes and items from before cooking.
+        let r: crate::crafting::RecipeDef = ron::from_str("(id: \"a\", result: \"b\")").unwrap();
+        assert_eq!(r.station_state, "");
+        let it: crate::defs::ItemDef = ron::from_str(r#"(id: "apple", name: "Apple", icon: (sheet: "items", frame: 3))"#).unwrap();
+        assert!(!it.food);
     }
 }

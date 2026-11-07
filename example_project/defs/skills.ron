@@ -111,6 +111,19 @@
         effect: r#None,
     ),
     (
+        id: "cooking",
+        name: "Cooking",
+        description: "Good food, well made: Carrot Soup and Pumpkin Stew at level 1, Apple Pie at level 2, and all food heals 25% more per level.",
+        icon: (
+            sheet: "items",
+            frame: 3,
+        ),
+        max_level: 2,
+        effect: FoodBonus(
+            percent: 25.0,
+        ),
+    ),
+    (
         id: "mining",
         name: "Mining",
         description: "Strong arms and a sharp eye for the seam: every level takes 20% fewer pickaxe hits to break off ore.",

@@ -34,6 +34,9 @@ pub struct RecipeDef {
     /// highest step the player's level reaches replaces `result`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub quality: Vec<QualityStep>,
+    /// The state the station's prop must be in (e.g. "lit" for a cooking fire); "" = any.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub station_state: String,
 }
 
 /// From skill level `level` on, a recipe makes `result` instead (`RecipeDef::quality`).
@@ -65,11 +68,13 @@ pub enum Missing {
     Skill(String, u32, u32),
     /// Tools the player doesn't have (tool kinds).
     Tools(Vec<String>),
+    /// The station isn't in the state the recipe needs (e.g. the fire isn't "lit").
+    StationState(String),
 }
 
 impl RecipeDef {
     pub fn new(id: &str, result: &str, count: u32, ingredients: Vec<ItemStack>, station: &str) -> Self {
-        RecipeDef { id: id.into(), result: result.into(), count, ingredients, station: station.into(), skill: String::new(), level: 0, tools: Vec::new(), quality: Vec::new() }
+        RecipeDef { id: id.into(), result: result.into(), count, ingredients, station: station.into(), skill: String::new(), level: 0, tools: Vec::new(), quality: Vec::new(), station_state: String::new() }
     }
 
     /// The item it makes for the player now: the best quality step their skill reaches.
